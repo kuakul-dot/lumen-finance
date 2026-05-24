@@ -1,9 +1,7 @@
 -- ─────────────────────────────────────────────
--- Lumen Finance · Supabase schema
+-- Lumen Finance · Supabase schema  (idempotent — safe to re-run)
 -- Run this in the Supabase SQL editor
 -- ─────────────────────────────────────────────
-
--- Enable RLS on all tables (row-level security — each user sees only their own data)
 
 -- ── Portfolios ──────────────────────────────────────────────────────────────
 create table if not exists portfolios (
@@ -15,6 +13,7 @@ create table if not exists portfolios (
   updated_at  timestamptz not null default now()
 );
 alter table portfolios enable row level security;
+drop policy if exists "Users can manage own portfolios" on portfolios;
 create policy "Users can manage own portfolios"
   on portfolios for all using (auth.uid() = user_id);
 
@@ -35,6 +34,7 @@ create table if not exists holdings (
   updated_at   timestamptz not null default now()
 );
 alter table holdings enable row level security;
+drop policy if exists "Users can manage own holdings" on holdings;
 create policy "Users can manage own holdings"
   on holdings for all
   using (portfolio_id in (select id from portfolios where user_id = auth.uid()));
@@ -55,6 +55,7 @@ create table if not exists transactions (
   created_at   timestamptz not null default now()
 );
 alter table transactions enable row level security;
+drop policy if exists "Users can manage own transactions" on transactions;
 create policy "Users can manage own transactions"
   on transactions for all
   using (portfolio_id in (select id from portfolios where user_id = auth.uid()));
@@ -74,6 +75,7 @@ create table if not exists goals (
   updated_at   timestamptz not null default now()
 );
 alter table goals enable row level security;
+drop policy if exists "Users can manage own goals" on goals;
 create policy "Users can manage own goals"
   on goals for all using (auth.uid() = user_id);
 
@@ -87,18 +89,18 @@ create table if not exists cash_accounts (
   updated_at   timestamptz not null default now()
 );
 alter table cash_accounts enable row level security;
+drop policy if exists "Users can manage own cash accounts" on cash_accounts;
 create policy "Users can manage own cash accounts"
   on cash_accounts for all
   using (portfolio_id in (select id from portfolios where user_id = auth.uid()));
 
--- ── Price cache (optional, for storing fetched prices) ───────────────────────
+-- ── Price cache (shared read cache, no sensitive data) ───────────────────────
 create table if not exists price_cache (
   ticker       text primary key,
   price        numeric not null,
   currency     text not null default 'THB',
   fetched_at   timestamptz not null default now()
 );
--- No RLS — shared read cache, no sensitive data
 
 -- ── Indexes ──────────────────────────────────────────────────────────────────
 create index if not exists holdings_portfolio_idx on holdings(portfolio_id);
