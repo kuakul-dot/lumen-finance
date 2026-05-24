@@ -4,7 +4,7 @@ import { Sparkline } from './Charts'
 import { LUMEN_FMT, LUMEN_DERIVE } from '../data'
 import { addHolding, deleteHolding, deriveHoldings } from '../lib/db'
 
-export function PortfolioPage({ t, lang, ccy, setRoute, dataState, portfolio, liveHoldings = [], refreshHoldings, loadingData }) {
+export function PortfolioPage({ t, lang, ccy, setRoute, dataState, portfolio, liveHoldings = [], refreshHoldings, loadingData, dataError, retryLoad }) {
   const [showAdd, setShowAdd] = useState(false)
   const th = lang === "th"
 
@@ -28,6 +28,24 @@ export function PortfolioPage({ t, lang, ccy, setRoute, dataState, portfolio, li
 
   // ── Live mode (Supabase) ─────────────────────────────────────────────────────
   if (dataState === "live") {
+    if (dataError) {
+      return (
+        <div className="shell fade-in">
+          <PageHead title={t.portfolio.heading} sub={t.portfolio.sub} />
+          <div className="card" style={{ padding: 32, background: "oklch(0.97 0.02 25)" }}>
+            <div style={{ fontWeight: 600, marginBottom: 8, color: "oklch(0.40 0.12 25)" }}>
+              {th ? "เชื่อมต่อฐานข้อมูลไม่ได้" : "Database connection error"}
+            </div>
+            <div style={{ fontSize: 13, color: "var(--ink-3)", fontFamily: "monospace", marginBottom: 16, wordBreak: "break-all" }}>
+              {dataError}
+            </div>
+            <button className="btn btn-sm" onClick={retryLoad}>
+              {th ? "ลองใหม่" : "Retry"}
+            </button>
+          </div>
+        </div>
+      )
+    }
     return (
       <LivePortfolioPage
         t={t} lang={lang} ccy={ccy}
@@ -249,7 +267,10 @@ function AddHoldingModal({ lang, portfolioId, onClose, onSaved }) {
 
   const handleSubmit = async (e) => {
     e.preventDefault()
-    if (!portfolioId) return
+    if (!portfolioId) {
+      setError(th ? 'ยังไม่ได้โหลด portfolio — ลองรีเฟรชหน้า' : 'Portfolio not loaded yet — please refresh the page')
+      return
+    }
     setSaving(true)
     setError(null)
     const { error } = await addHolding(portfolioId, {

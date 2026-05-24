@@ -1,19 +1,31 @@
 import { supabase } from './supabase'
 
 export async function getOrCreatePortfolio(userId, currency = 'THB') {
-  const { data } = await supabase
+  const { data, error } = await supabase
     .from('portfolios')
     .select('*')
     .eq('user_id', userId)
     .limit(1)
     .maybeSingle()
+  if (error) throw new Error(`portfolios select: ${error.message}`)
   if (data) return data
-  const { data: created } = await supabase
+  const { data: created, error: insertError } = await supabase
     .from('portfolios')
     .insert({ user_id: userId, currency })
     .select()
     .single()
+  if (insertError) throw new Error(`portfolios insert: ${insertError.message}`)
   return created
+}
+
+export async function getHoldingsSafe(portfolioId) {
+  const { data, error } = await supabase
+    .from('holdings')
+    .select('*')
+    .eq('portfolio_id', portfolioId)
+    .order('created_at', { ascending: true })
+  if (error) throw new Error(`holdings select: ${error.message}`)
+  return data || []
 }
 
 export async function getHoldings(portfolioId) {

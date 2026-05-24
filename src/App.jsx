@@ -9,7 +9,7 @@ import { ToolsPage } from './components/Tools'
 import { PlanningPage } from './components/Planning'
 import { LUMEN_I18N } from './data'
 import { supabase } from './lib/supabase'
-import { getOrCreatePortfolio, getHoldings } from './lib/db'
+import { getOrCreatePortfolio, getHoldingsSafe } from './lib/db'
 
 const TWEAK_DEFAULTS = {
   accent:  "oklch(0.55 0.06 175)",
@@ -49,14 +49,21 @@ export default function App() {
   const [portfolio, setPortfolio] = useState(null)
   const [liveHoldings, setLiveHoldings] = useState([])
   const [loadingData, setLoadingData] = useState(false)
+  const [dataError, setDataError] = useState(null)
 
   const loadPortfolioData = useCallback(async (userId) => {
     setLoadingData(true)
+    setDataError(null)
     try {
       const p = await getOrCreatePortfolio(userId, ccy)
       setPortfolio(p)
-      const h = await getHoldings(p.id)
+      const h = await getHoldingsSafe(p.id)
       setLiveHoldings(h)
+    } catch (err) {
+      console.error('[Lumen] loadPortfolioData error:', err)
+      setDataError(err.message)
+      setPortfolio(null)
+      setLiveHoldings([])
     } finally {
       setLoadingData(false)
     }
@@ -64,8 +71,12 @@ export default function App() {
 
   const refreshHoldings = useCallback(async () => {
     if (!portfolio) return
-    const h = await getHoldings(portfolio.id)
-    setLiveHoldings(h)
+    try {
+      const h = await getHoldingsSafe(portfolio.id)
+      setLiveHoldings(h)
+    } catch (err) {
+      console.error('[Lumen] refreshHoldings error:', err)
+    }
   }, [portfolio])
 
   useEffect(() => {
@@ -139,6 +150,8 @@ export default function App() {
         liveHoldings={liveHoldings}
         refreshHoldings={refreshHoldings}
         loadingData={loadingData}
+        dataError={dataError}
+        retryLoad={() => session?.user && loadPortfolioData(session.user.id)}
       />
     )
   } else if (route === "analytics") {
