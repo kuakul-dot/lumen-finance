@@ -5,9 +5,11 @@ import {
   LUMEN_FMT, LUMEN_DERIVE, LUMEN_HISTORY, LUMEN_GOALS,
   LUMEN_ACTIVITY, LUMEN_UPCOMING, LUMEN_INSIGHTS, LUMEN_FX,
 } from '../data'
+import { deriveHoldings } from '../lib/db'
 
-export function DashboardPage({ t, lang, ccy, setRoute, dataState }) {
+export function DashboardPage({ t, lang, ccy, setRoute, dataState, liveHoldings = [] }) {
   if (dataState === "empty") return <DashboardEmpty t={t} lang={lang} setRoute={setRoute} />
+  if (dataState === "live") return <LiveDashboardPage t={t} lang={lang} ccy={ccy} setRoute={setRoute} liveHoldings={liveHoldings} />
 
   const derived = useMemo(() => LUMEN_DERIVE(), [])
   const { rows, value, cost, pl, plPct, cash, liab, net } = derived
@@ -343,6 +345,201 @@ function actionLabel(type, lang) {
     th: { Buy: "ซื้อ",   Sell: "ขาย",  Dividend: "ปันผล",     Deposit: "ฝากเงิน" },
   }
   return (map[lang] || map.en)[type] || type
+}
+
+// ─── Live Dashboard (real Supabase data) ─────────────────────────────────────
+function LiveDashboardPage({ t, lang, ccy, setRoute, liveHoldings }) {
+  const th = lang === "th"
+  const rows = useMemo(() => deriveHoldings(liveHoldings, ccy), [liveHoldings, ccy])
+
+  const totalValue = rows.reduce((s, r) => s + r.value, 0)
+
+  const allocClass = useMemo(() => {
+    if (rows.length === 0) return []
+    const map = {}
+    rows.forEach(r => {
+      const key = r.cls === "Equity"
+        ? (r.region === "TH" ? (th ? "หุ้นไทย" : "TH Equity") : (th ? "หุ้น US" : "US Equity"))
+        : r.cls
+      map[key] = (map[key] || 0) + r.value
+    })
+    const colors = ["var(--c1)", "var(--c2)", "var(--c3)", "var(--c4)", "var(--c5)", "var(--c6)", "var(--c7)"]
+    return Object.entries(map).map(([k, v], i) => ({ name: k, value: v, color: colors[i % 7] }))
+  }, [rows, th])
+
+  const topHoldings = useMemo(() => [...rows].sort((a, b) => b.value - a.value).slice(0, 5), [rows])
+
+  const today = new Date().toLocaleDateString(th ? "th-TH" : "en-US", { weekday: "long", day: "numeric", month: "long" })
+
+  if (rows.length === 0) {
+    return (
+      <div className="shell fade-in">
+        <PageHead
+          kicker={(th ? "หน้าหลัก · " : "Dashboard · ") + today}
+          title={t.dashboard.heading}
+          sub={t.dashboard.sub}
+        />
+        <div className="card" style={{ padding: 80, textAlign: "center" }}>
+          <svg width="64" height="64" viewBox="0 0 64 64" style={{ margin: "0 auto 24px", display: "block" }}>
+            <rect x="8" y="14" width="48" height="40" rx="6" fill="none" stroke="var(--line-2)" strokeWidth="1.5" strokeDasharray="4 4" />
+            <path d="M14 44 L24 32 L32 38 L44 22 L54 32" fill="none" stroke="var(--ink-4)" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
+          </svg>
+          <h2 className="display" style={{ fontSize: 32, margin: "0 0 8px" }}>
+            {th ? "ยังไม่มีหลักทรัพย์" : "No holdings yet"}
+          </h2>
+          <p className="muted" style={{ fontSize: 14, maxWidth: 380, margin: "0 auto 28px" }}>
+            {th ? "ไปที่ Portfolio แล้วกด + เพิ่มหลักทรัพย์แรกของคุณ" : "Go to Portfolio and press + to add your first holding."}
+          </p>
+          <button className="btn" onClick={() => setRoute("portfolio")}>
+            <Icon name="plus" size={14} /> {t.common.addInvestment}
+          </button>
+        </div>
+      </div>
+    )
+  }
+
+  return (
+    <div className="shell fade-in" data-screen-label="Dashboard">
+      <PageHead
+        kicker={(th ? "หน้าหลัก · " : "Dashboard · ") + today}
+        title={t.dashboard.heading}
+        sub={t.dashboard.sub}
+        right={
+          <button className="btn btn-sm" onClick={() => setRoute("portfolio")}>
+            <Icon name="plus" size={14} /> {t.common.addInvestment}
+          </button>
+        }
+      />
+
+      {/* HERO */}
+      <section className="card" style={{ padding: 36, marginBottom: 16 }}>
+        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 48, alignItems: "start" }}>
+          <div>
+            <div className="label-up" style={{ marginBottom: 12 }}>
+              {t.dashboard.invested} · {ccy} · {th ? "ราคาทุน" : "at cost"}
+            </div>
+            <div className="display" style={{ fontSize: 64, lineHeight: 1, letterSpacing: "-0.035em" }}>
+              {LUMEN_FMT.money(totalValue, ccy)}
+            </div>
+            <div style={{ marginTop: 18, color: "var(--ink-3)", fontSize: 13 }}>
+              {rows.length} {th ? "ตำแหน่ง" : "positions"} · {[...new Set(rows.map(r => r.cls))].join(", ")}
+            </div>
+            <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 20, marginTop: 32, paddingTop: 24, borderTop: "1px solid var(--line)" }}>
+              <Metric label={th ? "หุ้นรวม" : "Equities"}
+                value={LUMEN_FMT.money(rows.filter(r => r.cls === "Equity" || r.cls === "ETF").reduce((s, r) => s + r.value, 0), ccy, { compact: true })} />
+              <Metric label={th ? "สินทรัพย์อื่น" : "Other"}
+                value={LUMEN_FMT.money(rows.filter(r => r.cls !== "Equity" && r.cls !== "ETF").reduce((s, r) => s + r.value, 0), ccy, { compact: true })} />
+              <Metric label={th ? "ปันผล/ปี" : "Annual div."}
+                value={LUMEN_FMT.money(rows.reduce((s, r) => s + r.value * (r.divYield || 0) / 100, 0), ccy, { compact: true })} />
+            </div>
+          </div>
+
+          <div>
+            <div className="label-up" style={{ marginBottom: 16 }}>{t.dashboard.allocation}</div>
+            {allocClass.length > 0 ? (
+              <div style={{ display: "flex", alignItems: "center", gap: 24 }}>
+                <Donut data={allocClass} size={160} thickness={24}
+                       centerLabel={th ? "รวม" : "Total"}
+                       centerValue={LUMEN_FMT.money(totalValue, ccy, { compact: true })} />
+                <div style={{ flex: 1, display: "grid", gap: 10 }}>
+                  {allocClass.map((s, i) => (
+                    <div key={i} style={{ display: "grid", gridTemplateColumns: "auto 1fr auto", gap: 10, alignItems: "center", fontSize: 13 }}>
+                      <span className="dot" style={{ background: s.color }} />
+                      <span>{s.name}</span>
+                      <span className="mono">{(s.value / totalValue * 100).toFixed(1)}%</span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            ) : null}
+          </div>
+        </div>
+      </section>
+
+      {/* Holdings summary + note */}
+      <section className="grid grid-12" style={{ marginBottom: 16 }}>
+        <div className="card col-span-8">
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 20 }}>
+            <h3 className="section-title">{th ? "หลักทรัพย์ของคุณ" : "Your Holdings"}</h3>
+            <button className="btn btn-ghost btn-sm" onClick={() => setRoute("portfolio")}>
+              {t.common.seeAll} <Icon name="chevron" size={12} />
+            </button>
+          </div>
+          <table className="table" style={{ marginTop: -8 }}>
+            <thead><tr>
+              <th>{t.portfolio.holding}</th>
+              <th className="num">{th ? "ประเภท" : "Class"}</th>
+              <th className="num">{t.portfolio.value}</th>
+              <th className="num">{t.portfolio.weight}</th>
+            </tr></thead>
+            <tbody>
+              {topHoldings.map(r => (
+                <tr key={r.id || r.ticker}>
+                  <td>
+                    <div className="ticker">
+                      <div className="ticker-mark">{r.ticker.slice(0, 2)}</div>
+                      <div>
+                        <div style={{ fontWeight: 500 }}>{r.ticker}</div>
+                        <div className="muted" style={{ fontSize: 11 }}>{r.name}</div>
+                      </div>
+                    </div>
+                  </td>
+                  <td className="num">
+                    <span className="chip" style={{ fontSize: 11 }}>{r.cls}</span>
+                  </td>
+                  <td className="num" style={{ fontWeight: 500 }}>
+                    {LUMEN_FMT.money(r.value, ccy, { compact: true })}
+                  </td>
+                  <td className="num">{r.weight.toFixed(1)}%</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+
+        <div className="col-span-4" style={{ display: "grid", gap: 16 }}>
+          <div className="card">
+            <h3 className="section-title" style={{ marginBottom: 16 }}>
+              {th ? "ขั้นตอนถัดไป" : "Next steps"}
+            </h3>
+            <div style={{ display: "grid", gap: 12 }}>
+              {[
+                { icon: "edit",     label: th ? "เพิ่มธุรกรรม" : "Log a transaction",   route: "portfolio" },
+                { icon: "leaf",     label: th ? "ตั้งเป้าหมาย" : "Set a financial goal", route: "planning" },
+                { icon: "bar",      label: th ? "ดูการวิเคราะห์" : "View analytics",     route: "analytics" },
+              ].map(item => (
+                <button key={item.route} onClick={() => setRoute(item.route)}
+                  style={{
+                    display: "flex", alignItems: "center", gap: 12, padding: "12px 14px",
+                    borderRadius: 10, border: "1px solid var(--line)", background: "var(--bg)",
+                    cursor: "pointer", textAlign: "left", fontSize: 13, fontWeight: 500,
+                    transition: "background 0.1s",
+                  }}
+                  onMouseEnter={e => e.currentTarget.style.background = "var(--bg-2)"}
+                  onMouseLeave={e => e.currentTarget.style.background = "var(--bg)"}
+                >
+                  <span style={{ color: "var(--accent-ink)", width: 20, display: "grid", placeItems: "center" }}>
+                    <Icon name={item.icon} size={16} />
+                  </span>
+                  {item.label}
+                </button>
+              ))}
+            </div>
+          </div>
+          <div className="card" style={{ padding: "14px 20px", background: "var(--accent-soft)", border: "none" }}>
+            <div style={{ fontSize: 12, color: "var(--accent-ink)", fontWeight: 600, marginBottom: 4 }}>
+              {th ? "หมายเหตุ" : "Note"}
+            </div>
+            <div style={{ fontSize: 12, color: "var(--ink-3)", lineHeight: 1.5 }}>
+              {th
+                ? "มูลค่าคำนวณจากราคาทุน ยังไม่มีราคาตลาดแบบ real-time"
+                : "Values are at cost price. Real-time market prices coming soon."}
+            </div>
+          </div>
+        </div>
+      </section>
+    </div>
+  )
 }
 
 function DashboardEmpty({ t, lang, setRoute }) {
