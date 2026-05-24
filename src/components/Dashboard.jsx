@@ -7,9 +7,9 @@ import {
 } from '../data'
 import { deriveHoldings } from '../lib/db'
 
-export function DashboardPage({ t, lang, ccy, setRoute, dataState, liveHoldings = [] }) {
+export function DashboardPage({ t, lang, ccy, setRoute, dataState, liveHoldings = [], prices = {} }) {
   if (dataState === "empty") return <DashboardEmpty t={t} lang={lang} setRoute={setRoute} />
-  if (dataState === "live") return <LiveDashboardPage t={t} lang={lang} ccy={ccy} setRoute={setRoute} liveHoldings={liveHoldings} />
+  if (dataState === "live") return <LiveDashboardPage t={t} lang={lang} ccy={ccy} setRoute={setRoute} liveHoldings={liveHoldings} prices={prices} />
 
   const derived = useMemo(() => LUMEN_DERIVE(), [])
   const { rows, value, cost, pl, plPct, cash, liab, net } = derived
@@ -348,11 +348,15 @@ function actionLabel(type, lang) {
 }
 
 // ─── Live Dashboard (real Supabase data) ─────────────────────────────────────
-function LiveDashboardPage({ t, lang, ccy, setRoute, liveHoldings }) {
+function LiveDashboardPage({ t, lang, ccy, setRoute, liveHoldings, prices = {} }) {
   const th = lang === "th"
-  const rows = useMemo(() => deriveHoldings(liveHoldings, ccy), [liveHoldings, ccy])
+  const rows = useMemo(() => deriveHoldings(liveHoldings, ccy, prices), [liveHoldings, ccy, prices])
 
   const totalValue = rows.reduce((s, r) => s + r.value, 0)
+  const totalPL = rows.reduce((s, r) => s + r.pl, 0)
+  const totalCostBasis = totalValue - totalPL
+  const totalPlPct = totalCostBasis > 0 ? (totalPL / totalCostBasis) * 100 : 0
+  const hasLivePrices = rows.some(r => r.hasLivePrice)
 
   const allocClass = useMemo(() => {
     if (rows.length === 0) return []
@@ -416,19 +420,30 @@ function LiveDashboardPage({ t, lang, ccy, setRoute, liveHoldings }) {
         <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 48, alignItems: "start" }}>
           <div>
             <div className="label-up" style={{ marginBottom: 12 }}>
-              {t.dashboard.invested} · {ccy} · {th ? "ราคาทุน" : "at cost"}
+              {th ? "มูลค่าพอร์ต" : "Portfolio value"} · {ccy}
+              {hasLivePrices && (
+                <span style={{ marginLeft: 8, color: "var(--gain)", fontWeight: 600 }}>● LIVE</span>
+              )}
             </div>
             <div className="display" style={{ fontSize: 64, lineHeight: 1, letterSpacing: "-0.035em" }}>
               {LUMEN_FMT.money(totalValue, ccy)}
             </div>
-            <div style={{ marginTop: 18, color: "var(--ink-3)", fontSize: 13 }}>
-              {rows.length} {th ? "ตำแหน่ง" : "positions"} · {[...new Set(rows.map(r => r.cls))].join(", ")}
+            <div style={{ marginTop: 18, display: "flex", gap: 24, alignItems: "center", flexWrap: "wrap" }}>
+              <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                <span className={"delta " + (totalPL >= 0 ? "gain" : "loss")} style={{ fontSize: 15 }}>
+                  <svg width="11" height="11" viewBox="0 0 10 10">
+                    <path d={totalPL >= 0 ? "M5 1 L9 7 H1 Z" : "M5 9 L1 3 H9 Z"} fill="currentColor" />
+                  </svg>
+                  {totalPL >= 0 ? "+" : ""}{LUMEN_FMT.money(totalPL, ccy, { compact: true })} · {totalPL >= 0 ? "+" : ""}{totalPlPct.toFixed(2)}%
+                </span>
+                <span className="muted" style={{ fontSize: 13 }}>{th ? "กำไร/ขาดทุน รวม" : "Total P/L"}</span>
+              </div>
             </div>
             <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 20, marginTop: 32, paddingTop: 24, borderTop: "1px solid var(--line)" }}>
+              <Metric label={th ? "ต้นทุนรวม" : "Cost basis"}
+                value={LUMEN_FMT.money(totalCostBasis, ccy, { compact: true })} />
               <Metric label={th ? "หุ้นรวม" : "Equities"}
                 value={LUMEN_FMT.money(rows.filter(r => r.cls === "Equity" || r.cls === "ETF").reduce((s, r) => s + r.value, 0), ccy, { compact: true })} />
-              <Metric label={th ? "สินทรัพย์อื่น" : "Other"}
-                value={LUMEN_FMT.money(rows.filter(r => r.cls !== "Equity" && r.cls !== "ETF").reduce((s, r) => s + r.value, 0), ccy, { compact: true })} />
               <Metric label={th ? "ปันผล/ปี" : "Annual div."}
                 value={LUMEN_FMT.money(rows.reduce((s, r) => s + r.value * (r.divYield || 0) / 100, 0), ccy, { compact: true })} />
             </div>
@@ -468,8 +483,9 @@ function LiveDashboardPage({ t, lang, ccy, setRoute, liveHoldings }) {
           <table className="table" style={{ marginTop: -8 }}>
             <thead><tr>
               <th>{t.portfolio.holding}</th>
-              <th className="num">{th ? "ประเภท" : "Class"}</th>
+              <th className="num">{th ? "ราคา" : "Price"}</th>
               <th className="num">{t.portfolio.value}</th>
+              <th className="num">{t.portfolio.pl}</th>
               <th className="num">{t.portfolio.weight}</th>
             </tr></thead>
             <tbody>
@@ -485,10 +501,22 @@ function LiveDashboardPage({ t, lang, ccy, setRoute, liveHoldings }) {
                     </div>
                   </td>
                   <td className="num">
-                    <span className="chip" style={{ fontSize: 11 }}>{r.cls}</span>
+                    <div style={{ fontSize: 13 }}>{LUMEN_FMT.money(r.price, ccy, { compact: true })}</div>
+                    {r.hasLivePrice && r.changePct !== 0 && (
+                      <div style={{ fontSize: 11, color: r.changePct >= 0 ? "var(--gain)" : "var(--loss)" }}>
+                        {r.changePct >= 0 ? "+" : ""}{r.changePct.toFixed(2)}%
+                      </div>
+                    )}
                   </td>
                   <td className="num" style={{ fontWeight: 500 }}>
                     {LUMEN_FMT.money(r.value, ccy, { compact: true })}
+                  </td>
+                  <td className="num">
+                    {r.hasLivePrice ? (
+                      <span style={{ color: r.pl >= 0 ? "var(--gain)" : "var(--loss)", fontSize: 13 }}>
+                        {r.pl >= 0 ? "+" : ""}{r.plPct.toFixed(1)}%
+                      </span>
+                    ) : <span className="muted">—</span>}
                   </td>
                   <td className="num">{r.weight.toFixed(1)}%</td>
                 </tr>
@@ -526,16 +554,13 @@ function LiveDashboardPage({ t, lang, ccy, setRoute, liveHoldings }) {
               ))}
             </div>
           </div>
-          <div className="card" style={{ padding: "14px 20px", background: "var(--accent-soft)", border: "none" }}>
-            <div style={{ fontSize: 12, color: "var(--accent-ink)", fontWeight: 600, marginBottom: 4 }}>
-              {th ? "หมายเหตุ" : "Note"}
+          {!hasLivePrices && (
+            <div className="card" style={{ padding: "14px 20px", background: "var(--bg-2)", border: "1px solid var(--line)" }}>
+              <div style={{ fontSize: 12, color: "var(--ink-3)", lineHeight: 1.5 }}>
+                {th ? "กำลังโหลดราคาตลาด…" : "Fetching live prices…"}
+              </div>
             </div>
-            <div style={{ fontSize: 12, color: "var(--ink-3)", lineHeight: 1.5 }}>
-              {th
-                ? "มูลค่าคำนวณจากราคาทุน ยังไม่มีราคาตลาดแบบ real-time"
-                : "Values are at cost price. Real-time market prices coming soon."}
-            </div>
-          </div>
+          )}
         </div>
       </section>
     </div>

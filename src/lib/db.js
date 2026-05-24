@@ -1,4 +1,5 @@
 import { supabase } from './supabase'
+import { toYahooSymbol } from './prices'
 
 export async function getOrCreatePortfolio(userId, currency = 'THB') {
   const { data, error } = await supabase
@@ -97,14 +98,48 @@ export async function upsertGoal(userId, goal) {
   return { data, error }
 }
 
-// Derive display rows from raw Supabase holdings (at cost price — no live prices yet)
-export function deriveHoldings(holdings, currency = 'THB') {
-  const FX = currency === 'USD' ? 0.028 : 1
-  const totalValue = holdings.reduce((s, h) => s + h.shares * h.cost_price * (h.currency === 'USD' ? 36 : 1) * FX, 0)
-  return holdings.map(h => {
-    const fx = h.currency === 'USD' ? 36 * FX : FX
-    const value = h.shares * h.cost_price * fx
-    const weight = totalValue > 0 ? (value / totalValue) * 100 : 0
+// Approximate FX rate THB/USD — used for cross-currency conversions
+const USD_THB = 36
+
+// Convert a price in `fromCcy` to display currency
+function fxConvert(amount, fromCcy, displayCcy) {
+  if (fromCcy === displayCcy) return amount
+  if (fromCcy === 'USD' && displayCcy === 'THB') return amount * USD_THB
+  if (fromCcy === 'THB' && displayCcy === 'USD') return amount / USD_THB
+  return amount
+}
+
+// Derive display rows from raw Supabase holdings.
+// `prices` is the object from fetchPrices() — optional, falls back to cost price.
+export function deriveHoldings(holdings, currency = 'THB', prices = {}) {
+  const rows = holdings.map(h => {
+    const displayCcy = currency
+    const holdingCcy = h.currency || 'THB'
+
+    // Cost-basis value in display currency
+    const costPriceInDisplay = fxConvert(h.cost_price, holdingCcy, displayCcy)
+    const costValue = h.shares * costPriceInDisplay
+
+    // Live price from Yahoo Finance
+    const sym = toYahooSymbol(h.ticker, h.region || 'TH', h.asset_class || 'Equity')
+    const priceData = prices[sym]
+
+    let currentPriceInDisplay = costPriceInDisplay
+    let currentValue = costValue
+    let pl = 0, plPct = 0, hasLivePrice = false, changePct = 0
+
+    if (priceData?.price != null) {
+      // Yahoo Finance returns price in the asset's native currency
+      // .BK stocks → THB, US stocks & crypto → USD
+      const priceCcy = h.region === 'TH' ? 'THB' : 'USD'
+      currentPriceInDisplay = fxConvert(priceData.price, priceCcy, displayCcy)
+      currentValue = h.shares * currentPriceInDisplay
+      pl = currentValue - costValue
+      plPct = costValue > 0 ? (pl / costValue) * 100 : 0
+      hasLivePrice = true
+      changePct = priceData.changePct ?? 0
+    }
+
     return {
       id: h.id,
       ticker: h.ticker,
@@ -113,14 +148,19 @@ export function deriveHoldings(holdings, currency = 'THB') {
       region: h.region || 'TH',
       cls: h.asset_class || 'Equity',
       shares: h.shares,
-      cost: h.cost_price,
-      value,
-      pl: 0,
-      plPct: 0,
-      weight,
+      cost: costPriceInDisplay,
+      price: currentPriceInDisplay,
+      value: currentValue,
+      pl, plPct,
+      weight: 0, // filled below
       divYield: h.div_yield || 0,
-      currency: h.currency,
+      currency: holdingCcy,
+      hasLivePrice,
+      changePct,
       spark: [],
     }
   })
+
+  const totalValue = rows.reduce((s, r) => s + r.value, 0)
+  return rows.map(r => ({ ...r, weight: totalValue > 0 ? (r.value / totalValue) * 100 : 0 }))
 }

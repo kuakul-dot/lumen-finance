@@ -10,6 +10,7 @@ import { PlanningPage } from './components/Planning'
 import { LUMEN_I18N } from './data'
 import { supabase } from './lib/supabase'
 import { getOrCreatePortfolio, getHoldingsSafe } from './lib/db'
+import { fetchPrices } from './lib/prices'
 
 const TWEAK_DEFAULTS = {
   accent:  "oklch(0.55 0.06 175)",
@@ -48,6 +49,7 @@ export default function App() {
   const [session, setSession] = useState(undefined)
   const [portfolio, setPortfolio] = useState(null)
   const [liveHoldings, setLiveHoldings] = useState([])
+  const [prices, setPrices] = useState({})
   const [loadingData, setLoadingData] = useState(false)
   const [dataError, setDataError] = useState(null)
 
@@ -59,6 +61,12 @@ export default function App() {
       setPortfolio(p)
       const h = await getHoldingsSafe(p.id)
       setLiveHoldings(h)
+      try {
+        const px = await fetchPrices(h)
+        setPrices(px)
+      } catch (priceErr) {
+        console.warn('[Lumen] price fetch failed:', priceErr.message)
+      }
     } catch (err) {
       console.error('[Lumen] loadPortfolioData error:', err)
       setDataError(err.message)
@@ -74,6 +82,10 @@ export default function App() {
     try {
       const h = await getHoldingsSafe(portfolio.id)
       setLiveHoldings(h)
+      try {
+        const px = await fetchPrices(h)
+        setPrices(px)
+      } catch {}
     } catch (err) {
       console.error('[Lumen] refreshHoldings error:', err)
     }
@@ -139,6 +151,7 @@ export default function App() {
         dataState={dataState}
         session={session}
         liveHoldings={liveHoldings}
+        prices={prices}
       />
     )
   } else if (route === "portfolio") {
@@ -148,6 +161,7 @@ export default function App() {
         dataState={dataState}
         portfolio={portfolio}
         liveHoldings={liveHoldings}
+        prices={prices}
         refreshHoldings={refreshHoldings}
         loadingData={loadingData}
         dataError={dataError}

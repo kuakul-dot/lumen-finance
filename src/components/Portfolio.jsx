@@ -4,7 +4,7 @@ import { Sparkline } from './Charts'
 import { LUMEN_FMT, LUMEN_DERIVE } from '../data'
 import { addHolding, deleteHolding, deriveHoldings } from '../lib/db'
 
-export function PortfolioPage({ t, lang, ccy, setRoute, dataState, portfolio, liveHoldings = [], refreshHoldings, loadingData, dataError, retryLoad }) {
+export function PortfolioPage({ t, lang, ccy, setRoute, dataState, portfolio, liveHoldings = [], prices = {}, refreshHoldings, loadingData, dataError, retryLoad }) {
   const [showAdd, setShowAdd] = useState(false)
   const th = lang === "th"
 
@@ -51,6 +51,7 @@ export function PortfolioPage({ t, lang, ccy, setRoute, dataState, portfolio, li
         t={t} lang={lang} ccy={ccy}
         portfolio={portfolio}
         liveHoldings={liveHoldings}
+        prices={prices}
         refreshHoldings={refreshHoldings}
         loadingData={loadingData}
         showAdd={showAdd}
@@ -64,14 +65,14 @@ export function PortfolioPage({ t, lang, ccy, setRoute, dataState, portfolio, li
 }
 
 // ─── Live Portfolio ──────────────────────────────────────────────────────────
-function LivePortfolioPage({ t, lang, ccy, portfolio, liveHoldings, refreshHoldings, loadingData, showAdd, setShowAdd }) {
+function LivePortfolioPage({ t, lang, ccy, portfolio, liveHoldings, prices = {}, refreshHoldings, loadingData, showAdd, setShowAdd }) {
   const th = lang === "th"
   const [deleting, setDeleting] = useState(null)
   const [sortKey, setSortKey] = useState("value")
   const [sortDir, setSortDir] = useState("desc")
   const [q, setQ] = useState("")
 
-  const rows = useMemo(() => deriveHoldings(liveHoldings, ccy), [liveHoldings, ccy])
+  const rows = useMemo(() => deriveHoldings(liveHoldings, ccy, prices), [liveHoldings, ccy, prices])
 
   const sorted = useMemo(() => {
     let list = rows
@@ -89,6 +90,10 @@ function LivePortfolioPage({ t, lang, ccy, portfolio, liveHoldings, refreshHoldi
   }
 
   const totalValue = rows.reduce((s, r) => s + r.value, 0)
+  const totalPL = rows.reduce((s, r) => s + r.pl, 0)
+  const totalCostBasis = totalValue - totalPL
+  const totalPlPct = totalCostBasis > 0 ? (totalPL / totalCostBasis) * 100 : 0
+  const hasLivePrices = rows.some(r => r.hasLivePrice)
 
   const handleDelete = async (id) => {
     if (!window.confirm(th ? "ลบหลักทรัพย์นี้?" : "Delete this holding?")) return
@@ -139,10 +144,22 @@ function LivePortfolioPage({ t, lang, ccy, portfolio, liveHoldings, refreshHoldi
           <section className="card" style={{ padding: "20px 24px", marginBottom: 16 }}>
             <div style={{ display: "flex", gap: 40, flexWrap: "wrap", alignItems: "center" }}>
               <div>
-                <div className="label-up" style={{ marginBottom: 4 }}>{th ? "มูลค่ารวม (ราคาทุน)" : "Total (at cost)"}</div>
+                <div className="label-up" style={{ marginBottom: 4 }}>
+                  {th ? "มูลค่าตลาด" : "Market value"} · {ccy}
+                  {hasLivePrices && <span style={{ marginLeft: 6, color: "var(--gain)", fontWeight: 700 }}>● LIVE</span>}
+                </div>
                 <div className="display" style={{ fontSize: 32, lineHeight: 1 }}>{LUMEN_FMT.money(totalValue, ccy)}</div>
                 <div className="muted" style={{ fontSize: 12, marginTop: 4 }}>
                   {rows.length} {th ? "ตำแหน่ง" : "positions"}
+                </div>
+              </div>
+              <div>
+                <div className="label-up" style={{ marginBottom: 4 }}>{th ? "กำไร/ขาดทุน" : "Total P/L"}</div>
+                <div style={{ fontSize: 22, fontWeight: 600, color: totalPL >= 0 ? "var(--gain)" : "var(--loss)" }}>
+                  {totalPL >= 0 ? "+" : ""}{LUMEN_FMT.money(totalPL, ccy, { compact: true })}
+                </div>
+                <div style={{ fontSize: 12, marginTop: 2, color: totalPlPct >= 0 ? "var(--gain)" : "var(--loss)" }}>
+                  {totalPlPct >= 0 ? "+" : ""}{totalPlPct.toFixed(2)}%
                 </div>
               </div>
               <div style={{ flex: 1, display: "flex", gap: 28, flexWrap: "wrap" }}>
@@ -177,10 +194,11 @@ function LivePortfolioPage({ t, lang, ccy, portfolio, liveHoldings, refreshHoldi
               <thead>
                 <tr>
                   <SortHeader id="ticker" label={t.portfolio.holding} sortKey={sortKey} sortDir={sortDir} onSort={setSort} />
-                  <SortHeader id="cls" label={th ? "ประเภท" : "Class"} sortKey={sortKey} sortDir={sortDir} onSort={setSort} />
                   <SortHeader id="shares" label={t.portfolio.shares} sortKey={sortKey} sortDir={sortDir} onSort={setSort} align="right" />
-                  <SortHeader id="cost" label={t.portfolio.cost} sortKey={sortKey} sortDir={sortDir} onSort={setSort} align="right" />
+                  <SortHeader id="cost" label={th ? "ราคาทุน" : "Cost/share"} sortKey={sortKey} sortDir={sortDir} onSort={setSort} align="right" />
+                  <SortHeader id="price" label={th ? "ราคาตลาด" : "Mkt price"} sortKey={sortKey} sortDir={sortDir} onSort={setSort} align="right" />
                   <SortHeader id="value" label={t.portfolio.value} sortKey={sortKey} sortDir={sortDir} onSort={setSort} align="right" />
+                  <SortHeader id="pl" label={t.portfolio.pl} sortKey={sortKey} sortDir={sortDir} onSort={setSort} align="right" />
                   <SortHeader id="weight" label={t.portfolio.weight} sortKey={sortKey} sortDir={sortDir} onSort={setSort} align="right" />
                   <th></th>
                 </tr>
@@ -199,12 +217,35 @@ function LivePortfolioPage({ t, lang, ccy, portfolio, liveHoldings, refreshHoldi
                         </div>
                       </div>
                     </td>
-                    <td>
-                      <span className="chip" style={{ fontSize: 11 }}>{r.cls}</span>
-                    </td>
                     <td className="num">{r.shares.toLocaleString(undefined, { maximumFractionDigits: 4 })}</td>
                     <td className="num">{LUMEN_FMT.money(r.cost, r.currency, { compact: true })}</td>
+                    <td className="num">
+                      {r.hasLivePrice ? (
+                        <div>
+                          <div style={{ fontWeight: 500 }}>{LUMEN_FMT.money(r.price, ccy, { compact: true })}</div>
+                          {r.changePct !== 0 && (
+                            <div style={{ fontSize: 11, color: r.changePct >= 0 ? "var(--gain)" : "var(--loss)" }}>
+                              {r.changePct >= 0 ? "+" : ""}{r.changePct.toFixed(2)}%
+                            </div>
+                          )}
+                        </div>
+                      ) : (
+                        <span className="muted" style={{ fontSize: 12 }}>{th ? "รอราคา" : "pending"}</span>
+                      )}
+                    </td>
                     <td className="num" style={{ fontWeight: 500 }}>{LUMEN_FMT.money(r.value, ccy, { compact: true })}</td>
+                    <td className="num">
+                      {r.hasLivePrice ? (
+                        <div>
+                          <div style={{ color: r.pl >= 0 ? "var(--gain)" : "var(--loss)", fontWeight: 500 }}>
+                            {r.pl >= 0 ? "+" : ""}{LUMEN_FMT.money(r.pl, ccy, { compact: true })}
+                          </div>
+                          <div style={{ fontSize: 11, color: r.plPct >= 0 ? "var(--gain)" : "var(--loss)" }}>
+                            {r.plPct >= 0 ? "+" : ""}{r.plPct.toFixed(2)}%
+                          </div>
+                        </div>
+                      ) : <span className="muted">—</span>}
+                    </td>
                     <td className="num">
                       <div style={{ display: "flex", alignItems: "center", gap: 8, justifyContent: "flex-end" }}>
                         <div className="bar" style={{ width: 40 }}>
@@ -228,6 +269,9 @@ function LivePortfolioPage({ t, lang, ccy, portfolio, liveHoldings, refreshHoldi
                 <tr style={{ background: "var(--bg)", fontWeight: 600 }}>
                   <td colSpan={4}><span className="label-up">{t.portfolio.total}</span></td>
                   <td className="num">{LUMEN_FMT.money(totalValue, ccy, { compact: true })}</td>
+                  <td className="num" style={{ color: totalPL >= 0 ? "var(--gain)" : "var(--loss)" }}>
+                    {totalPL >= 0 ? "+" : ""}{LUMEN_FMT.money(totalPL, ccy, { compact: true })}
+                  </td>
                   <td className="num">100.0%</td>
                   <td></td>
                 </tr>
@@ -236,7 +280,9 @@ function LivePortfolioPage({ t, lang, ccy, portfolio, liveHoldings, refreshHoldi
           </section>
 
           <div style={{ marginTop: 12, color: "var(--ink-4)", fontSize: 12 }}>
-            {th ? "* มูลค่าคำนวณจากราคาทุน ยังไม่มีราคาตลาดแบบ real-time" : "* Values at cost price — real-time prices coming soon"}
+            {hasLivePrices
+              ? (th ? "ราคาตลาดจาก Yahoo Finance · อัปเดตทุก 15 นาที" : "Market prices from Yahoo Finance · updates every 15 min")
+              : (th ? "กำลังโหลดราคาตลาด…" : "Fetching live market prices…")}
           </div>
         </>
       )}
