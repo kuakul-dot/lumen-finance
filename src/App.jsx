@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useCallback } from 'react'
 import { TopNav, Brand, Icon } from './components/Nav'
 import { TweaksPanel, useTweaks, TweakSection, TweakRadio, TweakColor } from './components/TweaksPanel'
 import { OnboardingPage } from './components/Onboarding'
@@ -8,6 +8,8 @@ import { AnalyticsPage } from './components/Analytics'
 import { ToolsPage } from './components/Tools'
 import { PlanningPage } from './components/Planning'
 import { LUMEN_I18N } from './data'
+import { supabase } from './lib/supabase'
+import { getOrCreatePortfolio, getHoldings } from './lib/db'
 
 const TWEAK_DEFAULTS = {
   accent:  "oklch(0.55 0.06 175)",
@@ -42,6 +44,45 @@ export default function App() {
   const ccy  = t.ccy === "USD" ? "USD" : "THB"
   const i18n = LUMEN_I18N[lang]
 
+  // Auth state: undefined = initializing, null = signed out, object = signed in
+  const [session, setSession] = useState(undefined)
+  const [portfolio, setPortfolio] = useState(null)
+  const [liveHoldings, setLiveHoldings] = useState([])
+  const [loadingData, setLoadingData] = useState(false)
+
+  const loadPortfolioData = useCallback(async (userId) => {
+    setLoadingData(true)
+    try {
+      const p = await getOrCreatePortfolio(userId, ccy)
+      setPortfolio(p)
+      const h = await getHoldings(p.id)
+      setLiveHoldings(h)
+    } finally {
+      setLoadingData(false)
+    }
+  }, [ccy])
+
+  const refreshHoldings = useCallback(async () => {
+    if (!portfolio) return
+    const h = await getHoldings(portfolio.id)
+    setLiveHoldings(h)
+  }, [portfolio])
+
+  useEffect(() => {
+    supabase.auth.getSession().then(({ data: { session } }) => setSession(session))
+    const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
+      setSession(session)
+      if (!session) { setPortfolio(null); setLiveHoldings([]) }
+    })
+    return () => subscription.unsubscribe()
+  }, [])
+
+  useEffect(() => {
+    if (session?.user) {
+      loadPortfolioData(session.user.id)
+    }
+  }, [session?.user?.id])
+
   useEffect(() => {
     const root = document.documentElement
     root.style.setProperty("--accent", t.accent)
@@ -58,17 +99,52 @@ export default function App() {
     }
   }, [t.accent, t.density, t.type])
 
+  const signOut = () => supabase.auth.signOut()
+
+  if (session === undefined) {
+    return (
+      <div style={{ display: "flex", alignItems: "center", justifyContent: "center", height: "100vh" }}>
+        <div style={{ opacity: 0.4, fontSize: 14 }}>Loading…</div>
+      </div>
+    )
+  }
+
+  const dataState = session ? "live" : t.data
+
   let page
   if (route === "onboarding") {
-    page = <OnboardingPage t={i18n} lang={lang} setRoute={setRoute} setDataState={(s) => setTweak("data", s)} />
+    page = (
+      <OnboardingPage
+        t={i18n} lang={lang} setRoute={setRoute}
+        setDataState={(s) => setTweak("data", s)}
+        session={session}
+        signOut={signOut}
+      />
+    )
   } else if (route === "dashboard") {
-    page = <DashboardPage t={i18n} lang={lang} ccy={ccy} setRoute={setRoute} dataState={t.data} />
+    page = (
+      <DashboardPage
+        t={i18n} lang={lang} ccy={ccy} setRoute={setRoute}
+        dataState={dataState}
+        session={session}
+        liveHoldings={liveHoldings}
+      />
+    )
   } else if (route === "portfolio") {
-    page = <PortfolioPage t={i18n} lang={lang} ccy={ccy} setRoute={setRoute} dataState={t.data} />
+    page = (
+      <PortfolioPage
+        t={i18n} lang={lang} ccy={ccy} setRoute={setRoute}
+        dataState={dataState}
+        portfolio={portfolio}
+        liveHoldings={liveHoldings}
+        refreshHoldings={refreshHoldings}
+        loadingData={loadingData}
+      />
+    )
   } else if (route === "analytics") {
-    page = <AnalyticsPage t={i18n} lang={lang} ccy={ccy} dataState={t.data} />
+    page = <AnalyticsPage t={i18n} lang={lang} ccy={ccy} dataState={dataState} />
   } else if (route === "tools") {
-    page = <ToolsPage t={i18n} lang={lang} ccy={ccy} dataState={t.data} />
+    page = <ToolsPage t={i18n} lang={lang} ccy={ccy} dataState={dataState} />
   } else if (route === "planning") {
     page = <PlanningPage t={i18n} lang={lang} ccy={ccy} />
   }
@@ -81,9 +157,14 @@ export default function App() {
           lang={lang} setLang={(v) => setTweak("lang", v)}
           ccy={ccy} setCcy={(v) => setTweak("ccy", v)}
           t={i18n}
+          session={session}
+          signOut={signOut}
         />
       ) : (
-        <OnboardingNav lang={lang} setLang={(v) => setTweak("lang", v)} ccy={ccy} setCcy={(v) => setTweak("ccy", v)} />
+        <OnboardingNav
+          lang={lang} setLang={(v) => setTweak("lang", v)}
+          ccy={ccy} setCcy={(v) => setTweak("ccy", v)}
+        />
       )}
 
       {page}
@@ -124,16 +205,20 @@ export default function App() {
           onChange={(v) => setTweak("type", v)}
         />
 
-        <TweakSection label={i18n.tweaks.data} />
-        <TweakRadio
-          label={i18n.tweaks.data}
-          value={t.data}
-          options={[
-            { value: "demo",  label: i18n.tweaks.demo },
-            { value: "empty", label: i18n.tweaks.empty },
-          ]}
-          onChange={(v) => setTweak("data", v)}
-        />
+        {!session && (
+          <>
+            <TweakSection label={i18n.tweaks.data} />
+            <TweakRadio
+              label={i18n.tweaks.data}
+              value={t.data}
+              options={[
+                { value: "demo",  label: i18n.tweaks.demo },
+                { value: "empty", label: i18n.tweaks.empty },
+              ]}
+              onChange={(v) => setTweak("data", v)}
+            />
+          </>
+        )}
 
         <TweakSection label={lang === "th" ? "ทางลัด" : "Quick jump"} />
         <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 6 }}>
