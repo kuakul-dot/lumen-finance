@@ -2,7 +2,7 @@ import { useState, useMemo } from 'react'
 import { PageHead, Delta, Icon } from './Nav'
 import { Sparkline } from './Charts'
 import { LUMEN_FMT, LUMEN_DERIVE } from '../data'
-import { addHolding, deleteHolding, deriveHoldings } from '../lib/db'
+import { addHolding, updateHolding, deleteHolding, deriveHoldings } from '../lib/db'
 
 export function PortfolioPage({ t, lang, ccy, setRoute, dataState, portfolio, liveHoldings = [], prices = {}, refreshHoldings, loadingData, dataError, retryLoad }) {
   const [showAdd, setShowAdd] = useState(false)
@@ -68,6 +68,7 @@ export function PortfolioPage({ t, lang, ccy, setRoute, dataState, portfolio, li
 function LivePortfolioPage({ t, lang, ccy, portfolio, liveHoldings, prices = {}, refreshHoldings, loadingData, showAdd, setShowAdd }) {
   const th = lang === "th"
   const [deleting, setDeleting] = useState(null)
+  const [editHolding, setEditHolding] = useState(null)
   const [sortKey, setSortKey] = useState("value")
   const [sortDir, setSortDir] = useState("desc")
   const [q, setQ] = useState("")
@@ -255,14 +256,19 @@ function LivePortfolioPage({ t, lang, ccy, portfolio, liveHoldings, prices = {},
                       </div>
                     </td>
                     <td>
-                      <button
-                        onClick={() => handleDelete(r.id)}
-                        disabled={deleting === r.id}
-                        style={{ background: "none", border: "none", cursor: "pointer", color: "var(--ink-4)", padding: "4px 6px", borderRadius: 6 }}
-                        title={th ? "ลบ" : "Delete"}
-                      >
-                        ×
-                      </button>
+                      <div style={{ display: "flex", gap: 2, justifyContent: "flex-end" }}>
+                        <button
+                          onClick={() => { const orig = liveHoldings.find(h => h.id === r.id); if (orig) setEditHolding(orig) }}
+                          style={{ background: "none", border: "none", cursor: "pointer", color: "var(--ink-3)", padding: "4px 7px", borderRadius: 6, fontSize: 15, lineHeight: 1 }}
+                          title={th ? "แก้ไข" : "Edit"}
+                        >✎</button>
+                        <button
+                          onClick={() => handleDelete(r.id)}
+                          disabled={deleting === r.id}
+                          style={{ background: "none", border: "none", cursor: "pointer", color: "var(--ink-4)", padding: "4px 6px", borderRadius: 6, fontSize: 17, lineHeight: 1 }}
+                          title={th ? "ลบ" : "Delete"}
+                        >×</button>
+                      </div>
                     </td>
                   </tr>
                 ))}
@@ -293,6 +299,14 @@ function LivePortfolioPage({ t, lang, ccy, portfolio, liveHoldings, prices = {},
           portfolioId={portfolio?.id}
           onClose={() => setShowAdd(false)}
           onSaved={async () => { setShowAdd(false); await refreshHoldings() }}
+        />
+      )}
+      {editHolding && (
+        <EditHoldingModal
+          lang={lang}
+          holding={editHolding}
+          onClose={() => setEditHolding(null)}
+          onSaved={async () => { setEditHolding(null); await refreshHoldings() }}
         />
       )}
     </div>
@@ -419,6 +433,132 @@ function AddHoldingModal({ lang, portfolioId, onClose, onSaved }) {
             </button>
             <button type="submit" className="btn" style={{ flex: 2 }} disabled={saving}>
               {saving ? (th ? "กำลังบันทึก…" : "Saving…") : (th ? "บันทึก" : "Save holding")}
+            </button>
+          </div>
+        </form>
+      </div>
+    </div>
+  )
+}
+
+// ─── Edit Holding Modal ──────────────────────────────────────────────────────
+function EditHoldingModal({ lang, holding, onClose, onSaved }) {
+  const th = lang === "th"
+  const [form, setForm] = useState({
+    ticker:      holding.ticker,
+    name:        holding.name,
+    asset_class: holding.asset_class || 'Equity',
+    region:      holding.region || 'TH',
+    shares:      String(holding.shares),
+    cost_price:  String(holding.cost_price),
+    currency:    holding.currency || 'THB',
+    div_yield:   String(holding.div_yield || ''),
+  })
+  const [saving, setSaving] = useState(false)
+  const [error, setError] = useState(null)
+  const set = (k, v) => setForm(f => ({ ...f, [k]: v }))
+
+  const handleSubmit = async (e) => {
+    e.preventDefault()
+    setSaving(true)
+    setError(null)
+    const { error } = await updateHolding(holding.id, {
+      ticker:      form.ticker.toUpperCase(),
+      name:        form.name,
+      asset_class: form.asset_class,
+      region:      form.region,
+      shares:      parseFloat(form.shares),
+      cost_price:  parseFloat(form.cost_price),
+      currency:    form.currency,
+      div_yield:   form.div_yield ? parseFloat(form.div_yield) : 0,
+    })
+    setSaving(false)
+    if (error) { setError(error.message); return }
+    onSaved()
+  }
+
+  return (
+    <div style={{
+      position: "fixed", inset: 0, background: "rgba(0,0,0,0.45)", backdropFilter: "blur(4px)",
+      display: "flex", alignItems: "flex-end", justifyContent: "center", zIndex: 1000,
+    }} onClick={e => e.target === e.currentTarget && onClose()}>
+      <div style={{
+        background: "var(--bg)", borderRadius: "20px 20px 0 0", padding: "32px 28px 40px",
+        width: "100%", maxWidth: 540, boxShadow: "0 -8px 40px rgba(0,0,0,0.12)",
+        animation: "slideUp 0.2s ease",
+      }}>
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 24 }}>
+          <h3 style={{ margin: 0, fontSize: 20, fontFamily: "var(--font-display)" }}>
+            {th ? `แก้ไข ${holding.ticker}` : `Edit ${holding.ticker}`}
+          </h3>
+          <button onClick={onClose} style={{ background: "none", border: "none", cursor: "pointer", fontSize: 20, color: "var(--ink-3)", lineHeight: 1 }}>×</button>
+        </div>
+
+        <form onSubmit={handleSubmit} style={{ display: "flex", flexDirection: "column", gap: 14 }}>
+          {error && (
+            <div style={{ padding: "10px 14px", borderRadius: 8, background: "oklch(0.96 0.05 25)", color: "oklch(0.40 0.12 25)", fontSize: 13 }}>
+              {error}
+            </div>
+          )}
+
+          <div style={{ display: "grid", gridTemplateColumns: "1fr 2fr", gap: 12 }}>
+            <Field label={th ? "ติ๊กเกอร์" : "Ticker"}>
+              <input required value={form.ticker} onChange={e => set('ticker', e.target.value)}
+                     placeholder="e.g. PTT" style={inputStyle} />
+            </Field>
+            <Field label={th ? "ชื่อ" : "Name"}>
+              <input required value={form.name} onChange={e => set('name', e.target.value)} style={inputStyle} />
+            </Field>
+          </div>
+
+          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
+            <Field label={th ? "ประเภท" : "Asset Class"}>
+              <select value={form.asset_class} onChange={e => set('asset_class', e.target.value)} style={inputStyle}>
+                <option value="Equity">{th ? "หุ้น" : "Equity"}</option>
+                <option value="ETF">ETF</option>
+                <option value="Bond">{th ? "พันธบัตร" : "Bond"}</option>
+                <option value="Crypto">{th ? "คริปโต" : "Crypto"}</option>
+                <option value="Commodity">{th ? "สินค้าโภคภัณฑ์" : "Commodity"}</option>
+              </select>
+            </Field>
+            <Field label={th ? "ตลาด" : "Region"}>
+              <select value={form.region} onChange={e => set('region', e.target.value)} style={inputStyle}>
+                <option value="TH">{th ? "ไทย" : "Thailand"}</option>
+                <option value="US">{th ? "สหรัฐ" : "US"}</option>
+                <option value="Other">{th ? "อื่นๆ" : "Other"}</option>
+              </select>
+            </Field>
+          </div>
+
+          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 80px", gap: 12 }}>
+            <Field label={th ? "จำนวนหุ้น" : "Shares"}>
+              <input required type="number" step="any" min="0" value={form.shares}
+                     onChange={e => set('shares', e.target.value)} placeholder="0" style={inputStyle} />
+            </Field>
+            <Field label={th ? "ราคาทุน/หุ้น" : "Cost price/share"}>
+              <input required type="number" step="any" min="0" value={form.cost_price}
+                     onChange={e => set('cost_price', e.target.value)} placeholder="0.00" style={inputStyle} />
+            </Field>
+            <Field label={th ? "สกุล" : "Currency"}>
+              <select value={form.currency} onChange={e => set('currency', e.target.value)} style={inputStyle}>
+                <option value="THB">THB</option>
+                <option value="USD">USD</option>
+              </select>
+            </Field>
+          </div>
+
+          <Field label={th ? "อัตราปันผล % (ไม่บังคับ)" : "Dividend yield % (optional)"}>
+            <input type="number" step="any" min="0" max="100" value={form.div_yield}
+                   onChange={e => set('div_yield', e.target.value)}
+                   placeholder="0.00" style={{ ...inputStyle, maxWidth: 160 }} />
+          </Field>
+
+          <div style={{ display: "flex", gap: 10, marginTop: 8 }}>
+            <button type="button" className="btn btn-outline" style={{ flex: 1 }} onClick={onClose}>
+              {th ? "ยกเลิก" : "Cancel"}
+            </button>
+            <button type="submit" className="btn" style={{ flex: 2 }} disabled={saving}>
+              {saving ? (th ? "กำลังบันทึก…" : "Saving…") : (th ? "บันทึกการเปลี่ยนแปลง" : "Save changes")}
             </button>
           </div>
         </form>

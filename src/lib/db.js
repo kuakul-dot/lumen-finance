@@ -98,6 +98,10 @@ export async function upsertGoal(userId, goal) {
   return { data, error }
 }
 
+export async function deleteGoal(id) {
+  return supabase.from('goals').delete().eq('id', id)
+}
+
 // Approximate FX rate THB/USD — used for cross-currency conversions
 const USD_THB = 36
 
