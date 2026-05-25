@@ -1,25 +1,35 @@
-// Vercel serverless function — fetches Yahoo Finance quotes via v8/finance/chart
-// Uses per-symbol parallel requests (no crumb token required)
+// Vercel Edge Function — runs on Cloudflare network, not AWS
+// Edge IPs are not blocked by Yahoo Finance (unlike serverless Lambda IPs)
+export const config = { runtime: 'edge' }
 
-export default async function handler(req, res) {
-  res.setHeader('Access-Control-Allow-Origin', '*')
-  if (req.method === 'OPTIONS') return res.status(200).end()
+export default async function handler(request) {
+  if (request.method === 'OPTIONS') {
+    return new Response(null, {
+      headers: { 'Access-Control-Allow-Origin': '*', 'Access-Control-Allow-Methods': 'GET' },
+    })
+  }
 
-  const { symbols } = req.query
-  if (!symbols) return res.status(400).json({ error: 'symbols required' })
+  const { searchParams } = new URL(request.url)
+  const symbols = searchParams.get('symbols')
+  if (!symbols) {
+    return new Response(JSON.stringify({ error: 'symbols required' }), {
+      status: 400,
+      headers: { 'Content-Type': 'application/json' },
+    })
+  }
 
   const syms = symbols.split(',').map(s => s.trim()).filter(Boolean)
+  const entries = await Promise.all(syms.map(fetchChart))
+  const result = {}
+  entries.forEach(({ sym, data }) => { if (data) result[sym] = data })
 
-  try {
-    const entries = await Promise.all(syms.map(fetchChart))
-    const result = {}
-    entries.forEach(({ sym, data }) => { if (data) result[sym] = data })
-
-    res.setHeader('Cache-Control', 's-maxage=900, stale-while-revalidate=1800')
-    return res.json(result)
-  } catch (err) {
-    return res.status(500).json({ error: err.message })
-  }
+  return new Response(JSON.stringify(result), {
+    headers: {
+      'Content-Type': 'application/json',
+      'Access-Control-Allow-Origin': '*',
+      'Cache-Control': 's-maxage=900, stale-while-revalidate=1800',
+    },
+  })
 }
 
 async function fetchChart(sym) {
@@ -30,47 +40,40 @@ async function fetchChart(sym) {
     Accept: 'application/json, text/plain, */*',
     'Accept-Language': 'en-US,en;q=0.9',
     Referer: 'https://finance.yahoo.com/',
-    Origin:  'https://finance.yahoo.com',
+    Origin: 'https://finance.yahoo.com',
   }
+  const params = '?interval=1d&range=1d&events=div,splits'
 
-  try {
-    const base = `?interval=1d&range=1d&events=div,splits`
-    let r = await fetch(
-      `https://query1.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(sym)}${base}`,
-      { headers, signal: AbortSignal.timeout(8000) }
-    )
-
-    if (!r.ok) {
-      r = await fetch(
-        `https://query2.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(sym)}${base}`,
+  for (const host of ['query1', 'query2']) {
+    try {
+      const r = await fetch(
+        `https://${host}.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(sym)}${params}`,
         { headers, signal: AbortSignal.timeout(8000) }
       )
-    }
-
-    if (!r.ok) return { sym, data: null }
-    return { sym, data: parseChart(await r.json(), sym) }
-  } catch {
-    return { sym, data: null }
+      if (r.ok) {
+        const data = parseChart(await r.json())
+        if (data) return { sym, data }
+      }
+    } catch { /* try next host */ }
   }
+  return { sym, data: null }
 }
 
-function parseChart(json, sym) {
+function parseChart(json) {
   const meta = json?.chart?.result?.[0]?.meta
   if (!meta || meta.regularMarketPrice == null) return null
-
-  const price      = meta.regularMarketPrice
-  const prev       = meta.previousClose ?? meta.chartPreviousClose ?? price
-  const changeAbs  = price - prev
-  const changePct  = prev > 0 ? (changeAbs / prev) * 100 : 0
-
+  const price     = meta.regularMarketPrice
+  const prev      = meta.previousClose ?? meta.chartPreviousClose ?? price
+  const changeAbs = price - prev
+  const changePct = prev > 0 ? (changeAbs / prev) * 100 : 0
   return {
     price,
-    currency:  meta.currency  || 'USD',
+    currency:  meta.currency || 'USD',
     changePct: meta.regularMarketChangePercent ?? changePct,
     changeAbs,
     high:   meta.regularMarketDayHigh  ?? price,
     low:    meta.regularMarketDayLow   ?? price,
     volume: meta.regularMarketVolume   ?? 0,
-    name:   meta.longName || meta.shortName || sym,
+    name:   meta.longName || meta.shortName || '',
   }
 }
