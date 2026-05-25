@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef, useMemo } from 'react'
+import { useState, useEffect, useRef } from 'react'
 
 export function Brand() {
   return (
@@ -14,6 +14,18 @@ export function Brand() {
 }
 
 export function TopNav({ route, setRoute, lang, setLang, ccy, setCcy, t, session, signOut }) {
+  const [showProfile, setShowProfile] = useState(false)
+  const menuRef = useRef(null)
+
+  useEffect(() => {
+    if (!showProfile) return
+    const handler = (e) => {
+      if (menuRef.current && !menuRef.current.contains(e.target)) setShowProfile(false)
+    }
+    document.addEventListener('mousedown', handler)
+    return () => document.removeEventListener('mousedown', handler)
+  }, [showProfile])
+
   const items = [
     { id: "dashboard", label: t.nav.dashboard },
     { id: "portfolio", label: t.nav.portfolio },
@@ -21,9 +33,10 @@ export function TopNav({ route, setRoute, lang, setLang, ccy, setCcy, t, session
     { id: "tools",     label: t.nav.tools },
     { id: "planning",  label: t.nav.planning },
   ]
-  const initials = session?.user?.email
-    ? session.user.email.slice(0, 2).toUpperCase()
-    : "ME"
+  const email    = session?.user?.email || ""
+  const initials = email ? email.slice(0, 2).toUpperCase() : "ME"
+  const name     = email ? email.split('@')[0] : (lang === "th" ? "ผู้ใช้งาน" : "User")
+
   return (
     <header className="topnav">
       <div className="topnav-inner">
@@ -51,17 +64,88 @@ export function TopNav({ route, setRoute, lang, setLang, ccy, setCcy, t, session
             <button className={lang === "th" ? "on" : ""} onClick={() => setLang("th")}>ไทย</button>
             <button className={lang === "en" ? "on" : ""} onClick={() => setLang("en")}>EN</button>
           </div>
-          <button
-            className="avatar"
-            title={session?.user?.email || ""}
-            onClick={session ? signOut : undefined}
-            style={{ cursor: session ? "pointer" : "default" }}
-          >
-            {initials}
-          </button>
+
+          {/* Avatar + Profile dropdown */}
+          <div ref={menuRef} style={{ position: "relative" }}>
+            <button
+              className="avatar"
+              title={email}
+              onClick={() => setShowProfile(v => !v)}
+              style={{ cursor: "pointer" }}
+            >
+              {initials}
+            </button>
+
+            {showProfile && (
+              <div style={{
+                position: "absolute", top: "calc(100% + 10px)", right: 0,
+                background: "var(--bg)", border: "1px solid var(--line)",
+                borderRadius: 14, minWidth: 256,
+                boxShadow: "0 8px 32px rgba(0,0,0,0.14)",
+                zIndex: 300, overflow: "hidden",
+                animation: "slideUp 0.15s ease",
+              }}>
+                {/* Profile header */}
+                <div style={{ padding: "16px 18px 14px", borderBottom: "1px solid var(--line)", display: "flex", gap: 14, alignItems: "center" }}>
+                  <div className="avatar" style={{ width: 44, height: 44, fontSize: 17, flexShrink: 0 }}>{initials}</div>
+                  <div style={{ minWidth: 0 }}>
+                    <div style={{ fontWeight: 600, fontSize: 14, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{name}</div>
+                    <div style={{ fontSize: 12, color: "var(--ink-3)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", marginTop: 2 }}>{email}</div>
+                  </div>
+                </div>
+
+                {/* Menu items */}
+                <div style={{ padding: "6px 0" }}>
+                  <MenuRow icon="currency" label={lang === "th" ? "สกุลเงิน" : "Currency"}>
+                    <div className="pill-toggle" style={{ transform: "scale(0.9)", transformOrigin: "right" }}>
+                      <button className={ccy === "THB" ? "on" : ""} onClick={() => setCcy("THB")}>฿ THB</button>
+                      <button className={ccy === "USD" ? "on" : ""} onClick={() => setCcy("USD")}>$ USD</button>
+                    </div>
+                  </MenuRow>
+                  <MenuRow icon="lang" label={lang === "th" ? "ภาษา" : "Language"}>
+                    <div className="pill-toggle" style={{ transform: "scale(0.9)", transformOrigin: "right" }}>
+                      <button className={lang === "th" ? "on" : ""} onClick={() => setLang("th")}>ไทย</button>
+                      <button className={lang === "en" ? "on" : ""} onClick={() => setLang("en")}>EN</button>
+                    </div>
+                  </MenuRow>
+                </div>
+
+                {session && (
+                  <div style={{ borderTop: "1px solid var(--line)", padding: "6px 0" }}>
+                    <button
+                      onClick={() => { setShowProfile(false); signOut() }}
+                      style={{
+                        width: "100%", textAlign: "left", padding: "11px 18px",
+                        background: "none", border: "none", cursor: "pointer",
+                        fontSize: 14, color: "oklch(0.45 0.12 25)",
+                        display: "flex", alignItems: "center", gap: 10,
+                      }}
+                      onMouseEnter={e => e.currentTarget.style.background = "oklch(0.97 0.02 25)"}
+                      onMouseLeave={e => e.currentTarget.style.background = "none"}
+                    >
+                      <Icon name="logout" size={15} />
+                      {lang === "th" ? "ออกจากระบบ" : "Sign out"}
+                    </button>
+                  </div>
+                )}
+              </div>
+            )}
+          </div>
         </div>
       </div>
     </header>
+  )
+}
+
+function MenuRow({ icon, label, children }) {
+  return (
+    <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "8px 18px", gap: 12 }}>
+      <div style={{ display: "flex", alignItems: "center", gap: 10, fontSize: 14, color: "var(--ink-2)" }}>
+        <Icon name={icon} size={15} />
+        {label}
+      </div>
+      {children}
+    </div>
   )
 }
 
@@ -144,6 +228,10 @@ export function Icon({ name, size = 18 }) {
     case "search":   return (<svg {...props}><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg>)
     case "filter":   return (<svg {...props}><path d="M3 5h18M6 12h12M10 19h4"/></svg>)
     case "sort":     return (<svg {...props}><path d="M3 6h13M3 12h9M3 18h5"/><path d="M17 11l3 3 3-3"/><path d="M20 14V4"/></svg>)
+    case "logout":   return (<svg {...props}><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" y1="12" x2="9" y2="12"/></svg>)
+    case "currency": return (<svg {...props}><circle cx="12" cy="12" r="9"/><path d="M9 9h.01M15 9h.01M9 15c1 1 5 1 6 0"/><path d="M12 6v2m0 8v2"/></svg>)
+    case "lang":     return (<svg {...props}><path d="M3 7V5h10"/><path d="M8 5v14"/><path d="M13 19h9M16 13h6"/><path d="M17.5 19c-.5-3 .5-5 2-6"/></svg>)
+    case "user":     return (<svg {...props}><circle cx="12" cy="8" r="4"/><path d="M4 20c0-4 3.6-7 8-7s8 3 8 7"/></svg>)
     default: return null
   }
 }

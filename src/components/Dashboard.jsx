@@ -101,6 +101,11 @@ export function DashboardPage({ t, lang, ccy, setRoute, dataState, liveHoldings 
           <div>
             <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 8 }}>
               <div className="label-up">{lang === "th" ? "พอร์ตการลงทุน · 3 ปี" : "Portfolio · 3 yrs"}</div>
+              <div className="segmented" style={{ gap: 0 }}>
+                {["1Y", "3Y", "5Y"].map(p => (
+                  <button key={p} className={p === "3Y" ? "on" : ""} style={{ fontSize: 12, padding: "4px 10px" }}>{p}</button>
+                ))}
+              </div>
             </div>
             <LineChart series={histSeries} height={220} fmt={v => "฿" + (v / 1_000_000).toFixed(2) + "M"} />
           </div>
@@ -360,6 +365,7 @@ function LiveDashboardPage({ t, lang, ccy, setRoute, liveHoldings, prices = {}, 
   const [showCashModal, setShowCashModal] = useState(null)
   const [goals, setGoals] = useState([])
   const [recentTx, setRecentTx] = useState([])
+  const [chartPeriod, setChartPeriod] = useState("1Y")
 
   useEffect(() => {
     if (!portfolio) return
@@ -414,10 +420,12 @@ function LiveDashboardPage({ t, lang, ccy, setRoute, liveHoldings, prices = {}, 
     return list.slice(0, 5)
   }, [rows])
 
-  // Simulated 12-month growth line: cost basis → current value
+  // Simulated growth chart — adjustable period 1Y / 3Y / 5Y
   const histSeries = useMemo(() => {
     if (totalCostBasis <= 0 || totalValue <= 0) return []
-    const pts = 12
+    const cfg = { "1Y": { pts: 12, stepM: 1 }, "3Y": { pts: 18, stepM: 2 }, "5Y": { pts: 20, stepM: 3 } }
+    const { pts, stepM } = cfg[chartPeriod] || cfg["1Y"]
+    const totalMonths = pts * stepM
     const now = new Date()
     return [{
       name: th ? "มูลค่าพอร์ต" : "Portfolio value",
@@ -426,12 +434,12 @@ function LiveDashboardPage({ t, lang, ccy, setRoute, liveHoldings, prices = {}, 
         const p = i / (pts - 1)
         const ease = p < 0.5 ? 2 * p * p : -1 + (4 - 2 * p) * p
         const noise = (Math.sin(i * 2.3) * 0.012 + Math.cos(i * 4.1) * 0.008) * totalCostBasis
-        const d = new Date(now.getFullYear(), now.getMonth() - (pts - 1 - i), 1)
+        const d = new Date(now.getFullYear(), now.getMonth() - (totalMonths - 1 - i * stepM), 1)
         const lbl = d.toLocaleString(th ? "th-TH" : "en-US", { month: "short" }) + " '" + String(d.getFullYear()).slice(2)
         return { x: i, y: totalCostBasis + (totalValue - totalCostBasis) * ease + noise, label: lbl }
       })
     }]
-  }, [totalCostBasis, totalValue, th])
+  }, [totalCostBasis, totalValue, th, chartPeriod])
 
   // Auto insights from live data
   const insights = useMemo(() => {
@@ -576,7 +584,13 @@ function LiveDashboardPage({ t, lang, ccy, setRoute, liveHoldings, prices = {}, 
           </div>
           <div>
             <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 8 }}>
-              <div className="label-up">{th ? "มูลค่าพอร์ต (ประมาณ 12 เดือน)" : "Portfolio · est. 12 months"}</div>
+              <div className="label-up">{th ? "มูลค่าพอร์ต" : "Portfolio"} · {chartPeriod}</div>
+              <div className="segmented" style={{ gap: 0 }}>
+                {["1Y", "3Y", "5Y"].map(p => (
+                  <button key={p} className={chartPeriod === p ? "on" : ""} onClick={() => setChartPeriod(p)}
+                    style={{ fontSize: 12, padding: "4px 10px" }}>{p}</button>
+                ))}
+              </div>
             </div>
             {histSeries.length > 0
               ? <LineChart series={histSeries} height={220} fmt={v => LUMEN_FMT.money(v, ccy, { compact: true })} />
