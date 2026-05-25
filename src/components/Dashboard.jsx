@@ -520,6 +520,7 @@ function LiveDashboardPage({ t, lang, ccy, setRoute, liveHoldings, prices = {}, 
   }
 
   return (
+  <>
     <div className="shell fade-in" data-screen-label="Dashboard">
       <PageHead
         kicker={(th ? "หน้าหลัก · " : "Dashboard · ") + today}
@@ -863,16 +864,19 @@ function LiveDashboardPage({ t, lang, ccy, setRoute, liveHoldings, prices = {}, 
         </section>
       )}
 
-      {showCashModal && (
-        <CashAccountModal
-          lang={lang} ccy={ccy}
-          portfolioId={portfolio?.id}
-          account={showCashModal === 'add' ? null : showCashModal}
-          onClose={() => setShowCashModal(null)}
-          onSaved={async () => { setShowCashModal(null); await refreshCashAccounts() }}
-        />
-      )}
     </div>
+
+    {/* Modal rendered outside .shell to avoid transform stacking-context issues */}
+    {showCashModal && (
+      <CashAccountModal
+        lang={lang} ccy={ccy}
+        portfolioId={portfolio?.id}
+        account={showCashModal === 'add' ? null : showCashModal}
+        onClose={() => setShowCashModal(null)}
+        onSaved={async () => { setShowCashModal(null); await refreshCashAccounts() }}
+      />
+    )}
+  </>
   )
 }
 
