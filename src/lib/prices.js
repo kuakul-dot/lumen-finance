@@ -1,13 +1,11 @@
-// Yahoo Finance symbol mapping + direct browser-side price fetching
-// Fetches directly from Yahoo Finance v8/chart (CORS allowed, no cloud-IP blocking)
+// Yahoo Finance prices — fetches via CORS proxy (Yahoo Finance blocks cross-origin requests)
 
-const CACHE_TTL = 15 * 60 * 1000 // 15 minutes
+const CACHE_TTL = 15 * 60 * 1000
 let _cache = { key: '', ts: 0, data: {} }
 
-// Map user ticker + region to Yahoo Finance symbol
 export function toYahooSymbol(ticker, region = 'TH', assetClass = 'Equity') {
   const t = ticker.toUpperCase()
-  if (assetClass === 'Crypto') return t.includes('-') ? t : `${t}-USD`
+  if (assetClass === 'Crypto')    return t.includes('-') ? t : `${t}-USD`
   if (assetClass === 'Commodity') {
     if (t === 'GOLD' || t === 'XAU')   return 'GC=F'
     if (t === 'SILVER' || t === 'XAG') return 'SI=F'
@@ -17,26 +15,33 @@ export function toYahooSymbol(ticker, region = 'TH', assetClass = 'Equity') {
   return t
 }
 
-// Fetch a single symbol directly from Yahoo Finance v8/chart
+// Build candidate URLs for a Yahoo Finance chart request (direct + two CORS proxies)
+function candidateUrls(sym) {
+  const base =
+    `https://query1.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(sym)}` +
+    `?interval=1d&range=1d`
+  return [
+    // 1. Direct (works if user's browser/network doesn't enforce CORS)
+    base,
+    // 2. allorigins.win — free CORS proxy, different IP pool
+    `https://api.allorigins.win/raw?url=${encodeURIComponent(base)}`,
+    // 3. corsproxy.io — second free CORS proxy as final fallback
+    `https://corsproxy.io/?${encodeURIComponent(base)}`,
+  ]
+}
+
 async function fetchOneChart(sym) {
-  try {
-    const url =
-      `https://query1.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(sym)}` +
-      `?interval=1d&range=1d&events=div,splits`
-    const r = await fetch(url, { signal: AbortSignal.timeout(8000) })
-    if (!r.ok) {
-      // Fallback to query2
-      const r2 = await fetch(
-        `https://query2.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(sym)}?interval=1d&range=1d`,
-        { signal: AbortSignal.timeout(8000) }
-      )
-      if (!r2.ok) return null
-      return parseChartMeta(await r2.json())
+  for (const url of candidateUrls(sym)) {
+    try {
+      const r = await fetch(url, { signal: AbortSignal.timeout(10000) })
+      if (!r.ok) continue
+      const data = parseChartMeta(await r.json())
+      if (data) return data
+    } catch {
+      // CORS block or timeout → try next
     }
-    return parseChartMeta(await r.json())
-  } catch {
-    return null
   }
+  return null
 }
 
 function parseChartMeta(json) {
@@ -58,7 +63,6 @@ function parseChartMeta(json) {
   }
 }
 
-// Fetch prices for a list of raw holdings — runs in the browser (no server proxy)
 export async function fetchPrices(holdings) {
   if (!holdings || holdings.length === 0) return {}
 
@@ -69,7 +73,6 @@ export async function fetchPrices(holdings) {
   const now = Date.now()
   if (_cache.key === cacheKey && now - _cache.ts < CACHE_TTL) return _cache.data
 
-  // Parallel fetch — browser requests are not IP-blocked by Yahoo Finance
   const results = await Promise.all(symbols.map(fetchOneChart))
   const data = {}
   symbols.forEach((sym, i) => { if (results[i]) data[sym] = results[i] })
