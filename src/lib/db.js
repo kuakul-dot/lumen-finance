@@ -104,11 +104,13 @@ export async function deleteGoal(id) {
 
 // ── Cash accounts ─────────────────────────────────────────────────────────────
 export async function getCashAccounts(portfolioId) {
-  const { data } = await supabase
+  // Note: cash_accounts has no created_at — order by updated_at instead
+  const { data, error } = await supabase
     .from('cash_accounts')
     .select('*')
     .eq('portfolio_id', portfolioId)
-    .order('created_at', { ascending: true })
+    .order('updated_at', { ascending: true })
+  if (error) console.warn('[Lumen] getCashAccounts error:', error.message)
   return data || []
 }
 
