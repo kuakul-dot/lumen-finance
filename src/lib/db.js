@@ -140,6 +140,11 @@ export function deriveHoldings(holdings, currency = 'THB', prices = {}) {
       changePct = priceData.changePct ?? 0
     }
 
+    // Native (untransformed) price & cost — for per-share display columns
+    const nativeCcy = priceData?.currency || (h.region === 'TH' ? 'THB' : 'USD')
+    const priceNative = priceData?.price ?? h.cost_price  // in native currency
+    const costNative  = h.cost_price                      // in native currency
+
     return {
       id: h.id,
       ticker: h.ticker,
@@ -150,6 +155,9 @@ export function deriveHoldings(holdings, currency = 'THB', prices = {}) {
       shares: h.shares,
       cost: costPriceInDisplay,
       price: currentPriceInDisplay,
+      priceNative,   // per-share price in native currency (USD for VOO, THB for .BK)
+      costNative,    // per-share cost  in native currency
+      nativeCcy,     // currency for priceNative / costNative display
       value: currentValue,
       pl, plPct,
       weight: 0, // filled below

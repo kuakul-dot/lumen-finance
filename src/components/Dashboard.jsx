@@ -501,7 +501,7 @@ function LiveDashboardPage({ t, lang, ccy, setRoute, liveHoldings, prices = {} }
                     </div>
                   </td>
                   <td className="num">
-                    <div style={{ fontSize: 13 }}>{LUMEN_FMT.money(r.price, ccy, { compact: true })}</div>
+                    <div style={{ fontSize: 13 }}>{LUMEN_FMT.moneyNative(r.priceNative, r.nativeCcy, { compact: true })}</div>
                     {r.hasLivePrice && r.changePct !== 0 && (
                       <div style={{ fontSize: 11, color: r.changePct >= 0 ? "var(--gain)" : "var(--loss)" }}>
                         {r.changePct >= 0 ? "+" : ""}{r.changePct.toFixed(2)}%

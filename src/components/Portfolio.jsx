@@ -218,11 +218,11 @@ function LivePortfolioPage({ t, lang, ccy, portfolio, liveHoldings, prices = {},
                       </div>
                     </td>
                     <td className="num">{r.shares.toLocaleString(undefined, { maximumFractionDigits: 4 })}</td>
-                    <td className="num">{LUMEN_FMT.money(r.cost, r.currency, { compact: true })}</td>
+                    <td className="num">{LUMEN_FMT.moneyNative(r.costNative, r.nativeCcy, { compact: true })}</td>
                     <td className="num">
                       {r.hasLivePrice ? (
                         <div>
-                          <div style={{ fontWeight: 500 }}>{LUMEN_FMT.money(r.price, ccy, { compact: true })}</div>
+                          <div style={{ fontWeight: 500 }}>{LUMEN_FMT.moneyNative(r.priceNative, r.nativeCcy, { compact: true })}</div>
                           {r.changePct !== 0 && (
                             <div style={{ fontSize: 11, color: r.changePct >= 0 ? "var(--gain)" : "var(--loss)" }}>
                               {r.changePct >= 0 ? "+" : ""}{r.changePct.toFixed(2)}%
