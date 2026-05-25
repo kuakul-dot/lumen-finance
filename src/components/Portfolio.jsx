@@ -246,7 +246,12 @@ function LivePortfolioPage({ t, lang, ccy, portfolio, liveHoldings, prices = {},
                         </div>
                         <div>
                           <div style={{ fontWeight: 500 }}>{r.ticker}</div>
-                          <div className="muted" style={{ fontSize: 11 }}>{r.name}</div>
+                          <div className="muted" style={{ fontSize: 11 }}>
+                            {r.name}
+                            {r.sector && r.sector !== "—" && (
+                              <span style={{ marginLeft: 6, opacity: 0.6 }}>· {r.sector}</span>
+                            )}
+                          </div>
                         </div>
                       </div>
                     </td>
@@ -345,12 +350,33 @@ function LivePortfolioPage({ t, lang, ccy, portfolio, liveHoldings, prices = {},
   )
 }
 
+// ─── Sector options ──────────────────────────────────────────────────────────
+const SECTORS = [
+  { value: "",                  th: "— ไม่ระบุ —",          en: "— None —" },
+  { value: "Technology",        th: "เทคโนโลยี",             en: "Technology" },
+  { value: "Financial",         th: "การเงิน / ธนาคาร",     en: "Financial" },
+  { value: "Healthcare",        th: "สุขภาพ / เวชภัณฑ์",    en: "Healthcare" },
+  { value: "Consumer",          th: "สินค้าผู้บริโภค",       en: "Consumer" },
+  { value: "Energy",            th: "พลังงาน",               en: "Energy" },
+  { value: "Industrial",        th: "อุตสาหกรรม",           en: "Industrial" },
+  { value: "Property",          th: "อสังหาริมทรัพย์",       en: "Property / REIT" },
+  { value: "Communication",     th: "สื่อสาร / โทรคมนาคม",  en: "Communication" },
+  { value: "Materials",         th: "วัสดุ / เคมี",          en: "Materials" },
+  { value: "Utilities",         th: "สาธารณูปโภค",           en: "Utilities" },
+  { value: "ETF / Fund",        th: "ETF / กองทุน",          en: "ETF / Fund" },
+  { value: "Crypto",            th: "คริปโตเคอร์เรนซี",      en: "Crypto" },
+  { value: "Other",             th: "อื่นๆ",                 en: "Other" },
+]
+
 // ─── Add Holding Modal ───────────────────────────────────────────────────────
 function AddHoldingModal({ lang, portfolioId, onClose, onSaved }) {
   const th = lang === "th"
+  const today = new Date().toISOString().split('T')[0]
   const [form, setForm] = useState({
     ticker: '', name: '', asset_class: 'Equity', region: 'TH',
+    sector: '',
     shares: '', cost_price: '', currency: 'THB', div_yield: '',
+    purchased_at: today,
   })
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState(null)
@@ -367,20 +393,24 @@ function AddHoldingModal({ lang, portfolioId, onClose, onSaved }) {
     setError(null)
     const shares = parseFloat(form.shares)
     const cost_price = parseFloat(form.cost_price)
-    const { data: newHolding, error } = await addHolding(portfolioId, {
+    const { data: newHolding, error: addErr } = await addHolding(portfolioId, {
       ticker: form.ticker.toUpperCase(),
       name: form.name,
       asset_class: form.asset_class,
       region: form.region,
+      sector: form.sector || null,
       shares,
       cost_price,
       currency: form.currency,
       div_yield: form.div_yield ? parseFloat(form.div_yield) : 0,
     })
     setSaving(false)
-    if (error) { setError(error.message); return }
-    // Auto-log the transaction
+    if (addErr) { setError(addErr.message); return }
+    // Auto-log transaction with actual purchase date
     try {
+      const txDate = form.purchased_at
+        ? new Date(form.purchased_at).toISOString()
+        : new Date().toISOString()
       await addTransaction(portfolioId, {
         type: 'Buy',
         ticker: form.ticker.toUpperCase(),
@@ -388,7 +418,7 @@ function AddHoldingModal({ lang, portfolioId, onClose, onSaved }) {
         price: cost_price,
         amount: shares * cost_price,
         currency: form.currency,
-        transacted_at: new Date().toISOString(),
+        transacted_at: txDate,
         note: form.name,
       })
     } catch (txErr) {
@@ -404,8 +434,8 @@ function AddHoldingModal({ lang, portfolioId, onClose, onSaved }) {
     }} onClick={e => e.target === e.currentTarget && onClose()}>
       <div style={{
         background: "var(--bg)", borderRadius: "20px 20px 0 0", padding: "32px 28px 40px",
-        width: "100%", maxWidth: 540, boxShadow: "0 -8px 40px rgba(0,0,0,0.12)",
-        animation: "slideUp 0.2s ease",
+        width: "100%", maxWidth: 560, boxShadow: "0 -8px 40px rgba(0,0,0,0.12)",
+        animation: "slideUp 0.2s ease", maxHeight: "92dvh", overflowY: "auto",
       }}>
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 24 }}>
           <h3 style={{ margin: 0, fontSize: 20, fontFamily: "var(--font-display)" }}>
@@ -421,6 +451,7 @@ function AddHoldingModal({ lang, portfolioId, onClose, onSaved }) {
             </div>
           )}
 
+          {/* Ticker + Name */}
           <div style={{ display: "grid", gridTemplateColumns: "1fr 2fr", gap: 12 }}>
             <Field label={th ? "ติ๊กเกอร์" : "Ticker"}>
               <input required value={form.ticker} onChange={e => set('ticker', e.target.value)}
@@ -432,10 +463,11 @@ function AddHoldingModal({ lang, portfolioId, onClose, onSaved }) {
             </Field>
           </div>
 
+          {/* Asset Class + Region */}
           <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
-            <Field label={th ? "ประเภท" : "Asset Class"}>
+            <Field label={th ? "ประเภทสินทรัพย์" : "Asset Class"}>
               <select value={form.asset_class} onChange={e => set('asset_class', e.target.value)} style={inputStyle}>
-                <option value="Equity">{th ? "หุ้น" : "Equity"}</option>
+                <option value="Equity">{th ? "หุ้น (Equity)" : "Equity"}</option>
                 <option value="ETF">ETF</option>
                 <option value="Bond">{th ? "พันธบัตร" : "Bond"}</option>
                 <option value="Crypto">{th ? "คริปโต" : "Crypto"}</option>
@@ -444,13 +476,23 @@ function AddHoldingModal({ lang, portfolioId, onClose, onSaved }) {
             </Field>
             <Field label={th ? "ตลาด" : "Region"}>
               <select value={form.region} onChange={e => set('region', e.target.value)} style={inputStyle}>
-                <option value="TH">{th ? "ไทย" : "Thailand"}</option>
-                <option value="US">{th ? "สหรัฐ" : "US"}</option>
+                <option value="TH">{th ? "ไทย (SET)" : "Thailand (SET)"}</option>
+                <option value="US">{th ? "สหรัฐ (NYSE/NASDAQ)" : "US (NYSE/NASDAQ)"}</option>
                 <option value="Other">{th ? "อื่นๆ" : "Other"}</option>
               </select>
             </Field>
           </div>
 
+          {/* Sector */}
+          <Field label={th ? "กลุ่มอุตสาหกรรม (Sector)" : "Sector (optional)"}>
+            <select value={form.sector} onChange={e => set('sector', e.target.value)} style={inputStyle}>
+              {SECTORS.map(s => (
+                <option key={s.value} value={s.value}>{th ? s.th : s.en}</option>
+              ))}
+            </select>
+          </Field>
+
+          {/* Shares + Cost + Currency */}
           <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 80px", gap: 12 }}>
             <Field label={th ? "จำนวนหุ้น" : "Shares"}>
               <input required type="number" step="any" min="0" value={form.shares}
@@ -462,7 +504,7 @@ function AddHoldingModal({ lang, portfolioId, onClose, onSaved }) {
                      onChange={e => set('cost_price', e.target.value)}
                      placeholder="0.00" style={inputStyle} />
             </Field>
-            <Field label={th ? "สกุล" : "Currency"}>
+            <Field label={th ? "สกุล" : "Ccy"}>
               <select value={form.currency} onChange={e => set('currency', e.target.value)} style={inputStyle}>
                 <option value="THB">THB</option>
                 <option value="USD">USD</option>
@@ -470,11 +512,23 @@ function AddHoldingModal({ lang, portfolioId, onClose, onSaved }) {
             </Field>
           </div>
 
-          <Field label={th ? "อัตราปันผล % (ไม่บังคับ)" : "Dividend yield % (optional)"}>
-            <input type="number" step="any" min="0" max="100" value={form.div_yield}
-                   onChange={e => set('div_yield', e.target.value)}
-                   placeholder="0.00" style={{ ...inputStyle, maxWidth: 160 }} />
-          </Field>
+          {/* Dividend yield + Purchase date */}
+          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
+            <Field label={th ? "อัตราปันผล % (ไม่บังคับ)" : "Dividend yield % (optional)"}>
+              <input type="number" step="any" min="0" max="100" value={form.div_yield}
+                     onChange={e => set('div_yield', e.target.value)}
+                     placeholder="0.00" style={inputStyle} />
+            </Field>
+            <Field label={th ? "วันที่ซื้อ" : "Purchase date"}>
+              <input
+                type="date"
+                value={form.purchased_at}
+                max={today}
+                onChange={e => set('purchased_at', e.target.value)}
+                style={inputStyle}
+              />
+            </Field>
+          </div>
 
           <div style={{ display: "flex", gap: 10, marginTop: 8 }}>
             <button type="button" className="btn btn-outline" style={{ flex: 1 }} onClick={onClose}>
@@ -498,6 +552,7 @@ function EditHoldingModal({ lang, holding, onClose, onSaved }) {
     name:        holding.name,
     asset_class: holding.asset_class || 'Equity',
     region:      holding.region || 'TH',
+    sector:      holding.sector || '',
     shares:      String(holding.shares),
     cost_price:  String(holding.cost_price),
     currency:    holding.currency || 'THB',
@@ -511,18 +566,19 @@ function EditHoldingModal({ lang, holding, onClose, onSaved }) {
     e.preventDefault()
     setSaving(true)
     setError(null)
-    const { error } = await updateHolding(holding.id, {
+    const { error: updateErr } = await updateHolding(holding.id, {
       ticker:      form.ticker.toUpperCase(),
       name:        form.name,
       asset_class: form.asset_class,
       region:      form.region,
+      sector:      form.sector || null,
       shares:      parseFloat(form.shares),
       cost_price:  parseFloat(form.cost_price),
       currency:    form.currency,
       div_yield:   form.div_yield ? parseFloat(form.div_yield) : 0,
     })
     setSaving(false)
-    if (error) { setError(error.message); return }
+    if (updateErr) { setError(updateErr.message); return }
     onSaved()
   }
 
@@ -533,8 +589,8 @@ function EditHoldingModal({ lang, holding, onClose, onSaved }) {
     }} onClick={e => e.target === e.currentTarget && onClose()}>
       <div style={{
         background: "var(--bg)", borderRadius: "20px 20px 0 0", padding: "32px 28px 40px",
-        width: "100%", maxWidth: 540, boxShadow: "0 -8px 40px rgba(0,0,0,0.12)",
-        animation: "slideUp 0.2s ease",
+        width: "100%", maxWidth: 560, boxShadow: "0 -8px 40px rgba(0,0,0,0.12)",
+        animation: "slideUp 0.2s ease", maxHeight: "92dvh", overflowY: "auto",
       }}>
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 24 }}>
           <h3 style={{ margin: 0, fontSize: 20, fontFamily: "var(--font-display)" }}>
@@ -550,6 +606,7 @@ function EditHoldingModal({ lang, holding, onClose, onSaved }) {
             </div>
           )}
 
+          {/* Ticker + Name */}
           <div style={{ display: "grid", gridTemplateColumns: "1fr 2fr", gap: 12 }}>
             <Field label={th ? "ติ๊กเกอร์" : "Ticker"}>
               <input required value={form.ticker} onChange={e => set('ticker', e.target.value)}
@@ -560,10 +617,11 @@ function EditHoldingModal({ lang, holding, onClose, onSaved }) {
             </Field>
           </div>
 
+          {/* Asset Class + Region */}
           <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
-            <Field label={th ? "ประเภท" : "Asset Class"}>
+            <Field label={th ? "ประเภทสินทรัพย์" : "Asset Class"}>
               <select value={form.asset_class} onChange={e => set('asset_class', e.target.value)} style={inputStyle}>
-                <option value="Equity">{th ? "หุ้น" : "Equity"}</option>
+                <option value="Equity">{th ? "หุ้น (Equity)" : "Equity"}</option>
                 <option value="ETF">ETF</option>
                 <option value="Bond">{th ? "พันธบัตร" : "Bond"}</option>
                 <option value="Crypto">{th ? "คริปโต" : "Crypto"}</option>
@@ -572,13 +630,23 @@ function EditHoldingModal({ lang, holding, onClose, onSaved }) {
             </Field>
             <Field label={th ? "ตลาด" : "Region"}>
               <select value={form.region} onChange={e => set('region', e.target.value)} style={inputStyle}>
-                <option value="TH">{th ? "ไทย" : "Thailand"}</option>
-                <option value="US">{th ? "สหรัฐ" : "US"}</option>
+                <option value="TH">{th ? "ไทย (SET)" : "Thailand (SET)"}</option>
+                <option value="US">{th ? "สหรัฐ (NYSE/NASDAQ)" : "US (NYSE/NASDAQ)"}</option>
                 <option value="Other">{th ? "อื่นๆ" : "Other"}</option>
               </select>
             </Field>
           </div>
 
+          {/* Sector */}
+          <Field label={th ? "กลุ่มอุตสาหกรรม (Sector)" : "Sector (optional)"}>
+            <select value={form.sector} onChange={e => set('sector', e.target.value)} style={inputStyle}>
+              {SECTORS.map(s => (
+                <option key={s.value} value={s.value}>{th ? s.th : s.en}</option>
+              ))}
+            </select>
+          </Field>
+
+          {/* Shares + Cost + Currency */}
           <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 80px", gap: 12 }}>
             <Field label={th ? "จำนวนหุ้น" : "Shares"}>
               <input required type="number" step="any" min="0" value={form.shares}
@@ -588,7 +656,7 @@ function EditHoldingModal({ lang, holding, onClose, onSaved }) {
               <input required type="number" step="any" min="0" value={form.cost_price}
                      onChange={e => set('cost_price', e.target.value)} placeholder="0.00" style={inputStyle} />
             </Field>
-            <Field label={th ? "สกุล" : "Currency"}>
+            <Field label={th ? "สกุล" : "Ccy"}>
               <select value={form.currency} onChange={e => set('currency', e.target.value)} style={inputStyle}>
                 <option value="THB">THB</option>
                 <option value="USD">USD</option>
@@ -596,10 +664,11 @@ function EditHoldingModal({ lang, holding, onClose, onSaved }) {
             </Field>
           </div>
 
+          {/* Dividend yield */}
           <Field label={th ? "อัตราปันผล % (ไม่บังคับ)" : "Dividend yield % (optional)"}>
             <input type="number" step="any" min="0" max="100" value={form.div_yield}
                    onChange={e => set('div_yield', e.target.value)}
-                   placeholder="0.00" style={{ ...inputStyle, maxWidth: 160 }} />
+                   placeholder="0.00" style={{ ...inputStyle, maxWidth: 200 }} />
           </Field>
 
           <div style={{ display: "flex", gap: 10, marginTop: 8 }}>
@@ -664,13 +733,13 @@ function TransactionsTab({ transactions, loading, lang, ccy }) {
       <table className="table">
         <thead>
           <tr>
-            <th style={{ width: 90 }}>{th ? "วันที่" : "Date"}</th>
+            <th style={{ width: 100 }}>{th ? "วันที่" : "Date"}</th>
             <th>{th ? "ประเภท" : "Type"}</th>
             <th>{th ? "หลักทรัพย์" : "Asset"}</th>
             <th className="num">{th ? "จำนวน" : "Shares"}</th>
             <th className="num">{th ? "ราคา" : "Price"}</th>
             <th className="num">{th ? "มูลค่า" : "Amount"}</th>
-            <th className="num hide-mob">{th ? "หมายเหตุ" : "Note"}</th>
+            <th className="num hide-mob">{th ? "สกุลเงิน" : "Ccy"}</th>
           </tr>
         </thead>
         <tbody>
