@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback } from 'react'
-import { TopNav, Brand, Icon } from './components/Nav'
+import { TopNav, BottomNav, Brand, Icon } from './components/Nav'
 import { TweaksPanel, useTweaks, TweakSection, TweakRadio, TweakColor } from './components/TweaksPanel'
 import { OnboardingPage } from './components/Onboarding'
 import { DashboardPage } from './components/Dashboard'
@@ -9,7 +9,7 @@ import { ToolsPage } from './components/Tools'
 import { PlanningPage } from './components/Planning'
 import { LUMEN_I18N } from './data'
 import { supabase } from './lib/supabase'
-import { getOrCreatePortfolio, getHoldingsSafe } from './lib/db'
+import { getOrCreatePortfolio, getHoldingsSafe, getCashAccounts } from './lib/db'
 import { fetchPrices } from './lib/prices'
 
 const TWEAK_DEFAULTS = {
@@ -50,6 +50,7 @@ export default function App() {
   const [portfolio, setPortfolio] = useState(null)
   const [liveHoldings, setLiveHoldings] = useState([])
   const [prices, setPrices] = useState({})
+  const [cashAccounts, setCashAccounts] = useState([])
   const [loadingData, setLoadingData] = useState(false)
   const [dataError, setDataError] = useState(null)
 
@@ -61,12 +62,10 @@ export default function App() {
       setPortfolio(p)
       const h = await getHoldingsSafe(p.id)
       setLiveHoldings(h)
-      try {
-        const px = await fetchPrices(h)
-        setPrices(px)
-      } catch (priceErr) {
-        console.warn('[Lumen] price fetch failed:', priceErr.message)
-      }
+      const [px, ca] = await Promise.allSettled([fetchPrices(h), getCashAccounts(p.id)])
+      if (px.status === 'fulfilled') setPrices(px.value)
+      else console.warn('[Lumen] price fetch failed:', px.reason?.message)
+      if (ca.status === 'fulfilled') setCashAccounts(ca.value)
     } catch (err) {
       console.error('[Lumen] loadPortfolioData error:', err)
       setDataError(err.message)
@@ -82,13 +81,20 @@ export default function App() {
     try {
       const h = await getHoldingsSafe(portfolio.id)
       setLiveHoldings(h)
-      try {
-        const px = await fetchPrices(h)
-        setPrices(px)
-      } catch {}
+      const [px, ca] = await Promise.allSettled([fetchPrices(h), getCashAccounts(portfolio.id)])
+      if (px.status === 'fulfilled') setPrices(px.value)
+      if (ca.status === 'fulfilled') setCashAccounts(ca.value)
     } catch (err) {
       console.error('[Lumen] refreshHoldings error:', err)
     }
+  }, [portfolio])
+
+  const refreshCashAccounts = useCallback(async () => {
+    if (!portfolio) return
+    try {
+      const ca = await getCashAccounts(portfolio.id)
+      setCashAccounts(ca)
+    } catch {}
   }, [portfolio])
 
   useEffect(() => {
@@ -152,6 +158,9 @@ export default function App() {
         session={session}
         liveHoldings={liveHoldings}
         prices={prices}
+        cashAccounts={cashAccounts}
+        portfolio={portfolio}
+        refreshCashAccounts={refreshCashAccounts}
       />
     )
   } else if (route === "portfolio") {
@@ -171,7 +180,15 @@ export default function App() {
   } else if (route === "analytics") {
     page = <AnalyticsPage t={i18n} lang={lang} ccy={ccy} dataState={dataState} liveHoldings={liveHoldings} prices={prices} />
   } else if (route === "tools") {
-    page = <ToolsPage t={i18n} lang={lang} ccy={ccy} dataState={dataState} />
+    page = (
+      <ToolsPage
+        t={i18n} lang={lang} ccy={ccy} dataState={dataState}
+        liveHoldings={liveHoldings}
+        prices={prices}
+        portfolio={portfolio}
+        cashAccounts={cashAccounts}
+      />
+    )
   } else if (route === "planning") {
     page = (
       <PlanningPage
@@ -202,6 +219,10 @@ export default function App() {
       )}
 
       {page}
+
+      {route !== "onboarding" && (
+        <BottomNav route={route} setRoute={setRoute} lang={lang} />
+      )}
 
       <TweaksPanel title={i18n.tweaks.title}>
         <TweakSection label={i18n.tweaks.accent} />

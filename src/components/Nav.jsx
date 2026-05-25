@@ -13,7 +13,7 @@ export function Brand() {
   )
 }
 
-export function TopNav({ route, setRoute, lang, setLang, ccy, setCcy, t }) {
+export function TopNav({ route, setRoute, lang, setLang, ccy, setCcy, t, session, signOut }) {
   const items = [
     { id: "dashboard", label: t.nav.dashboard },
     { id: "portfolio", label: t.nav.portfolio },
@@ -21,6 +21,9 @@ export function TopNav({ route, setRoute, lang, setLang, ccy, setCcy, t }) {
     { id: "tools",     label: t.nav.tools },
     { id: "planning",  label: t.nav.planning },
   ]
+  const initials = session?.user?.email
+    ? session.user.email.slice(0, 2).toUpperCase()
+    : "ME"
   return (
     <header className="topnav">
       <div className="topnav-inner">
@@ -48,20 +51,41 @@ export function TopNav({ route, setRoute, lang, setLang, ccy, setCcy, t }) {
             <button className={lang === "th" ? "on" : ""} onClick={() => setLang("th")}>ไทย</button>
             <button className={lang === "en" ? "on" : ""} onClick={() => setLang("en")}>EN</button>
           </div>
-          <button className="icon-btn" aria-label="Search" title="Search">
-            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-              <circle cx="11" cy="11" r="7" /><path d="m20 20-3.5-3.5" />
-            </svg>
+          <button
+            className="avatar"
+            title={session?.user?.email || ""}
+            onClick={session ? signOut : undefined}
+            style={{ cursor: session ? "pointer" : "default" }}
+          >
+            {initials}
           </button>
-          <button className="icon-btn" aria-label="Notifications">
-            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-              <path d="M6 8a6 6 0 0 1 12 0c0 7 3 9 3 9H3s3-2 3-9" /><path d="M10 21a2 2 0 0 0 4 0" />
-            </svg>
-          </button>
-          <div className="avatar" title="Mintra">MN</div>
         </div>
       </div>
     </header>
+  )
+}
+
+export function BottomNav({ route, setRoute, lang }) {
+  const items = [
+    { id: "dashboard", labelTh: "หน้าหลัก", labelEn: "Home",     icon: "home"   },
+    { id: "portfolio", labelTh: "พอร์ต",    labelEn: "Portfolio", icon: "filter" },
+    { id: "analytics", labelTh: "วิเคราะห์", labelEn: "Analytics", icon: "spark"  },
+    { id: "tools",     labelTh: "เครื่องมือ", labelEn: "Tools",    icon: "sort"   },
+    { id: "planning",  labelTh: "วางแผน",    labelEn: "Plan",      icon: "leaf"   },
+  ]
+  return (
+    <nav className="bottom-nav" aria-label="Bottom navigation">
+      {items.map(it => (
+        <button
+          key={it.id}
+          className={"bottom-nav-item" + (route === it.id ? " active" : "")}
+          onClick={() => setRoute(it.id)}
+        >
+          <Icon name={it.icon} size={22} />
+          <span>{lang === "th" ? it.labelTh : it.labelEn}</span>
+        </button>
+      ))}
+    </nav>
   )
 }
 

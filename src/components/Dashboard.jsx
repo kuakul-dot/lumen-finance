@@ -5,11 +5,18 @@ import {
   LUMEN_FMT, LUMEN_DERIVE, LUMEN_HISTORY, LUMEN_GOALS,
   LUMEN_ACTIVITY, LUMEN_UPCOMING, LUMEN_INSIGHTS, LUMEN_FX,
 } from '../data'
-import { deriveHoldings } from '../lib/db'
+import { deriveHoldings, upsertCashAccount, deleteCashAccount } from '../lib/db'
 
-export function DashboardPage({ t, lang, ccy, setRoute, dataState, liveHoldings = [], prices = {} }) {
+export function DashboardPage({ t, lang, ccy, setRoute, dataState, liveHoldings = [], prices = {}, cashAccounts = [], portfolio, refreshCashAccounts }) {
   if (dataState === "empty") return <DashboardEmpty t={t} lang={lang} setRoute={setRoute} />
-  if (dataState === "live") return <LiveDashboardPage t={t} lang={lang} ccy={ccy} setRoute={setRoute} liveHoldings={liveHoldings} prices={prices} />
+  if (dataState === "live") return (
+    <LiveDashboardPage
+      t={t} lang={lang} ccy={ccy} setRoute={setRoute}
+      liveHoldings={liveHoldings} prices={prices}
+      cashAccounts={cashAccounts} portfolio={portfolio}
+      refreshCashAccounts={refreshCashAccounts}
+    />
+  )
 
   const derived = useMemo(() => LUMEN_DERIVE(), [])
   const { rows, value, cost, pl, plPct, cash, liab, net } = derived
@@ -348,8 +355,9 @@ function actionLabel(type, lang) {
 }
 
 // ─── Live Dashboard (real Supabase data) ─────────────────────────────────────
-function LiveDashboardPage({ t, lang, ccy, setRoute, liveHoldings, prices = {} }) {
+function LiveDashboardPage({ t, lang, ccy, setRoute, liveHoldings, prices = {}, cashAccounts = [], portfolio, refreshCashAccounts }) {
   const th = lang === "th"
+  const [showCashModal, setShowCashModal] = useState(null) // null | 'add' | acct-object
   const rows = useMemo(() => deriveHoldings(liveHoldings, ccy, prices), [liveHoldings, ccy, prices])
 
   const totalValue = rows.reduce((s, r) => s + r.value, 0)
@@ -357,6 +365,17 @@ function LiveDashboardPage({ t, lang, ccy, setRoute, liveHoldings, prices = {} }
   const totalCostBasis = totalValue - totalPL
   const totalPlPct = totalCostBasis > 0 ? (totalPL / totalCostBasis) * 100 : 0
   const hasLivePrices = rows.some(r => r.hasLivePrice)
+
+  // Cash total in display currency
+  const cashTotal = useMemo(() => cashAccounts.reduce((s, a) => {
+    const b = a.balance || 0, c = a.currency || 'THB'
+    if (c === ccy) return s + b
+    if (c === 'USD' && ccy === 'THB') return s + b * LUMEN_FX.THB_per_USD
+    if (c === 'THB' && ccy === 'USD') return s + b / LUMEN_FX.THB_per_USD
+    return s + b
+  }, 0), [cashAccounts, ccy])
+  const netWorth = totalValue + cashTotal
+  const hasCash = cashAccounts.length > 0
 
   const allocClass = useMemo(() => {
     if (rows.length === 0) return []
@@ -417,18 +436,28 @@ function LiveDashboardPage({ t, lang, ccy, setRoute, liveHoldings, prices = {} }
 
       {/* HERO */}
       <section className="card" style={{ padding: 36, marginBottom: 16 }}>
-        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 48, alignItems: "start" }}>
+        <div className="hero-grid" style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 48, alignItems: "start" }}>
           <div>
             <div className="label-up" style={{ marginBottom: 12 }}>
-              {th ? "มูลค่าพอร์ต" : "Portfolio value"} · {ccy}
+              {hasCash ? (th ? "มูลค่าสุทธิ (Net Worth)" : "Net Worth") : (th ? "มูลค่าพอร์ต" : "Portfolio value")} · {ccy}
               {hasLivePrices && (
                 <span style={{ marginLeft: 8, color: "var(--gain)", fontWeight: 600 }}>● LIVE</span>
               )}
             </div>
-            <div className="display" style={{ fontSize: 64, lineHeight: 1, letterSpacing: "-0.035em" }}>
-              {LUMEN_FMT.money(totalValue, ccy)}
+            <div className="display hero-num" style={{ fontSize: 64, lineHeight: 1, letterSpacing: "-0.035em" }}>
+              {LUMEN_FMT.money(hasCash ? netWorth : totalValue, ccy)}
             </div>
-            <div style={{ marginTop: 18, display: "flex", gap: 24, alignItems: "center", flexWrap: "wrap" }}>
+            {hasCash && (
+              <div style={{ marginTop: 10, display: "flex", gap: 20, flexWrap: "wrap" }}>
+                <span className="muted" style={{ fontSize: 13 }}>
+                  {th ? "การลงทุน " : "Investments "}<strong style={{ color: "var(--ink)" }}>{LUMEN_FMT.money(totalValue, ccy, { compact: true })}</strong>
+                </span>
+                <span className="muted" style={{ fontSize: 13 }}>
+                  {th ? "เงินสด " : "Cash "}<strong style={{ color: "var(--ink)" }}>{LUMEN_FMT.money(cashTotal, ccy, { compact: true })}</strong>
+                </span>
+              </div>
+            )}
+            <div style={{ marginTop: hasCash ? 12 : 18, display: "flex", gap: 24, alignItems: "center", flexWrap: "wrap" }}>
               <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
                 <span className={"delta " + (totalPL >= 0 ? "gain" : "loss")} style={{ fontSize: 15 }}>
                   <svg width="11" height="11" viewBox="0 0 10 10">
@@ -439,7 +468,7 @@ function LiveDashboardPage({ t, lang, ccy, setRoute, liveHoldings, prices = {} }
                 <span className="muted" style={{ fontSize: 13 }}>{th ? "กำไร/ขาดทุน รวม" : "Total P/L"}</span>
               </div>
             </div>
-            <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 20, marginTop: 32, paddingTop: 24, borderTop: "1px solid var(--line)" }}>
+            <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 20, marginTop: 28, paddingTop: 20, borderTop: "1px solid var(--line)" }}>
               <Metric label={th ? "ต้นทุนรวม" : "Cost basis"}
                 value={LUMEN_FMT.money(totalCostBasis, ccy, { compact: true })} />
               <Metric label={th ? "หุ้นรวม" : "Equities"}
@@ -469,6 +498,73 @@ function LiveDashboardPage({ t, lang, ccy, setRoute, liveHoldings, prices = {} }
             ) : null}
           </div>
         </div>
+      </section>
+
+      {/* Cash accounts */}
+      <section className="card" style={{ marginBottom: 16, padding: "20px 28px" }}>
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: hasCash ? 16 : 0 }}>
+          <h3 className="section-title" style={{ margin: 0 }}>
+            {th ? "บัญชีเงินสด & เงินฝาก" : "Cash & Savings Accounts"}
+          </h3>
+          <button className="btn btn-sm" onClick={() => setShowCashModal('add')}>
+            <Icon name="plus" size={14} /> {th ? "เพิ่มบัญชี" : "Add account"}
+          </button>
+        </div>
+        {hasCash ? (
+          <div style={{ display: "grid", gap: 8 }}>
+            {cashAccounts.map(a => {
+              const dispBal = (() => {
+                const b = a.balance || 0, c = a.currency || 'THB'
+                if (c === ccy) return b
+                if (c === 'USD' && ccy === 'THB') return b * LUMEN_FX.THB_per_USD
+                if (c === 'THB' && ccy === 'USD') return b / LUMEN_FX.THB_per_USD
+                return b
+              })()
+              return (
+                <div key={a.id} style={{
+                  display: "flex", alignItems: "center", gap: 16,
+                  padding: "12px 16px", borderRadius: 10,
+                  border: "1px solid var(--line)", background: "var(--bg)",
+                }}>
+                  <div style={{
+                    width: 36, height: 36, borderRadius: 9,
+                    background: "var(--accent-soft)", color: "var(--accent-ink)",
+                    display: "grid", placeItems: "center", flexShrink: 0,
+                  }}>
+                    <Icon name="deposit" size={16} />
+                  </div>
+                  <div style={{ flex: 1, minWidth: 0 }}>
+                    <div style={{ fontWeight: 500, fontSize: 14 }}>{a.label}</div>
+                    <div className="muted" style={{ fontSize: 11 }}>{a.currency || 'THB'}</div>
+                  </div>
+                  <div style={{ fontFamily: "var(--font-display)", fontSize: 18, fontWeight: 600, letterSpacing: "-0.02em" }}>
+                    {LUMEN_FMT.money(dispBal, ccy)}
+                  </div>
+                  <div style={{ display: "flex", gap: 2 }}>
+                    <button onClick={() => setShowCashModal(a)}
+                      style={{ background: "none", border: "none", cursor: "pointer", color: "var(--ink-3)", padding: "4px 7px", borderRadius: 6, fontSize: 15 }}>✎</button>
+                    <button onClick={async () => {
+                      if (!window.confirm(th ? "ลบบัญชีนี้?" : "Delete this account?")) return
+                      await deleteCashAccount(a.id)
+                      refreshCashAccounts()
+                    }} style={{ background: "none", border: "none", cursor: "pointer", color: "var(--ink-4)", padding: "4px 6px", borderRadius: 6, fontSize: 17 }}>×</button>
+                  </div>
+                </div>
+              )
+            })}
+            {cashAccounts.length > 1 && (
+              <div style={{ display: "flex", justifyContent: "flex-end", paddingTop: 4 }}>
+                <span className="muted" style={{ fontSize: 12 }}>
+                  {th ? "รวมเงินสด: " : "Total cash: "}<strong style={{ color: "var(--ink)" }}>{LUMEN_FMT.money(cashTotal, ccy)}</strong>
+                </span>
+              </div>
+            )}
+          </div>
+        ) : (
+          <p className="muted" style={{ fontSize: 13, margin: "12px 0 0" }}>
+            {th ? "เพิ่มบัญชีเงินสด/ออมทรัพย์เพื่อดู Net Worth รวม" : "Add cash or savings accounts to see your total Net Worth."}
+          </p>
+        )}
       </section>
 
       {/* Holdings summary + note */}
@@ -563,6 +659,112 @@ function LiveDashboardPage({ t, lang, ccy, setRoute, liveHoldings, prices = {} }
           )}
         </div>
       </section>
+      {showCashModal && (
+        <CashAccountModal
+          lang={lang} ccy={ccy}
+          portfolioId={portfolio?.id}
+          account={showCashModal === 'add' ? null : showCashModal}
+          onClose={() => setShowCashModal(null)}
+          onSaved={async () => { setShowCashModal(null); await refreshCashAccounts() }}
+        />
+      )}
+    </div>
+  )
+}
+
+// ─── Cash Account Modal ───────────────────────────────────────────────────────
+function CashAccountModal({ lang, ccy, portfolioId, account, onClose, onSaved }) {
+  const th = lang === "th"
+  const isEdit = account != null
+  const [form, setForm] = useState({
+    label:    account?.label    ?? '',
+    balance:  account?.balance != null ? String(account.balance) : '',
+    currency: account?.currency ?? 'THB',
+  })
+  const [saving, setSaving] = useState(false)
+  const [error,  setError]  = useState(null)
+  const set = (k, v) => setForm(f => ({ ...f, [k]: v }))
+
+  const handleSubmit = async (e) => {
+    e.preventDefault()
+    if (!portfolioId) { setError("Portfolio not loaded"); return }
+    setSaving(true); setError(null)
+    const payload = {
+      ...(isEdit ? { id: account.id } : {}),
+      label:    form.label.trim(),
+      balance:  parseFloat(form.balance) || 0,
+      currency: form.currency,
+    }
+    const { error } = await upsertCashAccount(portfolioId, payload)
+    setSaving(false)
+    if (error) { setError(error.message); return }
+    onSaved()
+  }
+
+  return (
+    <div style={{
+      position: "fixed", inset: 0, background: "rgba(0,0,0,0.45)", backdropFilter: "blur(4px)",
+      display: "flex", alignItems: "flex-end", justifyContent: "center", zIndex: 1000,
+    }} onClick={e => e.target === e.currentTarget && onClose()}>
+      <div style={{
+        background: "var(--bg)", borderRadius: "20px 20px 0 0", padding: "32px 28px 40px",
+        width: "100%", maxWidth: 480, boxShadow: "0 -8px 40px rgba(0,0,0,0.12)",
+        animation: "slideUp 0.2s ease",
+      }}>
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 24 }}>
+          <h3 style={{ margin: 0, fontSize: 20, fontFamily: "var(--font-display)" }}>
+            {isEdit ? (th ? `แก้ไข ${account.label}` : `Edit ${account.label}`) : (th ? "เพิ่มบัญชีเงินสด" : "Add Cash Account")}
+          </h3>
+          <button onClick={onClose} style={{ background: "none", border: "none", cursor: "pointer", fontSize: 22, color: "var(--ink-3)" }}>×</button>
+        </div>
+
+        <form onSubmit={handleSubmit} style={{ display: "flex", flexDirection: "column", gap: 16 }}>
+          {error && (
+            <div style={{ padding: "10px 14px", borderRadius: 8, background: "oklch(0.96 0.05 25)", color: "oklch(0.40 0.12 25)", fontSize: 13 }}>
+              {error}
+            </div>
+          )}
+
+          <div style={{ display: "flex", flexDirection: "column", gap: 5 }}>
+            <label style={{ fontSize: 11, fontWeight: 600, color: "var(--ink-2)", letterSpacing: "0.06em", textTransform: "uppercase" }}>
+              {th ? "ชื่อบัญชี" : "Account label"}
+            </label>
+            <input required value={form.label} onChange={e => set('label', e.target.value)}
+              placeholder={th ? "เช่น กระแสรายวัน SCB, HYSA" : "e.g. SCB Savings, Emergency Fund"}
+              style={{ padding: "10px 12px", borderRadius: 8, fontSize: 14, border: "1.5px solid var(--line)", background: "var(--bg)", color: "var(--ink)", outline: "none" }} />
+          </div>
+
+          <div style={{ display: "grid", gridTemplateColumns: "1fr 100px", gap: 12 }}>
+            <div style={{ display: "flex", flexDirection: "column", gap: 5 }}>
+              <label style={{ fontSize: 11, fontWeight: 600, color: "var(--ink-2)", letterSpacing: "0.06em", textTransform: "uppercase" }}>
+                {th ? "ยอดคงเหลือ" : "Balance"}
+              </label>
+              <input required type="number" step="any" min="0" value={form.balance}
+                onChange={e => set('balance', e.target.value)} placeholder="0.00"
+                style={{ padding: "10px 12px", borderRadius: 8, fontSize: 14, border: "1.5px solid var(--line)", background: "var(--bg)", color: "var(--ink)", outline: "none" }} />
+            </div>
+            <div style={{ display: "flex", flexDirection: "column", gap: 5 }}>
+              <label style={{ fontSize: 11, fontWeight: 600, color: "var(--ink-2)", letterSpacing: "0.06em", textTransform: "uppercase" }}>
+                {th ? "สกุล" : "Currency"}
+              </label>
+              <select value={form.currency} onChange={e => set('currency', e.target.value)}
+                style={{ padding: "10px 12px", borderRadius: 8, fontSize: 14, border: "1.5px solid var(--line)", background: "var(--bg)", color: "var(--ink)", outline: "none" }}>
+                <option value="THB">THB</option>
+                <option value="USD">USD</option>
+              </select>
+            </div>
+          </div>
+
+          <div style={{ display: "flex", gap: 10, marginTop: 4 }}>
+            <button type="button" className="btn btn-outline" style={{ flex: 1 }} onClick={onClose}>
+              {th ? "ยกเลิก" : "Cancel"}
+            </button>
+            <button type="submit" className="btn" style={{ flex: 2 }} disabled={saving}>
+              {saving ? (th ? "กำลังบันทึก…" : "Saving…") : (th ? "บันทึก" : "Save account")}
+            </button>
+          </div>
+        </form>
+      </div>
     </div>
   )
 }

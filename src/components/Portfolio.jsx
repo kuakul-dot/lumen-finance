@@ -1,8 +1,8 @@
-import { useState, useMemo } from 'react'
+import { useState, useMemo, useEffect, useCallback } from 'react'
 import { PageHead, Delta, Icon } from './Nav'
 import { Sparkline } from './Charts'
 import { LUMEN_FMT, LUMEN_DERIVE } from '../data'
-import { addHolding, updateHolding, deleteHolding, deriveHoldings } from '../lib/db'
+import { addHolding, updateHolding, deleteHolding, deriveHoldings, addTransaction, getTransactions } from '../lib/db'
 
 export function PortfolioPage({ t, lang, ccy, setRoute, dataState, portfolio, liveHoldings = [], prices = {}, refreshHoldings, loadingData, dataError, retryLoad }) {
   const [showAdd, setShowAdd] = useState(false)
@@ -67,11 +67,31 @@ export function PortfolioPage({ t, lang, ccy, setRoute, dataState, portfolio, li
 // ─── Live Portfolio ──────────────────────────────────────────────────────────
 function LivePortfolioPage({ t, lang, ccy, portfolio, liveHoldings, prices = {}, refreshHoldings, loadingData, showAdd, setShowAdd }) {
   const th = lang === "th"
+  const [tab, setTab] = useState("holdings")  // "holdings" | "transactions"
   const [deleting, setDeleting] = useState(null)
   const [editHolding, setEditHolding] = useState(null)
   const [sortKey, setSortKey] = useState("value")
   const [sortDir, setSortDir] = useState("desc")
   const [q, setQ] = useState("")
+  const [transactions, setTransactions] = useState([])
+  const [txLoading, setTxLoading] = useState(false)
+
+  const loadTransactions = useCallback(async () => {
+    if (!portfolio?.id) return
+    setTxLoading(true)
+    try {
+      const data = await getTransactions(portfolio.id)
+      setTransactions(data)
+    } catch (err) {
+      console.error('[Lumen] loadTransactions:', err)
+    } finally {
+      setTxLoading(false)
+    }
+  }, [portfolio?.id])
+
+  useEffect(() => {
+    if (tab === "transactions") loadTransactions()
+  }, [tab, loadTransactions])
 
   const rows = useMemo(() => deriveHoldings(liveHoldings, ccy, prices), [liveHoldings, ccy, prices])
 
@@ -127,7 +147,19 @@ function LivePortfolioPage({ t, lang, ccy, portfolio, liveHoldings, prices = {},
         }
       />
 
-      {rows.length === 0 ? (
+      {/* Tab switcher */}
+      <div className="segmented" style={{ marginBottom: 16, width: "fit-content" }}>
+        <button className={tab === "holdings" ? "on" : ""} onClick={() => setTab("holdings")}>
+          {th ? "หลักทรัพย์" : "Holdings"} {rows.length > 0 && <span style={{ opacity: 0.6, marginLeft: 4 }}>{rows.length}</span>}
+        </button>
+        <button className={tab === "transactions" ? "on" : ""} onClick={() => setTab("transactions")}>
+          {th ? "ประวัติธุรกรรม" : "Transactions"}
+        </button>
+      </div>
+
+      {tab === "transactions" ? (
+        <TransactionsTab transactions={transactions} loading={txLoading} lang={lang} ccy={ccy} />
+      ) : rows.length === 0 ? (
         <div className="card empty">
           <h2 className="display" style={{ fontSize: 28, margin: 0 }}>
             {th ? "ยังไม่มีหลักทรัพย์" : "No holdings yet"}
@@ -333,18 +365,35 @@ function AddHoldingModal({ lang, portfolioId, onClose, onSaved }) {
     }
     setSaving(true)
     setError(null)
-    const { error } = await addHolding(portfolioId, {
+    const shares = parseFloat(form.shares)
+    const cost_price = parseFloat(form.cost_price)
+    const { data: newHolding, error } = await addHolding(portfolioId, {
       ticker: form.ticker.toUpperCase(),
       name: form.name,
       asset_class: form.asset_class,
       region: form.region,
-      shares: parseFloat(form.shares),
-      cost_price: parseFloat(form.cost_price),
+      shares,
+      cost_price,
       currency: form.currency,
       div_yield: form.div_yield ? parseFloat(form.div_yield) : 0,
     })
     setSaving(false)
     if (error) { setError(error.message); return }
+    // Auto-log the transaction
+    try {
+      await addTransaction(portfolioId, {
+        type: 'Buy',
+        ticker: form.ticker.toUpperCase(),
+        shares,
+        price: cost_price,
+        amount: shares * cost_price,
+        currency: form.currency,
+        transacted_at: new Date().toISOString(),
+        note: form.name,
+      })
+    } catch (txErr) {
+      console.warn('[Lumen] transaction log failed:', txErr)
+    }
     onSaved()
   }
 
@@ -582,6 +631,98 @@ const inputStyle = {
   padding: "10px 12px", borderRadius: 8, fontSize: 14,
   border: "1.5px solid var(--line)", background: "var(--bg)",
   color: "var(--ink)", outline: "none", width: "100%", boxSizing: "border-box",
+}
+
+// ─── Transactions Tab ────────────────────────────────────────────────────────
+function TransactionsTab({ transactions, loading, lang, ccy }) {
+  const th = lang === "th"
+
+  if (loading) return (
+    <div style={{ padding: 48, textAlign: "center", color: "var(--ink-3)", fontSize: 14 }}>
+      {th ? "กำลังโหลด…" : "Loading…"}
+    </div>
+  )
+
+  if (transactions.length === 0) return (
+    <div className="card empty" style={{ padding: "60px 24px" }}>
+      <h3 className="display" style={{ fontSize: 24, margin: "0 0 8px" }}>
+        {th ? "ยังไม่มีธุรกรรม" : "No transactions yet"}
+      </h3>
+      <p className="muted" style={{ fontSize: 13 }}>
+        {th ? "เมื่อคุณเพิ่มหลักทรัพย์ใหม่ มันจะถูกบันทึกที่นี่โดยอัตโนมัติ" : "When you add holdings they'll be logged here automatically."}
+      </p>
+    </div>
+  )
+
+  const typeColor = { Buy: "var(--gain)", Sell: "var(--loss)", Dividend: "var(--accent-ink)", Deposit: "var(--ink-2)" }
+  const typeBg    = { Buy: "var(--gain-soft)", Sell: "var(--loss-soft)", Dividend: "var(--accent-soft)", Deposit: "var(--bg-2)" }
+  const typeLabel = { en: { Buy: "Buy", Sell: "Sell", Dividend: "Dividend", Deposit: "Deposit" }, th: { Buy: "ซื้อ", Sell: "ขาย", Dividend: "ปันผล", Deposit: "ฝาก" } }
+  const typeIcon  = { Buy: "buy", Sell: "sell", Dividend: "dividend", Deposit: "deposit" }
+
+  return (
+    <section className="card" style={{ padding: 0, overflow: "hidden" }}>
+      <table className="table">
+        <thead>
+          <tr>
+            <th style={{ width: 90 }}>{th ? "วันที่" : "Date"}</th>
+            <th>{th ? "ประเภท" : "Type"}</th>
+            <th>{th ? "หลักทรัพย์" : "Asset"}</th>
+            <th className="num">{th ? "จำนวน" : "Shares"}</th>
+            <th className="num">{th ? "ราคา" : "Price"}</th>
+            <th className="num">{th ? "มูลค่า" : "Amount"}</th>
+            <th className="num hide-mob">{th ? "หมายเหตุ" : "Note"}</th>
+          </tr>
+        </thead>
+        <tbody>
+          {transactions.map(tx => {
+            const type = tx.type || 'Buy'
+            const date = tx.transacted_at
+              ? new Date(tx.transacted_at).toLocaleDateString(th ? "th-TH" : "en-US", { day: "numeric", month: "short", year: "2-digit" })
+              : "—"
+            const priceCcy = tx.currency || 'THB'
+            const amountDisp = (() => {
+              const a = tx.amount || (tx.shares * tx.price) || 0
+              if (priceCcy === ccy) return a
+              if (priceCcy === 'USD' && ccy === 'THB') return a * 36.4
+              if (priceCcy === 'THB' && ccy === 'USD') return a / 36.4
+              return a
+            })()
+            return (
+              <tr key={tx.id}>
+                <td className="mono muted" style={{ fontSize: 12 }}>{date}</td>
+                <td>
+                  <span className="chip" style={{
+                    background: typeBg[type] || "var(--bg-2)",
+                    color: typeColor[type] || "var(--ink-2)",
+                    fontSize: 11, fontWeight: 600, display: "inline-flex", alignItems: "center", gap: 4,
+                  }}>
+                    <Icon name={typeIcon[type] || "buy"} size={11} />
+                    {(typeLabel[lang] || typeLabel.en)[type] || type}
+                  </span>
+                </td>
+                <td>
+                  <div style={{ fontWeight: 500, fontSize: 13 }}>{tx.ticker || "—"}</div>
+                  {tx.note && <div className="muted" style={{ fontSize: 11 }}>{tx.note}</div>}
+                </td>
+                <td className="num">{tx.shares != null ? tx.shares.toLocaleString(undefined, { maximumFractionDigits: 4 }) : "—"}</td>
+                <td className="num">
+                  {tx.price != null
+                    ? (priceCcy === 'USD' ? '$' : '฿') + tx.price.toLocaleString(undefined, { maximumFractionDigits: 2 })
+                    : "—"}
+                </td>
+                <td className="num" style={{ fontWeight: 500 }}>
+                  {amountDisp > 0 ? LUMEN_FMT.money(amountDisp, ccy, { compact: true }) : "—"}
+                </td>
+                <td className="num hide-mob">
+                  <span className="muted" style={{ fontSize: 11 }}>{priceCcy}</span>
+                </td>
+              </tr>
+            )
+          })}
+        </tbody>
+      </table>
+    </section>
+  )
 }
 
 // ─── Demo Portfolio (unchanged) ──────────────────────────────────────────────

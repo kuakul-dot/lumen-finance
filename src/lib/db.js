@@ -102,6 +102,29 @@ export async function deleteGoal(id) {
   return supabase.from('goals').delete().eq('id', id)
 }
 
+// ── Cash accounts ─────────────────────────────────────────────────────────────
+export async function getCashAccounts(portfolioId) {
+  const { data } = await supabase
+    .from('cash_accounts')
+    .select('*')
+    .eq('portfolio_id', portfolioId)
+    .order('created_at', { ascending: true })
+  return data || []
+}
+
+export async function upsertCashAccount(portfolioId, acct) {
+  const { data, error } = await supabase
+    .from('cash_accounts')
+    .upsert({ portfolio_id: portfolioId, ...acct, updated_at: new Date().toISOString() })
+    .select()
+    .single()
+  return { data, error }
+}
+
+export async function deleteCashAccount(id) {
+  return supabase.from('cash_accounts').delete().eq('id', id)
+}
+
 // Approximate FX rate THB/USD — used for cross-currency conversions
 const USD_THB = 36
 
