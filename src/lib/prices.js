@@ -1,7 +1,27 @@
 // Yahoo Finance prices via Vercel Edge Function proxy (/api/prices)
 
-const CACHE_TTL = 15 * 60 * 1000
-let _cache = { key: '', ts: 0, data: {} }
+const CACHE_TTL    = 15 * 60 * 1000   // 15 min for stock prices
+const FX_CACHE_TTL = 60 * 60 * 1000   // 1 hr for FX rate
+let _cache   = { key: '', ts: 0, data: {} }
+let _fxCache = { ts: 0, rate: null }
+
+// Fetch live USD → THB exchange rate (USDTHB=X via Yahoo Finance)
+export async function fetchFxRate() {
+  const now = Date.now()
+  if (_fxCache.rate && now - _fxCache.ts < FX_CACHE_TTL) return _fxCache.rate
+  try {
+    const res = await fetch('/api/prices?symbols=USDTHB%3DX')
+    if (res.ok) {
+      const data = await res.json()
+      const rate = data['USDTHB=X']?.price
+      if (rate && rate > 20 && rate < 100) {   // sanity check — realistic THB/USD range
+        _fxCache = { ts: now, rate }
+        return rate
+      }
+    }
+  } catch {}
+  return _fxCache.rate ?? 36   // fall back to last known or 36
+}
 
 export function toYahooSymbol(ticker, region = 'TH', assetClass = 'Equity') {
   const t = ticker.toUpperCase()

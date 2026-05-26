@@ -13,7 +13,7 @@ export function Brand() {
   )
 }
 
-export function TopNav({ route, setRoute, lang, setLang, ccy, setCcy, t, session, signOut }) {
+export function TopNav({ route, setRoute, lang, setLang, ccy, setCcy, t, session, signOut, displayName = '', setDisplayName }) {
   const [showProfile, setShowProfile] = useState(false)
   const menuRef = useRef(null)
 
@@ -92,6 +92,24 @@ export function TopNav({ route, setRoute, lang, setLang, ccy, setCcy, t, session
                     <div style={{ fontWeight: 600, fontSize: 14, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{name}</div>
                     <div style={{ fontSize: 12, color: "var(--ink-3)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", marginTop: 2 }}>{email}</div>
                   </div>
+                </div>
+
+                {/* Display name editor */}
+                <div style={{ padding: "12px 18px 10px", borderBottom: "1px solid var(--line)" }}>
+                  <div style={{ fontSize: 11, fontWeight: 600, color: "var(--ink-3)", letterSpacing: "0.06em", textTransform: "uppercase", marginBottom: 6 }}>
+                    {lang === "th" ? "ชื่อแสดง" : "Display name"}
+                  </div>
+                  <input
+                    value={displayName}
+                    onChange={e => setDisplayName && setDisplayName(e.target.value)}
+                    onKeyDown={e => e.key === 'Enter' && e.currentTarget.blur()}
+                    placeholder={lang === "th" ? "ชื่อของคุณ" : "Your name"}
+                    style={{
+                      width: "100%", padding: "7px 10px", borderRadius: 8, fontSize: 13,
+                      border: "1.5px solid var(--line)", background: "var(--bg-2)", color: "var(--ink)",
+                      outline: "none", fontFamily: "inherit", boxSizing: "border-box",
+                    }}
+                  />
                 </div>
 
                 {/* Menu items */}
