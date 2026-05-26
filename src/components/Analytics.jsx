@@ -4,12 +4,12 @@ import { LineChart, Donut, BarChart } from './Charts'
 import { LUMEN_FMT, LUMEN_DERIVE, LUMEN_HISTORY, LUMEN_BENCH } from '../data'
 import { deriveHoldings } from '../lib/db'
 
-export function AnalyticsPage({ t, lang, ccy, dataState, liveHoldings = [], prices = {} }) {
+export function AnalyticsPage({ t, lang, ccy, dataState, liveHoldings = [], prices = {}, fxRate = 36 }) {
   const [tab, setTab] = useState("common")
 
   const liveRows = useMemo(
-    () => dataState === "live" ? deriveHoldings(liveHoldings, ccy, prices) : [],
-    [liveHoldings, ccy, prices, dataState]
+    () => dataState === "live" ? deriveHoldings(liveHoldings, ccy, prices, fxRate) : [],
+    [liveHoldings, ccy, prices, fxRate, dataState]
   )
   const demoData = useMemo(() => dataState !== "live" ? LUMEN_DERIVE() : null, [dataState])
 

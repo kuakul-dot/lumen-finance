@@ -4,7 +4,7 @@ import { Sparkline } from './Charts'
 import { LUMEN_FMT, LUMEN_DERIVE } from '../data'
 import { addHolding, updateHolding, deleteHolding, deriveHoldings, addTransaction, getTransactions } from '../lib/db'
 
-export function PortfolioPage({ t, lang, ccy, setRoute, dataState, portfolio, liveHoldings = [], prices = {}, refreshHoldings, loadingData, dataError, retryLoad }) {
+export function PortfolioPage({ t, lang, ccy, setRoute, dataState, portfolio, liveHoldings = [], prices = {}, refreshHoldings, loadingData, dataError, retryLoad, fxRate = 36 }) {
   const [showAdd, setShowAdd] = useState(false)
   const th = lang === "th"
 
@@ -56,6 +56,7 @@ export function PortfolioPage({ t, lang, ccy, setRoute, dataState, portfolio, li
         loadingData={loadingData}
         showAdd={showAdd}
         setShowAdd={setShowAdd}
+        fxRate={fxRate}
       />
     )
   }
@@ -65,14 +66,15 @@ export function PortfolioPage({ t, lang, ccy, setRoute, dataState, portfolio, li
 }
 
 // ─── Live Portfolio ──────────────────────────────────────────────────────────
-function LivePortfolioPage({ t, lang, ccy, portfolio, liveHoldings, prices = {}, refreshHoldings, loadingData, showAdd, setShowAdd }) {
+function LivePortfolioPage({ t, lang, ccy, portfolio, liveHoldings, prices = {}, refreshHoldings, loadingData, showAdd, setShowAdd, fxRate = 36 }) {
   const th = lang === "th"
-  const [tab, setTab] = useState("holdings")  // "holdings" | "transactions"
+  const [tab, setTab] = useState("holdings")
   const [deleting, setDeleting] = useState(null)
   const [editHolding, setEditHolding] = useState(null)
   const [sortKey, setSortKey] = useState("value")
   const [sortDir, setSortDir] = useState("desc")
   const [q, setQ] = useState("")
+  const [filter, setFilter] = useState("all")
   const [transactions, setTransactions] = useState([])
   const [txLoading, setTxLoading] = useState(false)
 
@@ -93,35 +95,63 @@ function LivePortfolioPage({ t, lang, ccy, portfolio, liveHoldings, prices = {},
     if (tab === "transactions") loadTransactions()
   }, [tab, loadTransactions])
 
-  const rows = useMemo(() => deriveHoldings(liveHoldings, ccy, prices), [liveHoldings, ccy, prices])
+  const rows = useMemo(() => deriveHoldings(liveHoldings, ccy, prices, fxRate), [liveHoldings, ccy, prices, fxRate])
 
-  const sorted = useMemo(() => {
+  const totalValue     = rows.reduce((s, r) => s + r.value, 0)
+  const totalPL        = rows.reduce((s, r) => s + r.pl, 0)
+  const totalCostBasis = totalValue - totalPL
+  const totalPlPct     = totalCostBasis > 0 ? (totalPL / totalCostBasis) * 100 : 0
+  const hasLivePrices  = rows.some(r => r.hasLivePrice)
+  const annualDiv      = rows.reduce((s, r) => s + r.value * (r.divYield || 0) / 100, 0)
+  const largestPos     = rows.length > 0 ? [...rows].sort((a, b) => b.value - a.value)[0] : null
+
+  // All positions merged — used for filter counts and footer total
+  const allGrouped = useMemo(() => groupByTicker(rows), [rows])
+
+  // Filter chip definitions — counts based on merged positions, not raw lots
+  const filterDefs = useMemo(() => [
+    { id: "all",    label: th ? "ทั้งหมด" : "All",       count: allGrouped.length },
+    { id: "TH",     label: th ? "หุ้นไทย" : "TH",        count: allGrouped.filter(r => r.region === "TH").length },
+    { id: "US",     label: th ? "หุ้น US" : "US",        count: allGrouped.filter(r => r.region === "US").length },
+    { id: "ETF",    label: "ETF",                         count: allGrouped.filter(r => r.cls === "ETF").length },
+    { id: "Bond",   label: th ? "พันธบัตร" : "Bonds",    count: allGrouped.filter(r => r.cls === "Bond").length },
+    { id: "Crypto", label: th ? "คริปโต" : "Crypto",     count: allGrouped.filter(r => r.cls === "Crypto").length },
+  ].filter(f => f.id === "all" || f.count > 0), [allGrouped, th])
+
+  const grouped = useMemo(() => {
     let list = rows
+    if (filter !== "all") list = list.filter(r => {
+      if (filter === "TH")     return r.region === "TH"
+      if (filter === "US")     return r.region === "US"
+      if (filter === "ETF")    return r.cls === "ETF"
+      if (filter === "Bond")   return r.cls === "Bond"
+      if (filter === "Crypto") return r.cls === "Crypto"
+      return true
+    })
     if (q) list = list.filter(r => (r.ticker + r.name).toLowerCase().includes(q.toLowerCase()))
-    return [...list].sort((a, b) => {
+    const g = groupByTicker(list)
+    return [...g].sort((a, b) => {
       const av = a[sortKey], bv = b[sortKey]
       const cmp = typeof av === "string" ? av.localeCompare(bv) : (av - bv)
       return sortDir === "asc" ? cmp : -cmp
     })
-  }, [rows, sortKey, sortDir, q])
+  }, [rows, filter, sortKey, sortDir, q])
 
   const setSort = k => {
     if (sortKey === k) setSortDir(d => d === "asc" ? "desc" : "asc")
     else { setSortKey(k); setSortDir("desc") }
   }
 
-  const totalValue = rows.reduce((s, r) => s + r.value, 0)
-  const totalPL = rows.reduce((s, r) => s + r.pl, 0)
-  const totalCostBasis = totalValue - totalPL
-  const totalPlPct = totalCostBasis > 0 ? (totalPL / totalCostBasis) * 100 : 0
-  const hasLivePrices = rows.some(r => r.hasLivePrice)
-
-  const handleDelete = async (id) => {
-    if (!window.confirm(th ? "ลบหลักทรัพย์นี้?" : "Delete this holding?")) return
-    setDeleting(id)
-    await deleteHolding(id)
-    await refreshHoldings()
+  const handleDelete = async (ids, ticker = '') => {
+    const idArr = Array.isArray(ids) ? ids : [ids]
+    const msg = idArr.length > 1
+      ? (th ? `ลบทั้งหมด ${idArr.length} lots ของ ${ticker}?` : `Delete all ${idArr.length} lots of ${ticker}?`)
+      : (th ? "ลบหลักทรัพย์นี้?" : "Delete this holding?")
+    if (!window.confirm(msg)) return
+    setDeleting(idArr[0])
+    for (const id of idArr) await deleteHolding(id)
     setDeleting(null)
+    await refreshHoldings()
   }
 
   if (loadingData) {
@@ -141,16 +171,18 @@ function LivePortfolioPage({ t, lang, ccy, portfolio, liveHoldings, prices = {},
         title={t.portfolio.heading}
         sub={t.portfolio.sub}
         right={
-          <button className="btn btn-sm" onClick={() => setShowAdd(true)}>
-            <Icon name="plus" size={14} /> {t.common.addInvestment}
-          </button>
+          <div style={{ display: "flex", gap: 8 }}>
+            <button className="btn btn-sm" onClick={() => setShowAdd(true)}>
+              <Icon name="plus" size={14} /> {t.common.addInvestment}
+            </button>
+          </div>
         }
       />
 
       {/* Tab switcher */}
       <div className="segmented" style={{ marginBottom: 16, width: "fit-content" }}>
         <button className={tab === "holdings" ? "on" : ""} onClick={() => setTab("holdings")}>
-          {th ? "หลักทรัพย์" : "Holdings"} {rows.length > 0 && <span style={{ opacity: 0.6, marginLeft: 4 }}>{rows.length}</span>}
+          {th ? "หลักทรัพย์" : "Holdings"} {allGrouped.length > 0 && <span style={{ opacity: 0.6, marginLeft: 4 }}>{allGrouped.length}</span>}
         </button>
         <button className={tab === "transactions" ? "on" : ""} onClick={() => setTab("transactions")}>
           {th ? "ประวัติธุรกรรม" : "Transactions"}
@@ -158,7 +190,7 @@ function LivePortfolioPage({ t, lang, ccy, portfolio, liveHoldings, prices = {},
       </div>
 
       {tab === "transactions" ? (
-        <TransactionsTab transactions={transactions} loading={txLoading} lang={lang} ccy={ccy} />
+        <TransactionsTab transactions={transactions} loading={txLoading} lang={lang} ccy={ccy} fxRate={fxRate} />
       ) : rows.length === 0 ? (
         <div className="card empty">
           <h2 className="display" style={{ fontSize: 28, margin: 0 }}>
@@ -173,147 +205,167 @@ function LivePortfolioPage({ t, lang, ccy, portfolio, liveHoldings, prices = {},
         </div>
       ) : (
         <>
-          {/* Summary bar */}
-          <section className="card" style={{ padding: "20px 24px", marginBottom: 16 }}>
-            <div style={{ display: "flex", gap: 40, flexWrap: "wrap", alignItems: "center" }}>
+          {/* ── Summary card — 5-column PortMetric layout matching demo ── */}
+          <section className="card" style={{ padding: "24px 28px", marginBottom: 16 }}>
+            <div style={{ display: "grid", gridTemplateColumns: "1.5fr 1fr 1fr 1fr 1fr", gap: 24, alignItems: "center" }}>
               <div>
-                <div className="label-up" style={{ marginBottom: 4 }}>
-                  {th ? "มูลค่าตลาด" : "Market value"} · {ccy}
+                <div className="label-up" style={{ marginBottom: 6 }}>
+                  {t.portfolio.total}
                   {hasLivePrices && <span style={{ marginLeft: 6, color: "var(--gain)", fontWeight: 700 }}>● LIVE</span>}
                 </div>
-                <div className="display" style={{ fontSize: 32, lineHeight: 1 }}>{LUMEN_FMT.money(totalValue, ccy)}</div>
+                <div className="display" style={{ fontSize: 36, lineHeight: 1 }}>{LUMEN_FMT.money(totalValue, ccy)}</div>
                 <div className="muted" style={{ fontSize: 12, marginTop: 4 }}>
-                  {rows.length} {th ? "ตำแหน่ง" : "positions"}
+                  {grouped.length} {th ? "ตำแหน่ง · หลายหมวด" : "positions · asset classes"}
                 </div>
               </div>
-              <div>
-                <div className="label-up" style={{ marginBottom: 4 }}>{th ? "กำไร/ขาดทุน" : "Total P/L"}</div>
-                <div style={{ fontSize: 22, fontWeight: 600, color: totalPL >= 0 ? "var(--gain)" : "var(--loss)" }}>
-                  {totalPL >= 0 ? "+" : ""}{LUMEN_FMT.money(totalPL, ccy, { compact: true })}
-                </div>
-                <div style={{ fontSize: 12, marginTop: 2, color: totalPlPct >= 0 ? "var(--gain)" : "var(--loss)" }}>
-                  {totalPlPct >= 0 ? "+" : ""}{totalPlPct.toFixed(2)}%
-                </div>
-              </div>
-              <div style={{ flex: 1, display: "flex", gap: 28, flexWrap: "wrap" }}>
-                {[...new Set(rows.map(r => r.cls))].map(cls => {
-                  const clsVal = rows.filter(r => r.cls === cls).reduce((s, r) => s + r.value, 0)
-                  return (
-                    <div key={cls}>
-                      <div className="label-up" style={{ marginBottom: 4 }}>{cls}</div>
-                      <div style={{ fontSize: 18, fontWeight: 500 }}>{LUMEN_FMT.money(clsVal, ccy, { compact: true })}</div>
-                      <div className="muted" style={{ fontSize: 11, marginTop: 2 }}>
-                        {totalValue > 0 ? (clsVal / totalValue * 100).toFixed(1) : 0}%
-                      </div>
-                    </div>
-                  )
-                })}
-              </div>
+              <PortMetric
+                label={th ? "กำไร/ขาดทุน รวม" : "Unrealized P/L"}
+                value={(totalPL >= 0 ? "+" : "") + LUMEN_FMT.money(totalPL, ccy, { compact: true })}
+                sub={<Delta value={totalPlPct} />}
+              />
+              <PortMetric
+                label={th ? "ปันผล/ปี (ประมาณ)" : "Est. annual dividends"}
+                value={annualDiv > 0 ? LUMEN_FMT.money(annualDiv, ccy, { compact: true }) : "—"}
+                sub={annualDiv > 0
+                  ? <span className="mono">{(annualDiv / totalValue * 100).toFixed(2)}% yield</span>
+                  : <span className="muted" style={{ fontSize: 11 }}>{th ? "ยังไม่มีปันผล" : "No dividends"}</span>}
+              />
+              <PortMetric
+                label={th ? "ตัวใหญ่สุด" : "Largest position"}
+                value={largestPos ? largestPos.ticker : "—"}
+                sub={largestPos ? <span className="mono">{largestPos.weight.toFixed(1)}%</span> : null}
+              />
+              <PortMetric
+                label={th ? "ต้นทุนรวม" : "Total cost basis"}
+                value={LUMEN_FMT.money(totalCostBasis, ccy, { compact: true })}
+                sub={<span className="mono" style={{ color: totalPlPct >= 0 ? "var(--gain)" : "var(--loss)" }}>
+                  {totalPlPct >= 0 ? "+" : ""}{totalPlPct.toFixed(1)}%
+                </span>}
+              />
             </div>
           </section>
 
-          {/* Search */}
-          <section style={{ marginBottom: 12 }}>
-            <div style={{ display: "inline-flex", alignItems: "center", gap: 8, background: "var(--card)", border: "1px solid var(--line)", borderRadius: 999, padding: "6px 14px", width: 240 }}>
+          {/* ── Filter chips + Search — same row like demo ── */}
+          <section style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 12, gap: 16, flexWrap: "wrap" }}>
+            <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
+              {filterDefs.map(f => (
+                <button key={f.id}
+                  className={"chip " + (filter === f.id ? "chip-soft" : "")}
+                  style={{ cursor: "pointer", padding: "6px 12px", fontSize: 12 }}
+                  onClick={() => setFilter(f.id)}>
+                  {f.label} <span style={{ opacity: 0.6, marginLeft: 4 }}>{f.count}</span>
+                </button>
+              ))}
+            </div>
+            <div style={{ display: "flex", alignItems: "center", gap: 8, background: "var(--card)", border: "1px solid var(--line)", borderRadius: 999, padding: "6px 14px", width: 240, flexShrink: 0 }}>
               <Icon name="search" size={14} />
               <input type="text" placeholder={t.common.search} value={q} onChange={e => setQ(e.target.value)}
                      style={{ border: 0, outline: 0, background: "transparent", flex: 1, fontSize: 13 }} />
             </div>
           </section>
 
-          {/* Table */}
+          {/* ── Table ── */}
           <section className="card" style={{ padding: 0, overflow: "hidden" }}>
             <table className="table">
               <thead>
                 <tr>
                   <SortHeader id="ticker" label={t.portfolio.holding} sortKey={sortKey} sortDir={sortDir} onSort={setSort} />
                   <SortHeader id="shares" label={t.portfolio.shares} sortKey={sortKey} sortDir={sortDir} onSort={setSort} align="right" />
-                  <SortHeader id="cost" label={th ? "ราคาทุน" : "Cost/share"} sortKey={sortKey} sortDir={sortDir} onSort={setSort} align="right" />
-                  <SortHeader id="price" label={th ? "ราคาตลาด" : "Mkt price"} sortKey={sortKey} sortDir={sortDir} onSort={setSort} align="right" />
-                  <SortHeader id="value" label={t.portfolio.value} sortKey={sortKey} sortDir={sortDir} onSort={setSort} align="right" />
-                  <SortHeader id="pl" label={t.portfolio.pl} sortKey={sortKey} sortDir={sortDir} onSort={setSort} align="right" />
+                  <SortHeader id="value"  label={th ? "ต้นทุน" : "Cost"} sortKey={sortKey} sortDir={sortDir} onSort={setSort} align="right" />
+                  <SortHeader id="value"  label={t.portfolio.value} sortKey={sortKey} sortDir={sortDir} onSort={setSort} align="right" />
+                  <th className="num">{th ? "30 วัน" : "30d"}</th>
+                  <SortHeader id="pl"     label={t.portfolio.pl} sortKey={sortKey} sortDir={sortDir} onSort={setSort} align="right" />
                   <SortHeader id="weight" label={t.portfolio.weight} sortKey={sortKey} sortDir={sortDir} onSort={setSort} align="right" />
                   <th></th>
                 </tr>
               </thead>
               <tbody>
-                {sorted.map(r => (
-                  <tr key={r.id} style={{ opacity: deleting === r.id ? 0.4 : 1 }}>
-                    <td>
-                      <div className="ticker">
-                        <div className="ticker-mark" style={{ background: classBg(r.cls), color: classFg(r.cls) }}>
-                          {r.ticker.slice(0, 2)}
-                        </div>
-                        <div>
-                          <div style={{ fontWeight: 500 }}>{r.ticker}</div>
-                          <div className="muted" style={{ fontSize: 11 }}>
-                            {r.name}
-                            {r.sector && r.sector !== "—" && (
-                              <span style={{ marginLeft: 6, opacity: 0.6 }}>· {r.sector}</span>
-                            )}
+                {grouped.map(r => {
+                  const costBasis = r.value - r.pl
+                  const sparkData = Array.from({ length: 20 }, (_, i) =>
+                    Math.sin(i / 2 + r.ticker.length) + Math.cos(i / 3 + r.ticker.length * 1.3) + (i / 20) * ((r.changePct || r.plPct / 10) > 0 ? 0.6 : -0.6))
+                  const sparkColor = (r.changePct || r.plPct) >= 0 ? "var(--gain)" : "var(--loss)"
+                  return (
+                    <tr key={r.ticker} style={{ opacity: deleting && r._ids.includes(deleting) ? 0.4 : 1 }}>
+                      <td>
+                        <div className="ticker">
+                          <div className="ticker-mark" style={{ background: classBg(r.cls), color: classFg(r.cls) }}>
+                            {r.ticker.slice(0, 2)}
                           </div>
-                        </div>
-                      </div>
-                    </td>
-                    <td className="num">{r.shares.toLocaleString(undefined, { maximumFractionDigits: 4 })}</td>
-                    <td className="num">{LUMEN_FMT.moneyNative(r.costNative, r.nativeCcy, { compact: true })}</td>
-                    <td className="num">
-                      {r.hasLivePrice ? (
-                        <div>
-                          <div style={{ fontWeight: 500 }}>{LUMEN_FMT.moneyNative(r.priceNative, r.nativeCcy, { compact: true })}</div>
-                          {r.changePct !== 0 && (
-                            <div style={{ fontSize: 11, color: r.changePct >= 0 ? "var(--gain)" : "var(--loss)" }}>
-                              {r.changePct >= 0 ? "+" : ""}{r.changePct.toFixed(2)}%
+                          <div>
+                            <div style={{ fontWeight: 500 }}>{r.ticker}</div>
+                            <div className="muted" style={{ fontSize: 11 }}>
+                              {r.name}
+                              {r.sector && r.sector !== "—" && (
+                                <span style={{ marginLeft: 6, opacity: 0.6 }}>· {r.sector}</span>
+                              )}
+                              {r._lots > 1 && (
+                                <span style={{ marginLeft: 6, fontSize: 10, background: "var(--accent-soft)", color: "var(--accent-ink)", borderRadius: 4, padding: "1px 5px", fontWeight: 600 }}>
+                                  {r._lots} lots
+                                </span>
+                              )}
                             </div>
-                          )}
+                          </div>
                         </div>
-                      ) : (
-                        <span className="muted" style={{ fontSize: 12 }}>{th ? "รอราคา" : "pending"}</span>
-                      )}
-                    </td>
-                    <td className="num" style={{ fontWeight: 500 }}>{LUMEN_FMT.money(r.value, ccy, { compact: true })}</td>
-                    <td className="num">
-                      {r.hasLivePrice ? (
-                        <div>
-                          <div style={{ color: r.pl >= 0 ? "var(--gain)" : "var(--loss)", fontWeight: 500 }}>
+                      </td>
+                      <td className="num">{r.shares.toLocaleString(undefined, { maximumFractionDigits: 4 })}</td>
+                      <td className="num">{LUMEN_FMT.money(costBasis, ccy, { compact: true })}</td>
+                      <td className="num">
+                        <div style={{ fontWeight: 500 }}>{LUMEN_FMT.money(r.value, ccy, { compact: true })}</div>
+                        {r.hasLivePrice && r.changePct !== 0 && (
+                          <div style={{ fontSize: 11, color: r.changePct >= 0 ? "var(--gain)" : "var(--loss)" }}>
+                            {r.changePct >= 0 ? "+" : ""}{r.changePct.toFixed(2)}%
+                          </div>
+                        )}
+                        {!r.hasLivePrice && (
+                          <div className="muted" style={{ fontSize: 11 }}>{th ? "รอราคา" : "pending"}</div>
+                        )}
+                      </td>
+                      <td><Sparkline data={sparkData} stroke={sparkColor} fill={sparkColor} /></td>
+                      <td className="num">
+                        <div style={{ display: "flex", flexDirection: "column", alignItems: "flex-end", gap: 1 }}>
+                          <span style={{ color: r.pl >= 0 ? "var(--gain)" : "var(--loss)", fontWeight: 500 }}>
                             {r.pl >= 0 ? "+" : ""}{LUMEN_FMT.money(r.pl, ccy, { compact: true })}
-                          </div>
-                          <div style={{ fontSize: 11, color: r.plPct >= 0 ? "var(--gain)" : "var(--loss)" }}>
-                            {r.plPct >= 0 ? "+" : ""}{r.plPct.toFixed(2)}%
-                          </div>
+                          </span>
+                          <Delta value={r.plPct} size={11} />
                         </div>
-                      ) : <span className="muted">—</span>}
-                    </td>
-                    <td className="num">
-                      <div style={{ display: "flex", alignItems: "center", gap: 8, justifyContent: "flex-end" }}>
-                        <div className="bar" style={{ width: 40 }}>
-                          <span style={{ width: Math.min(100, r.weight * 3) + "%", background: classFg(r.cls) }} />
+                      </td>
+                      <td className="num">
+                        <div style={{ display: "flex", alignItems: "center", gap: 8, justifyContent: "flex-end" }}>
+                          <div className="bar" style={{ width: 50 }}>
+                            <span style={{ width: Math.min(100, r.weight * 3) + "%", background: classFg(r.cls) }} />
+                          </div>
+                          <span style={{ minWidth: 36 }}>{r.weight.toFixed(1)}%</span>
                         </div>
-                        <span style={{ minWidth: 36 }}>{r.weight.toFixed(1)}%</span>
-                      </div>
-                    </td>
-                    <td>
-                      <div style={{ display: "flex", gap: 2, justifyContent: "flex-end" }}>
-                        <button
-                          onClick={() => { const orig = liveHoldings.find(h => h.id === r.id); if (orig) setEditHolding(orig) }}
-                          style={{ background: "none", border: "none", cursor: "pointer", color: "var(--ink-3)", padding: "4px 7px", borderRadius: 6, fontSize: 15, lineHeight: 1 }}
-                          title={th ? "แก้ไข" : "Edit"}
-                        >✎</button>
-                        <button
-                          onClick={() => handleDelete(r.id)}
-                          disabled={deleting === r.id}
-                          style={{ background: "none", border: "none", cursor: "pointer", color: "var(--ink-4)", padding: "4px 6px", borderRadius: 6, fontSize: 17, lineHeight: 1 }}
-                          title={th ? "ลบ" : "Delete"}
-                        >×</button>
-                      </div>
-                    </td>
-                  </tr>
-                ))}
-                <tr style={{ background: "var(--bg)", fontWeight: 600 }}>
-                  <td colSpan={4}><span className="label-up">{t.portfolio.total}</span></td>
-                  <td className="num">{LUMEN_FMT.money(totalValue, ccy, { compact: true })}</td>
-                  <td className="num" style={{ color: totalPL >= 0 ? "var(--gain)" : "var(--loss)" }}>
-                    {totalPL >= 0 ? "+" : ""}{LUMEN_FMT.money(totalPL, ccy, { compact: true })}
+                      </td>
+                      <td>
+                        <div style={{ display: "flex", gap: 2, justifyContent: "flex-end" }}>
+                          <button
+                            onClick={() => { const orig = liveHoldings.find(h => h.id === r._ids[0]); if (orig) setEditHolding(orig) }}
+                            style={{ background: "none", border: "none", cursor: "pointer", color: "var(--ink-3)", padding: "4px 7px", borderRadius: 6, fontSize: 15, lineHeight: 1 }}
+                            title={th ? "แก้ไข" : "Edit"}
+                          >✎</button>
+                          <button
+                            onClick={() => handleDelete(r._ids, r.ticker)}
+                            disabled={!!(deleting && r._ids.includes(deleting))}
+                            style={{ background: "none", border: "none", cursor: "pointer", color: "var(--ink-4)", padding: "4px 6px", borderRadius: 6, fontSize: 17, lineHeight: 1 }}
+                            title={th ? "ลบ" : "Delete"}
+                          >×</button>
+                        </div>
+                      </td>
+                    </tr>
+                  )
+                })}
+                <tr style={{ background: "var(--bg)", fontWeight: 500 }}>
+                  <td style={{ paddingTop: 18, paddingBottom: 18 }}><span className="label-up">{t.portfolio.total}</span></td>
+                  <td></td>
+                  <td className="num">{LUMEN_FMT.money(totalCostBasis, ccy, { compact: true })}</td>
+                  <td className="num" style={{ fontWeight: 600 }}>{LUMEN_FMT.money(totalValue, ccy, { compact: true })}</td>
+                  <td></td>
+                  <td className="num">
+                    <span style={{ color: totalPL >= 0 ? "var(--gain)" : "var(--loss)" }}>
+                      {totalPL >= 0 ? "+" : ""}{LUMEN_FMT.money(totalPL, ccy, { compact: true })}
+                    </span>
                   </td>
                   <td className="num">100.0%</td>
                   <td></td>
@@ -322,10 +374,11 @@ function LivePortfolioPage({ t, lang, ccy, portfolio, liveHoldings, prices = {},
             </table>
           </section>
 
-          <div style={{ marginTop: 12, color: "var(--ink-4)", fontSize: 12 }}>
-            {hasLivePrices
-              ? (th ? "ราคาตลาดจาก Yahoo Finance · อัปเดตทุก 15 นาที" : "Market prices from Yahoo Finance · updates every 15 min")
-              : (th ? "กำลังโหลดราคาตลาด…" : "Fetching live market prices…")}
+          <div style={{ display: "flex", justifyContent: "space-between", marginTop: 12, color: "var(--ink-4)", fontSize: 12 }}>
+            <span>{th ? `แสดง ${grouped.length} จาก ${allGrouped.length} ตำแหน่ง` : `Showing ${grouped.length} of ${allGrouped.length} positions`}</span>
+            <span>{hasLivePrices
+              ? (th ? "ราคาตลาดจาก Yahoo Finance · อัปเดตทุก 15 นาที" : "Market prices from Yahoo Finance · 15 min delay")
+              : (th ? "กำลังโหลดราคาตลาด…" : "Fetching live market prices…")}</span>
           </div>
         </>
       )}
@@ -367,6 +420,36 @@ const SECTORS = [
   { value: "Crypto",            th: "คริปโตเคอร์เรนซี",      en: "Crypto" },
   { value: "Other",             th: "อื่นๆ",                 en: "Other" },
 ]
+
+// ─── Group holdings by ticker for aggregated display ────────────────────────
+function groupByTicker(rows) {
+  const map = new Map()
+  rows.forEach(r => {
+    if (!map.has(r.ticker)) {
+      map.set(r.ticker, { ...r, _ids: [r.id], _lots: 1 })
+    } else {
+      const g = map.get(r.ticker)
+      const totalShares = g.shares + r.shares
+      const totalValue  = g.value + r.value
+      const totalPL     = g.pl + r.pl
+      const costBasis   = totalValue - totalPL
+      map.set(r.ticker, {
+        ...g,
+        shares:      totalShares,
+        cost:        (g.cost       * g.shares + r.cost       * r.shares) / totalShares,
+        costNative:  (g.costNative * g.shares + r.costNative * r.shares) / totalShares,
+        value:       totalValue,
+        pl:          totalPL,
+        plPct:       costBasis > 0 ? (totalPL / costBasis) * 100 : 0,
+        _ids:        [...g._ids, r.id],
+        _lots:       g._lots + 1,
+      })
+    }
+  })
+  const result = [...map.values()]
+  const total  = result.reduce((s, r) => s + r.value, 0)
+  return result.map(r => ({ ...r, weight: total > 0 ? (r.value / total) * 100 : 0 }))
+}
 
 // ─── Add Holding Modal ───────────────────────────────────────────────────────
 function AddHoldingModal({ lang, portfolioId, onClose, onSaved }) {
@@ -512,23 +595,20 @@ function AddHoldingModal({ lang, portfolioId, onClose, onSaved }) {
             </Field>
           </div>
 
-          {/* Dividend yield + Purchase date */}
-          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
-            <Field label={th ? "อัตราปันผล % (ไม่บังคับ)" : "Dividend yield % (optional)"}>
-              <input type="number" step="any" min="0" max="100" value={form.div_yield}
-                     onChange={e => set('div_yield', e.target.value)}
-                     placeholder="0.00" style={inputStyle} />
-            </Field>
-            <Field label={th ? "วันที่ซื้อ" : "Purchase date"}>
-              <input
-                type="date"
-                value={form.purchased_at}
-                max={today}
-                onChange={e => set('purchased_at', e.target.value)}
-                style={inputStyle}
-              />
-            </Field>
-          </div>
+          {/* Dividend yield */}
+          <Field label={th ? "อัตราปันผล % (ไม่บังคับ)" : "Dividend yield % (optional)"}>
+            <input type="number" step="any" min="0" max="100" value={form.div_yield}
+                   onChange={e => set('div_yield', e.target.value)}
+                   placeholder="0.00" style={inputStyle} />
+          </Field>
+
+          {/* Purchase date — custom selector avoids OS locale issues */}
+          <DateSelectField
+            label={th ? "วันที่ซื้อ" : "Purchase date"}
+            value={form.purchased_at}
+            onChange={v => set('purchased_at', v)}
+            lang={lang}
+          />
 
           <div style={{ display: "flex", gap: 10, marginTop: 8 }}>
             <button type="button" className="btn btn-outline" style={{ flex: 1 }} onClick={onClose}>
@@ -702,8 +782,43 @@ const inputStyle = {
   color: "var(--ink)", outline: "none", width: "100%", boxSizing: "border-box",
 }
 
+const MONTHS_EN = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec']
+const MONTHS_TH = ['ม.ค.','ก.พ.','มี.ค.','เม.ย.','พ.ค.','มิ.ย.','ก.ค.','ส.ค.','ก.ย.','ต.ค.','พ.ย.','ธ.ค.']
+
+function DateSelectField({ label, value, onChange, lang }) {
+  const now = new Date()
+  const parts = (value || '').split('-')
+  const year  = parseInt(parts[0]) || now.getFullYear()
+  const month = parseInt(parts[1]) || (now.getMonth() + 1)
+  const day   = parseInt(parts[2]) || now.getDate()
+  const months = lang === "th" ? MONTHS_TH : MONTHS_EN
+  const clampDay = (y, m, d) => Math.min(d, new Date(y, m, 0).getDate())
+  const emit = (y, m, d) => {
+    const dd = clampDay(y, m, d)
+    onChange(`${y}-${String(m).padStart(2,'0')}-${String(dd).padStart(2,'0')}`)
+  }
+  const years = Array.from({ length: now.getFullYear() - 2009 }, (_, i) => now.getFullYear() - i)
+  return (
+    <Field label={label}>
+      <div style={{ display: 'grid', gridTemplateColumns: '60px 1fr 90px', gap: 6 }}>
+        <select value={day} onChange={e => emit(year, month, +e.target.value)} style={inputStyle}>
+          {Array.from({ length: new Date(year, month, 0).getDate() }, (_, i) => i + 1).map(d => (
+            <option key={d} value={d}>{d}</option>
+          ))}
+        </select>
+        <select value={month} onChange={e => emit(year, +e.target.value, day)} style={inputStyle}>
+          {months.map((m, i) => <option key={i+1} value={i+1}>{m}</option>)}
+        </select>
+        <select value={year} onChange={e => emit(+e.target.value, month, day)} style={inputStyle}>
+          {years.map(y => <option key={y} value={y}>{y}</option>)}
+        </select>
+      </div>
+    </Field>
+  )
+}
+
 // ─── Transactions Tab ────────────────────────────────────────────────────────
-function TransactionsTab({ transactions, loading, lang, ccy }) {
+function TransactionsTab({ transactions, loading, lang, ccy, fxRate = 36 }) {
   const th = lang === "th"
 
   if (loading) return (
@@ -749,12 +864,10 @@ function TransactionsTab({ transactions, loading, lang, ccy }) {
               ? new Date(tx.transacted_at).toLocaleDateString(th ? "th-TH" : "en-US", { day: "numeric", month: "short", year: "2-digit" })
               : "—"
             const priceCcy = tx.currency || 'THB'
+            // amountDisp always in THB; LUMEN_FMT.money handles display conversion
             const amountDisp = (() => {
               const a = tx.amount || (tx.shares * tx.price) || 0
-              if (priceCcy === ccy) return a
-              if (priceCcy === 'USD' && ccy === 'THB') return a * 36.4
-              if (priceCcy === 'THB' && ccy === 'USD') return a / 36.4
-              return a
+              return priceCcy === 'USD' ? a * fxRate : a
             })()
             return (
               <tr key={tx.id}>

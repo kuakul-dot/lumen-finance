@@ -127,33 +127,33 @@ export async function deleteCashAccount(id) {
   return supabase.from('cash_accounts').delete().eq('id', id)
 }
 
-// Approximate FX rate THB/USD — used for cross-currency conversions
-const USD_THB = 36
-
-// Convert a price in `fromCcy` to display currency
-function fxConvert(amount, fromCcy, displayCcy) {
-  if (fromCcy === displayCcy) return amount
-  if (fromCcy === 'USD' && displayCcy === 'THB') return amount * USD_THB
-  if (fromCcy === 'THB' && displayCcy === 'USD') return amount / USD_THB
-  return amount
-}
-
 // Derive display rows from raw Supabase holdings.
 // `prices` is the object from fetchPrices() — optional, falls back to cost price.
-export function deriveHoldings(holdings, currency = 'THB', prices = {}) {
+// `fxRate` is live USD→THB rate (e.g. 36.5) — defaults to 36 if not provided.
+//
+// IMPORTANT: All monetary values (value, pl, cost, price) are returned in THB regardless
+// of the `currency` parameter. Display-layer formatting (LUMEN_FMT.money) handles the
+// THB→USD conversion at render time using the live rate. This prevents double-conversion.
+export function deriveHoldings(holdings, currency = 'THB', prices = {}, fxRate = 36) {
+  // Convert any amount to THB
+  const toTHB = (amount, fromCcy) => {
+    if (fromCcy === 'THB') return amount
+    if (fromCcy === 'USD') return amount * fxRate
+    return amount
+  }
+
   const rows = holdings.map(h => {
-    const displayCcy = currency
     const holdingCcy = h.currency || 'THB'
 
-    // Cost-basis value in display currency
-    const costPriceInDisplay = fxConvert(h.cost_price, holdingCcy, displayCcy)
-    const costValue = h.shares * costPriceInDisplay
+    // Cost-basis in THB
+    const costPriceInTHB = toTHB(h.cost_price, holdingCcy)
+    const costValue = h.shares * costPriceInTHB   // THB
 
     // Live price from Yahoo Finance
     const sym = toYahooSymbol(h.ticker, h.region || 'TH', h.asset_class || 'Equity')
     const priceData = prices[sym]
 
-    let currentPriceInDisplay = costPriceInDisplay
+    let currentPriceInTHB = costPriceInTHB
     let currentValue = costValue
     let pl = 0, plPct = 0, hasLivePrice = false, changePct = 0
 
@@ -161,9 +161,9 @@ export function deriveHoldings(holdings, currency = 'THB', prices = {}) {
       // Yahoo Finance returns price in the asset's native currency
       // .BK stocks → THB, US stocks & crypto → USD
       const priceCcy = h.region === 'TH' ? 'THB' : 'USD'
-      currentPriceInDisplay = fxConvert(priceData.price, priceCcy, displayCcy)
-      currentValue = h.shares * currentPriceInDisplay
-      pl = currentValue - costValue
+      currentPriceInTHB = toTHB(priceData.price, priceCcy)
+      currentValue = h.shares * currentPriceInTHB  // THB
+      pl = currentValue - costValue                 // THB
       plPct = costValue > 0 ? (pl / costValue) * 100 : 0
       hasLivePrice = true
       changePct = priceData.changePct ?? 0
@@ -182,13 +182,13 @@ export function deriveHoldings(holdings, currency = 'THB', prices = {}) {
       region: h.region || 'TH',
       cls: h.asset_class || 'Equity',
       shares: h.shares,
-      cost: costPriceInDisplay,
-      price: currentPriceInDisplay,
+      cost: costPriceInTHB,     // per-share cost in THB (used for groupByTicker avg)
+      price: currentPriceInTHB, // per-share price in THB
       priceNative,   // per-share price in native currency (USD for VOO, THB for .BK)
       costNative,    // per-share cost  in native currency
       nativeCcy,     // currency for priceNative / costNative display
-      value: currentValue,
-      pl, plPct,
+      value: currentValue,  // total current value in THB
+      pl, plPct,            // P&L in THB
       weight: 0, // filled below
       divYield: h.div_yield || 0,
       currency: holdingCcy,

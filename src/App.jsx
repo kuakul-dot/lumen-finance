@@ -7,10 +7,10 @@ import { PortfolioPage } from './components/Portfolio'
 import { AnalyticsPage } from './components/Analytics'
 import { ToolsPage } from './components/Tools'
 import { PlanningPage } from './components/Planning'
-import { LUMEN_I18N } from './data'
+import { LUMEN_I18N, setLiveFxRate } from './data'
 import { supabase } from './lib/supabase'
 import { getOrCreatePortfolio, getHoldingsSafe, getCashAccounts } from './lib/db'
-import { fetchPrices } from './lib/prices'
+import { fetchPrices, fetchFxRate } from './lib/prices'
 
 const TWEAK_DEFAULTS = {
   accent:  "oklch(0.55 0.06 175)",
@@ -41,6 +41,13 @@ const DENSITY_MAP = {
 export default function App() {
   const [t, setTweak] = useTweaks(TWEAK_DEFAULTS)
   const [route, setRoute] = useState("onboarding")
+  const [displayName, setDisplayNameRaw] = useState(() => {
+    try { return localStorage.getItem('lumen_display_name') || '' } catch { return '' }
+  })
+  const setDisplayName = useCallback((name) => {
+    setDisplayNameRaw(name)
+    try { localStorage.setItem('lumen_display_name', name) } catch {}
+  }, [])
   const lang = t.lang === "en" ? "en" : "th"
   const ccy  = t.ccy === "USD" ? "USD" : "THB"
   const i18n = LUMEN_I18N[lang]
@@ -53,6 +60,16 @@ export default function App() {
   const [cashAccounts, setCashAccounts] = useState([])
   const [loadingData, setLoadingData] = useState(false)
   const [dataError, setDataError] = useState(null)
+  const [fxRate, setFxRate] = useState(36)    // live USD→THB rate
+
+  // Fetch FX rate on mount, then refresh every hour
+  useEffect(() => {
+    fetchFxRate().then(r => { if (r) { setFxRate(r); setLiveFxRate(r) } })
+    const id = setInterval(() => {
+      fetchFxRate().then(r => { if (r) { setFxRate(r); setLiveFxRate(r) } })
+    }, 60 * 60 * 1000)
+    return () => clearInterval(id)
+  }, [])
 
   const loadPortfolioData = useCallback(async (userId) => {
     setLoadingData(true)
@@ -161,6 +178,8 @@ export default function App() {
         cashAccounts={cashAccounts}
         portfolio={portfolio}
         refreshCashAccounts={refreshCashAccounts}
+        displayName={displayName}
+        fxRate={fxRate}
       />
     )
   } else if (route === "portfolio") {
@@ -175,10 +194,11 @@ export default function App() {
         loadingData={loadingData}
         dataError={dataError}
         retryLoad={() => session?.user && loadPortfolioData(session.user.id)}
+        fxRate={fxRate}
       />
     )
   } else if (route === "analytics") {
-    page = <AnalyticsPage t={i18n} lang={lang} ccy={ccy} dataState={dataState} liveHoldings={liveHoldings} prices={prices} />
+    page = <AnalyticsPage t={i18n} lang={lang} ccy={ccy} dataState={dataState} liveHoldings={liveHoldings} prices={prices} fxRate={fxRate} />
   } else if (route === "tools") {
     page = (
       <ToolsPage
@@ -187,6 +207,7 @@ export default function App() {
         prices={prices}
         portfolio={portfolio}
         cashAccounts={cashAccounts}
+        fxRate={fxRate}
       />
     )
   } else if (route === "planning") {
@@ -210,6 +231,8 @@ export default function App() {
           t={i18n}
           session={session}
           signOut={signOut}
+          displayName={displayName}
+          setDisplayName={setDisplayName}
         />
       ) : (
         <OnboardingNav

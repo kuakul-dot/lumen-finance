@@ -7,7 +7,34 @@ import {
 } from '../data'
 import { deriveHoldings, upsertCashAccount, deleteCashAccount, getGoals, getTransactions } from '../lib/db'
 
-export function DashboardPage({ t, lang, ccy, setRoute, dataState, liveHoldings = [], prices = {}, cashAccounts = [], portfolio, refreshCashAccounts }) {
+function makeGreeting(name, lang) {
+  const h = new Date().getHours()
+  const slot = h < 5 ? 3 : h < 12 ? 0 : h < 17 ? 1 : h < 21 ? 2 : 3
+  const grEn = ["Good morning", "Good afternoon", "Good evening", "Good night"]
+  const grTh = ["สวัสดีตอนเช้า", "สวัสดีตอนบ่าย", "สวัสดีตอนเย็น", "สวัสดีตอนดึก"]
+  if (!name) return lang === "th" ? grTh[slot] : grEn[slot]
+  return lang === "th" ? `${grTh[slot]} ${name}` : `${grEn[slot]}, ${name}`
+}
+
+function makeGreetingSub(lang) {
+  const h = new Date().getHours()
+  const slot = h < 5 ? 3 : h < 12 ? 0 : h < 17 ? 1 : h < 21 ? 2 : 3
+  const subEn = [
+    "Here's your morning financial overview.",
+    "Here's where your money stands this afternoon.",
+    "Here's where your money stands tonight.",
+    "Here's where your money stands tonight.",
+  ]
+  const subTh = [
+    "นี่คือภาพรวมการเงินเช้านี้",
+    "นี่คือภาพรวมการเงินบ่ายนี้",
+    "นี่คือภาพรวมการเงินคืนนี้",
+    "นี่คือภาพรวมการเงินคืนนี้",
+  ]
+  return lang === "th" ? subTh[slot] : subEn[slot]
+}
+
+export function DashboardPage({ t, lang, ccy, setRoute, dataState, liveHoldings = [], prices = {}, cashAccounts = [], portfolio, refreshCashAccounts, displayName = '', fxRate = 36 }) {
   if (dataState === "empty") return <DashboardEmpty t={t} lang={lang} setRoute={setRoute} />
   if (dataState === "live") return (
     <LiveDashboardPage
@@ -15,8 +42,17 @@ export function DashboardPage({ t, lang, ccy, setRoute, dataState, liveHoldings 
       liveHoldings={liveHoldings} prices={prices}
       cashAccounts={cashAccounts} portfolio={portfolio}
       refreshCashAccounts={refreshCashAccounts}
+      displayName={displayName}
+      fxRate={fxRate}
     />
   )
+
+  return <DemoDashboardPage t={t} lang={lang} ccy={ccy} setRoute={setRoute} />
+}
+
+// ─── Demo Dashboard ─────────────────────────────────────────────────────────
+function DemoDashboardPage({ t, lang, ccy, setRoute }) {
+  const [chartPeriod, setChartPeriod] = useState("3Y")
 
   const derived = useMemo(() => LUMEN_DERIVE(), [])
   const { rows, value, cost, pl, plPct, cash, liab, net } = derived
@@ -41,13 +77,23 @@ export function DashboardPage({ t, lang, ccy, setRoute, dataState, liveHoldings 
     })).sort((a, b) => Math.abs(b.day) - Math.abs(a.day)).slice(0, 5)
   }, [rows])
 
-  const monthLabels = ["Jun","Jul","Aug","Sep","Oct","Nov","Dec","Jan","Feb","Mar","Apr","May"]
-  const histSeries = [{
-    name: t.dashboard.netWorth,
-    color: "var(--ink)",
-    fill: true,
-    data: LUMEN_HISTORY.map((p, i) => ({ x: i, y: p.v * 1000, label: monthLabels[i % 12] + " '" + (24 + Math.floor(i / 12)) })),
-  }]
+  const histSeries = useMemo(() => {
+    const cfg = { "1Y": { pts: 12, stepM: 1 }, "3Y": { pts: 18, stepM: 2 }, "5Y": { pts: 20, stepM: 3 } }
+    const { pts, stepM } = cfg[chartPeriod] || cfg["3Y"]
+    const now = new Date()
+    return [{
+      name: t.dashboard.netWorth,
+      color: "var(--ink)", fill: true,
+      data: Array.from({ length: pts }, (_, i) => {
+        const p = i / (pts - 1)
+        const ease = p < 0.5 ? 2 * p * p : -1 + (4 - 2 * p) * p
+        const noise = (Math.sin(i * 2.3) * 0.012 + Math.cos(i * 4.1) * 0.008) * cost
+        const d = new Date(now.getFullYear(), now.getMonth() - (pts - 1 - i) * stepM, 1)
+        const lbl = d.toLocaleString(lang === "th" ? "th-TH" : "en-US", { month: "short" }) + " '" + String(d.getFullYear()).slice(2)
+        return { x: i, y: cost + (value - cost) * ease + noise, label: lbl }
+      }),
+    }]
+  }, [chartPeriod, value, cost, lang, t.dashboard.netWorth])
 
   const todayPct = 0.62
   const todayAbs = value * todayPct / 100
@@ -100,14 +146,15 @@ export function DashboardPage({ t, lang, ccy, setRoute, dataState, liveHoldings 
           </div>
           <div>
             <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 8 }}>
-              <div className="label-up">{lang === "th" ? "พอร์ตการลงทุน · 3 ปี" : "Portfolio · 3 yrs"}</div>
+              <div className="label-up">{lang === "th" ? "พอร์ตการลงทุน" : "Portfolio"} · {chartPeriod}</div>
               <div className="segmented" style={{ gap: 0 }}>
                 {["1Y", "3Y", "5Y"].map(p => (
-                  <button key={p} className={p === "3Y" ? "on" : ""} style={{ fontSize: 12, padding: "4px 10px" }}>{p}</button>
+                  <button key={p} className={chartPeriod === p ? "on" : ""} onClick={() => setChartPeriod(p)}
+                    style={{ fontSize: 12, padding: "4px 10px" }}>{p}</button>
                 ))}
               </div>
             </div>
-            <LineChart series={histSeries} height={220} fmt={v => "฿" + (v / 1_000_000).toFixed(2) + "M"} />
+            <LineChart series={histSeries} height={220} fmt={v => LUMEN_FMT.money(v, ccy, { compact: true })} />
           </div>
         </div>
       </section>
@@ -359,8 +406,38 @@ function actionLabel(type, lang) {
   return (map[lang] || map.en)[type] || type
 }
 
+// Groups same-ticker derived rows for display — preserves raw DB lots, aggregates for UI
+function groupRowsByTicker(rows) {
+  const map = new Map()
+  rows.forEach(r => {
+    if (!map.has(r.ticker)) {
+      map.set(r.ticker, { ...r })
+    } else {
+      const g = map.get(r.ticker)
+      const totalValue  = g.value + r.value
+      const totalPL     = g.pl + r.pl
+      const totalShares = (g.shares || 0) + (r.shares || 0)
+      const costBasis   = totalValue - totalPL
+      map.set(r.ticker, {
+        ...g,
+        value:     totalValue,
+        pl:        totalPL,
+        plPct:     costBasis > 0 ? (totalPL / costBasis) * 100 : 0,
+        shares:    totalShares,
+        changePct: totalValue > 0
+          ? ((g.changePct || 0) * g.value + (r.changePct || 0) * r.value) / totalValue
+          : (g.changePct || 0),
+        hasLivePrice: g.hasLivePrice || r.hasLivePrice,
+      })
+    }
+  })
+  const result = [...map.values()]
+  const total  = result.reduce((s, r) => s + r.value, 0)
+  return result.map(r => ({ ...r, weight: total > 0 ? (r.value / total) * 100 : 0 }))
+}
+
 // ─── Live Dashboard — matches demo layout with real data ─────────────────────
-function LiveDashboardPage({ t, lang, ccy, setRoute, liveHoldings, prices = {}, cashAccounts = [], portfolio, refreshCashAccounts }) {
+function LiveDashboardPage({ t, lang, ccy, setRoute, liveHoldings, prices = {}, cashAccounts = [], portfolio, refreshCashAccounts, displayName = '', fxRate = 36 }) {
   const th = lang === "th"
   const [showCashModal, setShowCashModal] = useState(null)
   const [goals, setGoals] = useState([])
@@ -375,7 +452,20 @@ function LiveDashboardPage({ t, lang, ccy, setRoute, liveHoldings, prices = {}, 
     getTransactions(portfolio.id).then(d => setRecentTx((d || []).slice(0, 5))).catch(() => {})
   }, [portfolio?.id, portfolio?.user_id])
 
-  const rows          = useMemo(() => deriveHoldings(liveHoldings, ccy, prices), [liveHoldings, ccy, prices])
+  const rows          = useMemo(() => deriveHoldings(liveHoldings, ccy, prices, fxRate), [liveHoldings, ccy, prices, fxRate])
+
+  // Earliest purchase date across all holdings — used to cap the chart start
+  const earliestHoldingDate = useMemo(() => {
+    if (!liveHoldings || liveHoldings.length === 0) return null
+    const dates = liveHoldings
+      .map(h => h.purchased_at || h.created_at)
+      .filter(Boolean)
+      .map(d => new Date(d))
+      .filter(d => !isNaN(d.getTime()))
+    if (dates.length === 0) return null
+    return new Date(Math.min(...dates.map(d => d.getTime())))
+  }, [liveHoldings])
+
   const totalValue    = rows.reduce((s, r) => s + r.value, 0)
   const totalPL       = rows.reduce((s, r) => s + r.pl, 0)
   const totalCostBasis = totalValue - totalPL
@@ -388,13 +478,11 @@ function LiveDashboardPage({ t, lang, ccy, setRoute, liveHoldings, prices = {}, 
     : 0
   const todayChangeAbs = totalValue * todayChangePct / 100
 
+  // cashTotal is always in THB; LUMEN_FMT.money handles display conversion
   const cashTotal = useMemo(() => cashAccounts.reduce((s, a) => {
     const b = a.balance || 0, c = a.currency || 'THB'
-    if (c === ccy) return s + b
-    if (c === 'USD' && ccy === 'THB') return s + b * LUMEN_FX.THB_per_USD
-    if (c === 'THB' && ccy === 'USD') return s + b / LUMEN_FX.THB_per_USD
-    return s + b
-  }, 0), [cashAccounts, ccy])
+    return s + (c === 'USD' ? b * fxRate : b)
+  }, 0), [cashAccounts, fxRate])
   const netWorth = totalValue + cashTotal
   const hasCash  = cashAccounts.length > 0
 
@@ -411,21 +499,21 @@ function LiveDashboardPage({ t, lang, ccy, setRoute, liveHoldings, prices = {}, 
     return Object.entries(map).map(([k, v], i) => ({ name: k, value: v, color: colors[i % 7] }))
   }, [rows, th])
 
-  // Top movers — sorted by |changePct| when live prices available
+  // Top movers — group same-ticker lots first, then sort by |changePct|
   const movers = useMemo(() => {
-    const live = rows.filter(r => r.hasLivePrice)
+    const grouped = groupRowsByTicker(rows)
+    const live = grouped.filter(r => r.hasLivePrice)
     const list = live.length >= 3
       ? [...live].sort((a, b) => Math.abs(b.changePct) - Math.abs(a.changePct))
-      : [...rows].sort((a, b) => b.value - a.value)
+      : [...grouped].sort((a, b) => b.value - a.value)
     return list.slice(0, 5)
   }, [rows])
 
-  // Simulated growth chart — adjustable period 1Y / 3Y / 5Y
+  // Simulated growth chart — full 1Y / 3Y / 5Y range, no date cap (data is synthetic anyway)
   const histSeries = useMemo(() => {
     if (totalCostBasis <= 0 || totalValue <= 0) return []
     const cfg = { "1Y": { pts: 12, stepM: 1 }, "3Y": { pts: 18, stepM: 2 }, "5Y": { pts: 20, stepM: 3 } }
     const { pts, stepM } = cfg[chartPeriod] || cfg["1Y"]
-    const totalMonths = pts * stepM
     const now = new Date()
     return [{
       name: th ? "มูลค่าพอร์ต" : "Portfolio value",
@@ -434,12 +522,14 @@ function LiveDashboardPage({ t, lang, ccy, setRoute, liveHoldings, prices = {}, 
         const p = i / (pts - 1)
         const ease = p < 0.5 ? 2 * p * p : -1 + (4 - 2 * p) * p
         const noise = (Math.sin(i * 2.3) * 0.012 + Math.cos(i * 4.1) * 0.008) * totalCostBasis
-        const d = new Date(now.getFullYear(), now.getMonth() - (totalMonths - 1 - i * stepM), 1)
+        const d = new Date(now.getFullYear(), now.getMonth() - (pts - 1 - i) * stepM, 1)
         const lbl = d.toLocaleString(th ? "th-TH" : "en-US", { month: "short" }) + " '" + String(d.getFullYear()).slice(2)
         return { x: i, y: totalCostBasis + (totalValue - totalCostBasis) * ease + noise, label: lbl }
       })
     }]
   }, [totalCostBasis, totalValue, th, chartPeriod])
+
+  const chartLabel = chartPeriod
 
   // Auto insights from live data
   const insights = useMemo(() => {
@@ -503,7 +593,7 @@ function LiveDashboardPage({ t, lang, ccy, setRoute, liveHoldings, prices = {}, 
   if (rows.length === 0) {
     return (
       <div className="shell fade-in">
-        <PageHead kicker={(th ? "หน้าหลัก · " : "Dashboard · ") + today} title={t.dashboard.heading} sub={t.dashboard.sub} />
+        <PageHead kicker={(th ? "หน้าหลัก · " : "Dashboard · ") + today} title={makeGreeting(displayName, lang)} sub={makeGreetingSub(lang)} />
         <div className="card" style={{ padding: 80, textAlign: "center" }}>
           <svg width="64" height="64" viewBox="0 0 64 64" style={{ margin: "0 auto 24px", display: "block" }}>
             <rect x="8" y="14" width="48" height="40" rx="6" fill="none" stroke="var(--line-2)" strokeWidth="1.5" strokeDasharray="4 4" />
@@ -524,8 +614,8 @@ function LiveDashboardPage({ t, lang, ccy, setRoute, liveHoldings, prices = {}, 
     <div className="shell fade-in" data-screen-label="Dashboard">
       <PageHead
         kicker={(th ? "หน้าหลัก · " : "Dashboard · ") + today}
-        title={t.dashboard.heading}
-        sub={t.dashboard.sub}
+        title={makeGreeting(displayName, lang)}
+        sub={makeGreetingSub(lang)}
         right={
           <div style={{ display: "flex", gap: 8 }}>
             <button className="btn btn-outline btn-sm" onClick={() => setShowCashModal('add')}>
@@ -545,6 +635,9 @@ function LiveDashboardPage({ t, lang, ccy, setRoute, liveHoldings, prices = {}, 
             <div className="label-up" style={{ marginBottom: 12 }}>
               {hasCash ? (th ? "มูลค่าสุทธิ (Net Worth)" : "Net Worth") : (th ? "มูลค่าพอร์ต" : "Portfolio value")} · {ccy}
               {hasLivePrices && <span style={{ marginLeft: 8, color: "var(--gain)", fontWeight: 600 }}>● LIVE</span>}
+              <span style={{ marginLeft: 10, color: "var(--ink-3)", fontWeight: 400 }}>
+                1 USD = {fxRate.toFixed(2)} THB
+              </span>
             </div>
             <div className="display" style={{ fontSize: 72, lineHeight: 1, letterSpacing: "-0.035em" }}>
               {LUMEN_FMT.money(hasCash ? netWorth : totalValue, ccy)}
@@ -585,7 +678,7 @@ function LiveDashboardPage({ t, lang, ccy, setRoute, liveHoldings, prices = {}, 
           </div>
           <div>
             <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 8 }}>
-              <div className="label-up">{th ? "มูลค่าพอร์ต" : "Portfolio"} · {chartPeriod}</div>
+              <div className="label-up">{th ? "มูลค่าพอร์ต" : "Portfolio"} · {chartLabel}</div>
               <div className="segmented" style={{ gap: 0 }}>
                 {["1Y", "3Y", "5Y"].map(p => (
                   <button key={p} className={chartPeriod === p ? "on" : ""} onClick={() => setChartPeriod(p)}
@@ -646,7 +739,7 @@ function LiveDashboardPage({ t, lang, ccy, setRoute, liveHoldings, prices = {}, 
                 const sparkData = Array.from({ length: 20 }, (_, i) =>
                   Math.sin(i / 3 + r.ticker.length) + Math.cos(i / 2 + r.ticker.length * 2) + (i / 20) * ((r.changePct || r.plPct / 10) > 0 ? 0.6 : -0.6))
                 return (
-                  <tr key={r.id || r.ticker}>
+                  <tr key={r.ticker}>
                     <td>
                       <div className="ticker">
                         <div className="ticker-mark">{r.ticker.slice(0, 2)}</div>
@@ -766,11 +859,10 @@ function LiveDashboardPage({ t, lang, ccy, setRoute, liveHoldings, prices = {}, 
               ? new Date(a.transacted_at).toLocaleDateString(th ? "th-TH" : "en-US", { day: "numeric", month: "short" })
               : "—"
             const priceCcy = a.currency || 'THB'
+            // dispAmt always in THB so LUMEN_FMT.money can handle display conversion
             const dispAmt = (() => {
               const amt = a.amount || (a.shares != null && a.price != null ? a.shares * a.price : 0)
-              if (priceCcy === ccy) return amt
-              if (priceCcy === 'USD' && ccy === 'THB') return amt * LUMEN_FX.THB_per_USD
-              return amt / LUMEN_FX.THB_per_USD
+              return priceCcy === 'USD' ? amt * fxRate : amt
             })()
             return (
               <div key={a.id || i} style={{
@@ -845,7 +937,8 @@ function LiveDashboardPage({ t, lang, ccy, setRoute, liveHoldings, prices = {}, 
           <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(220px, 1fr))", gap: 8 }}>
             {cashAccounts.map(a => {
               const b = a.balance || 0, c = a.currency || 'THB'
-              const dispBal = c === ccy ? b : c === 'USD' ? b * LUMEN_FX.THB_per_USD : b / LUMEN_FX.THB_per_USD
+              // dispBal always in THB; LUMEN_FMT.money handles display conversion
+              const dispBal = c === 'USD' ? b * fxRate : b
               return (
                 <div key={a.id} style={{ display: "flex", alignItems: "center", gap: 12, padding: "10px 14px", borderRadius: 10, border: "1px solid var(--line)", background: "var(--bg)" }}>
                   <div style={{ width: 32, height: 32, borderRadius: 8, background: "var(--accent-soft)", color: "var(--accent-ink)", display: "grid", placeItems: "center", flexShrink: 0 }}>

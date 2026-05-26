@@ -39,7 +39,7 @@ function buildCurrentByClass(rows, cash) {
   return map
 }
 
-export function ToolsPage({ t, lang, ccy, dataState, liveHoldings = [], prices = {}, portfolio, cashAccounts = [] }) {
+export function ToolsPage({ t, lang, ccy, dataState, liveHoldings = [], prices = {}, portfolio, cashAccounts = [], fxRate = 36 }) {
   const FMT = LUMEN_FMT
   const th = lang === "th"
 
@@ -58,13 +58,11 @@ export function ToolsPage({ t, lang, ccy, dataState, liveHoldings = [], prices =
 
   const { rows, total, cash } = useMemo(() => {
     if (isLive) {
-      const derived = deriveHoldings(liveHoldings, ccy, prices)
+      const derived = deriveHoldings(liveHoldings, ccy, prices, fxRate)
+      // cashTotal always in THB (deriveHoldings also returns THB values)
       const cashTotal = cashAccounts.reduce((s, a) => {
         const b = a.balance || 0, c = a.currency || 'THB'
-        if (c === ccy) return s + b
-        if (c === 'USD' && ccy === 'THB') return s + b * LUMEN_FX.THB_per_USD
-        if (c === 'THB' && ccy === 'USD') return s + b / LUMEN_FX.THB_per_USD
-        return s + b
+        return s + (c === 'USD' ? b * fxRate : b)
       }, 0)
       const investTotal = derived.reduce((s, r) => s + r.value, 0)
       return { rows: derived, total: investTotal + cashTotal, cash: cashTotal }
@@ -72,12 +70,15 @@ export function ToolsPage({ t, lang, ccy, dataState, liveHoldings = [], prices =
     if (dataState === "empty") return { rows: [], total: 0, cash: 0 }
     const demo = LUMEN_DERIVE()
     return { rows: demo.rows, total: demo.value + demo.cash, cash: demo.cash }
-  }, [isLive, liveHoldings, ccy, prices, cashAccounts, dataState])
+  }, [isLive, liveHoldings, ccy, prices, fxRate, cashAccounts, dataState])
 
   const currentByClass = useMemo(() => buildCurrentByClass(rows, cash), [rows, cash])
 
+  // User types amount in display currency; convert to THB for internal calculations
+  // (total, all values from deriveHoldings, are in THB)
   const dep = parseFloat(amount) || 0
-  const newTotal = mode === "deposit" ? total + dep : Math.max(0, total - dep)
+  const depInTHB = ccy === 'USD' ? dep * fxRate : dep
+  const newTotal = mode === "deposit" ? total + depInTHB : Math.max(0, total - depInTHB)
 
   // ── Target editing helpers ───────────────────────────────────────────────────
   const totalTargetPct = Object.values(targets).reduce((s, v) => s + v, 0)
@@ -124,7 +125,7 @@ export function ToolsPage({ t, lang, ccy, dataState, liveHoldings = [], prices =
         const split = Math.min(2, sorted.length)
         sorted.slice(0, split).forEach(c => {
           const amt = s.delta / split
-          const priceInDisplay = c.price  // already in display ccy from deriveHoldings
+          const priceInDisplay = c.price  // always in THB (deriveHoldings returns THB values)
           const sharesNeeded = priceInDisplay > 0 ? Math.floor(amt / priceInDisplay) : 0
           if (sharesNeeded > 0) {
             out.push({ action: "Buy", ticker: c.ticker, name: c.name, shares: sharesNeeded, priceNative: c.priceNative, nativeCcy: c.nativeCcy, amount: sharesNeeded * priceInDisplay, cls: s.name })
@@ -145,8 +146,9 @@ export function ToolsPage({ t, lang, ccy, dataState, liveHoldings = [], prices =
     return out
   }, [suggestions, allowSales, rows, total, showResult])
 
-  const cashRemaining = Math.max(0, dep - trades.filter(tr => tr.action === "Buy").reduce((a, b) => a + b.amount, 0)
-                                     + trades.filter(tr => tr.action === "Sell").reduce((a, b) => a + b.amount, 0))
+  // cashRemaining in THB (depInTHB minus buy/sell amounts which are also THB)
+  const cashRemaining = Math.max(0, depInTHB - trades.filter(tr => tr.action === "Buy").reduce((a, b) => a + b.amount, 0)
+                                             + trades.filter(tr => tr.action === "Sell").reduce((a, b) => a + b.amount, 0))
 
   if (dataState === "empty") {
     return (

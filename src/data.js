@@ -297,6 +297,12 @@ export const LUMEN_I18N = {
 
 export const LUMEN_FX = { THB_per_USD: 36.4 };
 
+// Live FX rate updated by App.jsx when fetchFxRate resolves
+let _liveRate = LUMEN_FX.THB_per_USD;
+export function setLiveFxRate(rate) {
+  if (rate > 20 && rate < 100) _liveRate = rate;
+}
+
 export const LUMEN_HOLDINGS = [
   { ticker: "KBANK",  name: "Kasikornbank",            sector: "Financials", region: "TH", cls: "Equity",    shares: 800,  cost: 132.5,  price: 158.5,  divYield: 4.1, ccy: "THB" },
   { ticker: "PTT",    name: "PTT Public Company",      sector: "Energy",     region: "TH", cls: "Equity",    shares: 1500, cost: 32.5,   price: 35.25,  divYield: 5.6, ccy: "THB" },
@@ -392,7 +398,9 @@ export const LUMEN_INSIGHTS = {
 export const LUMEN_FMT = {
   money(value, ccy, opts = {}) {
     const inUSD = ccy === "USD";
-    const v = inUSD ? value / LUMEN_FX.THB_per_USD : value;
+    // opts.fxRate overrides live rate; fallback to _liveRate (updated from Yahoo Finance)
+    const rate = opts.fxRate ?? _liveRate;
+    const v = inUSD ? value / rate : value;
     const decimals = opts.decimals ?? (Math.abs(v) >= 100 ? 0 : 2);
     const symbol = inUSD ? "$" : "฿";
     const sign = v < 0 ? "-" : "";
