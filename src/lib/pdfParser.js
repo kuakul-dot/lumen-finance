@@ -1,6 +1,9 @@
 // PDF text extraction + transaction detection using pdfjs-dist
 // Supports column-header detection (Thai & English) + heuristic fallback
 //
+// Column matching uses X-coordinate proximity (not array index) so it is robust
+// against empty cells, wrapped header text, and bilingual two-row headers.
+//
 // Confirmed working brokers:
 //   ✅ Dime! (ไดม์)          — Confirmation Note / Tax Invoice (US stocks, USD)
 //   ✅ Settrade / SET-linked  — รายงานการซื้อขาย, ใบยืนยัน (TH stocks, THB)
@@ -17,8 +20,11 @@ pdfjs.GlobalWorkerOptions.workerSrc = workerSrc
 
 // ─── Text extraction ──────────────────────────────────────────────────────────
 
-const Y_SNAP = 3  // group text items within 3 px vertically
+const Y_SNAP = 3   // group text items within ±3 px vertically
+const X_TOL  = 80  // max px off-centre to match a data cell to a header column
 
+// Returns { rows, numPages }
+// rows: Array<Array<{ x: number, text: string }>>  — sorted top→bottom, left→right
 export async function extractPDFRows(file, password = '') {
   const buf  = await file.arrayBuffer()
   const loadingTask = pdfjs.getDocument({ data: buf, ...(password ? { password } : {}) })
@@ -40,8 +46,8 @@ export async function extractPDFRows(file, password = '') {
     }
 
     const rows = [...byY.entries()]
-      .sort((a, b) => b[0] - a[0])
-      .map(([, items]) => items.sort((a, b) => a.x - b.x).map(i => i.text))
+      .sort((a, b) => b[0] - a[0])                           // top → bottom
+      .map(([, items]) => items.sort((a, b) => a.x - b.x))   // left → right
 
     allRows.push(...rows)
   }
@@ -51,8 +57,7 @@ export async function extractPDFRows(file, password = '') {
 
 // ─── Header detection ─────────────────────────────────────────────────────────
 // Each field lists patterns in priority order (most specific → most generic).
-// The loop assigns each header cell to the FIRST field whose pattern matches,
-// so put generic patterns AFTER specific ones.
+// findHeader maps field → X-coordinate of the matching header cell.
 
 const HEADER_PATS = {
   transacted_at: [
@@ -100,7 +105,7 @@ const HEADER_PATS = {
     /ราคา/i,
   ],
   amount: [
-    /จำนวนเงิน(?!รวม)/i,      // "จำนวนเงิน" but NOT "จำนวนเงินรวม" (that's total)
+    /จำนวนเงิน(?!รวม)/i,      // "จำนวนเงิน" but NOT "จำนวนเงินรวม"
     /gross.?amount/i,          // Dime! English: Gross Amount
     /มูลค่า/i,
     /^amount$/i,
@@ -120,7 +125,7 @@ const HEADER_PATS = {
     /ค่าธรรมเนียม/i,
     /ค่านายหน้า/i,
     /fee.?include/i,           // Dime! English: Fee Include Vat
-    /^fee/i,                   // any header starting with "fee"
+    /^fee/i,
     /commission/i,
   ],
   tax: [
@@ -130,7 +135,6 @@ const HEADER_PATS = {
     /withholding/i,            // Dime! English: Withholding Tax
     /^wht$/i,
     /^tax$/i,
-    /^vat$/i,
     /^stamp/i,
   ],
   currency: [
@@ -140,18 +144,21 @@ const HEADER_PATS = {
   ],
 }
 
+// Returns { headerRow, colMap } where colMap maps field → X coordinate
+// of the header cell (not array index — avoids misalignment with data rows).
 function findHeader(rows) {
   let best = null, bestScore = 0
   for (let ri = 0; ri < Math.min(rows.length, 80); ri++) {
-    const row = rows[ri]
+    const row    = rows[ri]
     const colMap = {}; let score = 0
-    row.forEach((cell, ci) => {
+    for (const { x, text } of row) {
       for (const [field, pats] of Object.entries(HEADER_PATS)) {
-        if (colMap[field] === undefined && pats.some(p => p.test(cell))) {
-          colMap[field] = ci; score++; break
+        if (colMap[field] === undefined && pats.some(p => p.test(text))) {
+          colMap[field] = x   // store X position, not array index
+          score++; break
         }
       }
-    })
+    }
     if (score >= 3 && score > bestScore) {
       best = { headerRow: ri, colMap }; bestScore = score
     }
@@ -197,19 +204,18 @@ function snum(v) {
   return isNaN(n) ? null : n
 }
 
-// Words / exchange codes to exclude from auto-ticker detection
 const SKIP_TICKER = new Set([
   'SET','THB','USD','VAT','TAX','FEE','BKK','AMP','GET','PUT','NET','ALL',
-  'BUY','SELL','DIV','CCY','THB',
-  // Exchange codes (Dime! shows these as [ARCX], [XNAS], etc.)
+  'BUY','SELL','DIV','CCY',
+  // Exchange / market codes that appear in Dime! brackets e.g. "VOO [ARCX]"
   'NYSE','ARCX','XNAS','XNYS','NMS','NGM','PCX','AMEX','ASE','BATS',
   'LSE','TYO','HKG','SGX','KRX','XTAI',
 ])
 
-function pickTicker(cells) {
-  return cells.find(c => {
+function pickTicker(texts) {
+  return texts.find(c => {
     const clean = c.replace(/\[.*?\]/g, '').trim()
-    return /^[A-Z][A-Z0-9\-]{1,7}$/.test(clean) && !SKIP_TICKER.has(clean)
+    return /^[A-Z][A-Z0-9.\-]{1,7}$/.test(clean) && !SKIP_TICKER.has(clean)
   })?.replace(/\[.*?\]/g, '').trim() ?? null
 }
 
@@ -218,48 +224,62 @@ function pickTicker(cells) {
 export function detectTransactions(rows) {
   const header = findHeader(rows)
 
-  // ── Mode A: header-guided ─────────────────────────────────────────────────
+  // ── Mode A: header-guided, X-position based ───────────────────────────────
   if (header) {
     const { headerRow, colMap } = header
     const results = []
 
+    // g(field, row): return text of the data cell whose X is closest to the
+    // header field's X.  Falls back to '' if nothing is within X_TOL.
+    const g = (f, row) => {
+      if (colMap[f] === undefined) return ''
+      const tx = colMap[f]
+      let best = null, minD = Infinity
+      for (const { x, text } of row) {
+        const d = Math.abs(x - tx)
+        if (d < minD) { minD = d; best = text }
+      }
+      return minD <= X_TOL ? (best ?? '') : ''
+    }
+
     for (let ri = headerRow + 1; ri < rows.length; ri++) {
       const row  = rows[ri]
-      const line = row.join(' ')
+      const texts = row.map(c => c.text)
+      const line  = texts.join(' ')
       if (!DATE_RE.test(line)) continue
 
-      const g = (f) => (colMap[f] !== undefined ? row[colMap[f]] : '') ?? ''
-
-      const rawDate = g('transacted_at') || row.find(c => DATE_RE.test(c)) || ''
+      const rawDate = g('transacted_at', row) || texts.find(t => DATE_RE.test(t)) || ''
       const date    = parseDate(rawDate)
       if (!date) continue
 
-      // Ticker: clean [EXCHANGE] suffix e.g. "VOO [ARCX]" → "VOO"
-      const rawTicker = g('ticker') || ''
+      // Ticker: strip [EXCHANGE] suffix e.g. "VOO [ARCX]" → "VOO"
+      const rawTicker = g('ticker', row)
       const ticker    = (rawTicker.replace(/\[.*?\]/g, '').trim().toUpperCase()
-                         || pickTicker(row)
+                         || pickTicker(texts)
                          || '').replace(/\.BK$/i, '') || null
 
-      // Currency: USD or THB based on the CCY column
-      const rawCcy  = g('currency').trim().toUpperCase()
-      const currency = rawCcy === 'USD' ? 'USD' : 'THB'
+      // Currency from CCY column; fall back to line scan
+      const rawCcy   = g('currency', row).trim().toUpperCase()
+      const currency = rawCcy === 'USD' ? 'USD'
+                     : rawCcy === 'THB' ? 'THB'
+                     : /\bUSD\b/.test(line) ? 'USD' : 'THB'
 
-      // Prefer gross amount; fall back to total if gross not mapped
-      const amtRaw   = g('amount') || g('total')
-      const feeRaw   = g('fee')
-      const taxRaw   = g('tax')
+      // Prefer gross amount; fall back to total
+      const amtRaw = g('amount', row) || g('total', row)
+      const feeRaw = g('fee',    row)
+      const taxRaw = g('tax',    row)
 
       results.push({
         transacted_at: date,
-        type:   mapType(g('type')),
+        type:   mapType(g('type', row)),
         ticker,
-        shares: snum(g('shares')),
-        price:  snum(g('price')),
+        shares: snum(g('shares', row)),
+        price:  snum(g('price',  row)),
         amount: snum(amtRaw),
-        fee:    snum(feeRaw)  || 0,
-        tax:    snum(taxRaw)  || 0,
+        fee:    snum(feeRaw) || 0,
+        tax:    snum(taxRaw) || 0,
         currency,
-        note: null,
+        note:   null,
       })
     }
     return results
@@ -269,17 +289,18 @@ export function detectTransactions(rows) {
   const results = []
 
   for (const row of rows) {
-    const line = row.join(' ')
+    const texts = row.map(c => c.text)
+    const line  = texts.join(' ')
     if (!DATE_RE.test(line)) continue
 
     const dateMatch = line.match(DATE_RE)
     const date = parseDate(dateMatch?.[0])
     if (!date) continue
 
-    const typeMatch  = line.match(/ซื้อ|Buy|ขาย|Sell|ปันผล|Dividend|ฝาก|Deposit|ถอน|Withdraw/i)
-    const ticker     = pickTicker(row)
+    const typeMatch = line.match(/ซื้อ|Buy|ขาย|Sell|ปันผล|Dividend|ฝาก|Deposit|ถอน|Withdraw/i)
+    const ticker    = pickTicker(texts)
 
-    const dateParts  = new Set((dateMatch[0].match(/\d+/g) || []).map(Number))
+    const dateParts = new Set((dateMatch[0].match(/\d+/g) || []).map(Number))
     const nums = (line.match(/[\d,]+(?:\.\d+)?/g) || [])
       .map(n => parseFloat(n.replace(/,/g, '')))
       .filter(n => n > 0 && !dateParts.has(n))
@@ -309,7 +330,6 @@ export function detectTransactions(rows) {
       shares = nums[0]; amount = nums[1]
     }
 
-    // Detect currency from line content
     const currency = /\bUSD\b/.test(line) ? 'USD' : 'THB'
 
     results.push({
@@ -322,7 +342,7 @@ export function detectTransactions(rows) {
       fee,
       tax,
       currency,
-      note: null,
+      note:   null,
     })
   }
 
