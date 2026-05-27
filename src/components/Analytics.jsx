@@ -84,7 +84,7 @@ export function AnalyticsPage({ t, lang, ccy, dataState, liveHoldings = [], pric
 function AnalyticsCommon({ t, lang, ccy, rows, totalValue, totalPL, totalPlPct, totalCost, hasLivePrices, demoData, dataState }) {
   const FMT = LUMEN_FMT
   const th = lang === "th"
-  const [chartPeriod, setChartPeriod] = useState("1Y")
+  const [chartPeriod, setChartPeriod] = useState("1y")
   const annualIncome = rows.reduce((a, r) => a + r.value * (r.divYield || 0) / 100, 0)
   const yieldOnPort  = totalValue > 0 ? (annualIncome / totalValue) * 100 : 0
 
@@ -102,24 +102,55 @@ function AnalyticsCommon({ t, lang, ccy, rows, totalValue, totalPL, totalPlPct, 
     },
   ] : null
 
-  // Live mode: simulated growth chart from cost basis → current value (THB)
+  // Live mode: simulated growth chart matching Demo's shape:
+  //  - portfolio: synthetic curve from cost basis → current value
+  //  - S&P 500:  synthetic benchmark on same scale (~13–16% trailing return)
   const liveSeries = useMemo(() => {
     if (dataState !== "live" || totalCost <= 0 || totalValue <= 0) return null
-    const cfg = { "1Y": { pts: 12, stepM: 1 }, "3Y": { pts: 18, stepM: 2 }, "5Y": { pts: 20, stepM: 3 } }
-    const { pts, stepM } = cfg[chartPeriod] || cfg["1Y"]
+    const cfg = {
+      "1m":  { pts: 8,  stepD: 4 },   // weekly-ish across ~1 month
+      "3m":  { pts: 10, stepD: 9 },
+      "6m":  { pts: 12, stepD: 16 },
+      "ytd": { pts: Math.max(3, new Date().getMonth() + 1), stepD: 30 },
+      "1y":  { pts: 12, stepD: 30 },
+      "5y":  { pts: 20, stepD: 90 },
+      "all": { pts: 24, stepD: 75 },
+    }
+    const { pts, stepD } = cfg[chartPeriod] || cfg["1y"]
     const now = new Date()
-    return [{
-      name: th ? "มูลค่าพอร์ต" : "Portfolio value",
-      color: "var(--ink)", fill: true,
-      data: Array.from({ length: pts }, (_, i) => {
-        const p = i / (pts - 1)
-        const ease = p < 0.5 ? 2 * p * p : -1 + (4 - 2 * p) * p
-        const noise = (Math.sin(i * 2.3) * 0.012 + Math.cos(i * 4.1) * 0.008) * totalCost
-        const d = new Date(now.getFullYear(), now.getMonth() - (pts - 1 - i) * stepM, 1)
-        const lbl = d.toLocaleString(th ? "th-TH" : "en-US", { month: "short" }) + " '" + String(d.getFullYear()).slice(2)
-        return { x: i, y: totalCost + (totalValue - totalCost) * ease + noise, label: lbl }
-      })
-    }]
+
+    // Bench grows ~14% over the visible window (smooth curve, mild noise)
+    const benchStart = totalCost
+    const benchEnd   = totalCost * 1.14
+
+    return [
+      {
+        name: th ? "พอร์ตของคุณ" : "Your portfolio",
+        color: "var(--ink)", fill: true,
+        data: Array.from({ length: pts }, (_, i) => {
+          const p = i / (pts - 1)
+          const ease = p < 0.5 ? 2 * p * p : -1 + (4 - 2 * p) * p
+          const noise = (Math.sin(i * 2.3) * 0.012 + Math.cos(i * 4.1) * 0.008) * totalCost
+          const d = new Date(now)
+          d.setDate(d.getDate() - (pts - 1 - i) * stepD)
+          const lbl = d.toLocaleString(th ? "th-TH" : "en-US", { month: "short" }) + " '" + String(d.getFullYear()).slice(2)
+          return { x: i, y: totalCost + (totalValue - totalCost) * ease + noise, label: lbl }
+        })
+      },
+      {
+        name: "S&P 500",
+        color: "var(--accent)",
+        data: Array.from({ length: pts }, (_, i) => {
+          const p = i / (pts - 1)
+          const ease = p < 0.5 ? 2 * p * p : -1 + (4 - 2 * p) * p
+          const noise = (Math.sin(i * 1.7 + 1) * 0.008 + Math.cos(i * 3.3 + 0.4) * 0.006) * benchStart
+          const d = new Date(now)
+          d.setDate(d.getDate() - (pts - 1 - i) * stepD)
+          const lbl = d.toLocaleString(th ? "th-TH" : "en-US", { month: "short" }) + " '" + String(d.getFullYear()).slice(2)
+          return { x: i, y: benchStart + (benchEnd - benchStart) * ease + noise, label: lbl }
+        })
+      },
+    ]
   }, [dataState, totalCost, totalValue, th, chartPeriod])
 
   const livePerformers = hasLivePrices ? rows.filter(r => r.hasLivePrice) : rows
@@ -142,50 +173,30 @@ function AnalyticsCommon({ t, lang, ccy, rows, totalValue, totalPL, totalPlPct, 
           sub={th ? "ปันผลกระแสรายปี" : "annual income"} />
         {dataState === "live" ? (
           <BigKpi className="col-span-3"
-            label={th ? "จำนวนตำแหน่ง" : "Positions"}
-            value={rows.length.toString()}
-            sub={[...new Set(rows.map(r => r.cls))].join(", ")} />
+            label={t.analytics.twr}
+            value={(totalPlPct >= 0 ? "+" : "") + totalPlPct.toFixed(1) + "%"}
+            sub={th ? "จากต้นทุน · " + rows.length + " ตำแหน่ง" : "vs. cost · " + rows.length + " positions"}
+            tone={totalPlPct >= 0 ? "gain" : "loss"} />
         ) : (
           <BigKpi className="col-span-3" label={t.analytics.twr} value="+18.3%" sub={th ? "12 เดือนล่าสุด" : "trailing 12-mo"} tone="gain" />
         )}
       </div>
 
-      {dataState === "live" ? (
-        liveSeries ? (
-          <div className="card" style={{ marginBottom: 16 }}>
-            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-end", marginBottom: 16 }}>
-              <div>
-                <h3 className="section-title">{th ? "มูลค่าพอร์ต (จำลอง)" : "Portfolio value (simulated)"}</h3>
-                <div className="muted" style={{ fontSize: 12, marginTop: 4 }}>
-                  {th
-                    ? "เส้นโค้งจำลองจากต้นทุน → มูลค่าปัจจุบัน · ราคาย้อนหลังจริงกำลังพัฒนา"
-                    : "Simulated from cost basis → current value · real historical prices in development"}
-                </div>
-              </div>
-              <div className="segmented">
-                {["1Y","3Y","5Y"].map(k => (
-                  <button key={k} className={chartPeriod === k ? "on" : ""} onClick={() => setChartPeriod(k)}>{k}</button>
-                ))}
-              </div>
+      {dataState === "live" && !liveSeries ? (
+        <div className="card" style={{ marginBottom: 16, padding: "36px 48px", display: "flex", alignItems: "center", gap: 24 }}>
+          <svg width="48" height="48" viewBox="0 0 48 48" style={{ flexShrink: 0 }}>
+            <rect x="4" y="8" width="40" height="32" rx="4" fill="none" stroke="var(--line-2)" strokeWidth="1.5" strokeDasharray="4 4" />
+            <path d="M8 32 L16 22 L24 26 L34 14 L44 20" fill="none" stroke="var(--ink-4)" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
+          </svg>
+          <div>
+            <div style={{ fontWeight: 500, fontSize: 14, marginBottom: 4 }}>
+              {th ? "ยังไม่มีข้อมูลพอร์ต" : "No portfolio data yet"}
             </div>
-            <LineChart series={liveSeries} height={340} fmt={v => FMT.money(v, ccy, { compact: true })} />
-          </div>
-        ) : (
-          <div className="card" style={{ marginBottom: 16, padding: "36px 48px", display: "flex", alignItems: "center", gap: 24 }}>
-            <svg width="48" height="48" viewBox="0 0 48 48" style={{ flexShrink: 0 }}>
-              <rect x="4" y="8" width="40" height="32" rx="4" fill="none" stroke="var(--line-2)" strokeWidth="1.5" strokeDasharray="4 4" />
-              <path d="M8 32 L16 22 L24 26 L34 14 L44 20" fill="none" stroke="var(--ink-4)" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
-            </svg>
-            <div>
-              <div style={{ fontWeight: 500, fontSize: 14, marginBottom: 4 }}>
-                {th ? "ยังไม่มีข้อมูลพอร์ต" : "No portfolio data yet"}
-              </div>
-              <div className="muted" style={{ fontSize: 13 }}>
-                {th ? "เพิ่มหลักทรัพย์เพื่อดูกราฟ" : "Add holdings to see the chart"}
-              </div>
+            <div className="muted" style={{ fontSize: 13 }}>
+              {th ? "เพิ่มหลักทรัพย์เพื่อดูกราฟ" : "Add holdings to see the chart"}
             </div>
           </div>
-        )
+        </div>
       ) : (
         <div className="card" style={{ marginBottom: 16 }}>
           <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-end", marginBottom: 16 }}>
@@ -194,15 +205,24 @@ function AnalyticsCommon({ t, lang, ccy, rows, totalValue, totalPL, totalPlPct, 
               <div className="muted" style={{ fontSize: 12, marginTop: 4 }}>
                 <span className="dot" style={{ background: "var(--ink)" }} /> {th ? "พอร์ตของคุณ" : "Your portfolio"}
                 <span style={{ marginLeft: 12 }}><span className="dot" style={{ background: "var(--accent)" }} /> S&P 500</span>
+                {dataState === "live" && (
+                  <span style={{ marginLeft: 12, fontSize: 11, color: "var(--ink-4)" }}>
+                    {th ? "· จำลอง (รอประวัติจริง)" : "· simulated (awaiting real history)"}
+                  </span>
+                )}
               </div>
             </div>
             <div className="segmented">
               {["1m","3m","6m","ytd","1y","5y","all"].map(k => (
-                <button key={k} className={k === "all" ? "on" : ""}>{t.analytics.timeRange[k]}</button>
+                <button key={k}
+                        className={(dataState === "live" ? chartPeriod === k : k === "all") ? "on" : ""}
+                        onClick={() => dataState === "live" && setChartPeriod(k)}>
+                  {t.analytics.timeRange[k]}
+                </button>
               ))}
             </div>
           </div>
-          <LineChart series={series} height={340} fmt={v => FMT.money(v, ccy, { compact: true })} />
+          <LineChart series={dataState === "live" ? liveSeries : series} height={340} fmt={v => FMT.money(v, ccy, { compact: true })} />
         </div>
       )}
 
