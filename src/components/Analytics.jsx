@@ -530,10 +530,44 @@ function AnalyticsDiv2({ t, lang, ccy, rows, totalValue, dataState, liveHoldings
     return () => { cancelled = true }
   }, [dataState, liveHoldings])
 
-  // ── Earliest buy date per ticker from transactions (most reliable source) ───
-  // holdings.created_at = when the row was inserted into the app, NOT the real
-  // purchase date. transactions.transacted_at = the actual date the user entered.
+  // ── Primary: use recorded Dividend transactions (exact net amounts) ──────────
+  // transactions.amount = actual net received after withholding tax & fees.
+  // This is more accurate than estimating from Yahoo Finance event prices × shares.
+  const receivedFromTx = useMemo(() => {
+    const divTxs = transactions.filter(tx => tx.type === 'Dividend')
+    if (divTxs.length === 0) return null
+
+    const byYear = {}
+    const byTicker = {}
+    let totalReceived = 0
+
+    divTxs.forEach(tx => {
+      // amount = net received; fall back to shares × price if amount missing
+      const rawAmount = tx.amount != null
+        ? Number(tx.amount)
+        : (tx.shares != null && tx.price != null ? Number(tx.shares) * Number(tx.price) : 0)
+      if (rawAmount <= 0) return
+
+      const isTHB = (tx.currency || 'THB') === 'THB'
+      const amountTHB = isTHB ? rawAmount : rawAmount * fxRate
+
+      totalReceived += amountTHB
+      const year = tx.transacted_at
+        ? String(new Date(tx.transacted_at).getFullYear())
+        : String(new Date().getFullYear())
+      byYear[year] = (byYear[year] || 0) + amountTHB
+      const ticker = tx.ticker || ''
+      if (ticker) byTicker[ticker] = (byTicker[ticker] || 0) + amountTHB
+    })
+
+    return { totalReceived, byYear, byTicker, source: 'transactions' }
+  }, [transactions, fxRate])
+
+  // ── Fallback: estimate from Yahoo Finance events × shares held ────────────
+  // Used only when the user has no recorded Dividend transactions.
+  // Earliest buy date per ticker from Buy transactions (for cutoff)
   const tickerPurchaseSec = useMemo(() => {
+    if (receivedFromTx) return {}   // not needed when tx data available
     const map = {}
     transactions
       .filter(tx => (tx.type || 'Buy') === 'Buy' && tx.transacted_at)
@@ -543,25 +577,21 @@ function AnalyticsDiv2({ t, lang, ccy, rows, totalValue, dataState, liveHoldings
         if (ticker && (!(ticker in map) || sec < map[ticker])) map[ticker] = sec
       })
     return map
-  }, [transactions])
+  }, [transactions, receivedFromTx])
 
-  // ── Calculate actual dividends received per holding since purchase date ─────
-  const receivedData = useMemo(() => {
-    if (dataState !== "live" || !divHistory) return null
-    const byYear = {}    // "2023" → totalTHB
-    const byTicker = {}  // "QH"   → totalTHB
+  const receivedFromApi = useMemo(() => {
+    if (receivedFromTx || dataState !== "live" || !divHistory) return null
+    const byYear = {}
+    const byTicker = {}
     let totalReceived = 0
 
     liveHoldings.forEach(h => {
       const sym = toYahooSymbol(h.ticker, h.region || 'TH', h.asset_class || 'Equity')
       const events = divHistory[sym] || []
-
-      // Priority: (1) earliest Buy transaction, (2) purchased_at field, (3) created_at, (4) 0 = all
       const purchaseSec = tickerPurchaseSec[h.ticker]
         ?? (h.purchased_at ? new Date(h.purchased_at).getTime() / 1000
           : h.created_at   ? new Date(h.created_at).getTime()   / 1000
           : 0)
-
       const isTHB = (h.region || 'TH') === 'TH'
 
       events
@@ -574,9 +604,11 @@ function AnalyticsDiv2({ t, lang, ccy, rows, totalValue, dataState, liveHoldings
           byTicker[h.ticker] = (byTicker[h.ticker] || 0) + amountTHB
         })
     })
+    return { totalReceived, byYear, byTicker, source: 'api' }
+  }, [receivedFromTx, dataState, divHistory, liveHoldings, fxRate, tickerPurchaseSec])
 
-    return { totalReceived, byYear, byTicker }
-  }, [dataState, divHistory, liveHoldings, fxRate, tickerPurchaseSec])
+  // receivedFromTx takes priority; fall back to API estimate
+  const receivedData = receivedFromTx ?? receivedFromApi
 
   // Historical received bar chart (years sorted asc)
   const histBarData = useMemo(() => {
@@ -625,7 +657,9 @@ function AnalyticsDiv2({ t, lang, ccy, rows, totalValue, dataState, liveHoldings
             : (receivedData?.totalReceived > 0
               ? FMT.money(receivedData.totalReceived, ccy, { compact: true })
               : "฿0")}
-          sub={th ? "ปันผลจริงตั้งแต่ซื้อ" : "actual divs since purchase"}
+          sub={receivedData?.source === 'transactions'
+            ? (th ? "จากบันทึกธุรกรรมจริง (สุทธิ)" : "from transaction records (net)")
+            : (th ? "ประมาณจาก Yahoo Finance" : "estimated · Yahoo Finance")}
           tone={receivedData?.totalReceived > 0 ? "gain" : undefined} />
       ) : (
         <BigKpi className="col-span-3" label={th ? "เติบโต 5 ปี" : "5y div growth"}
