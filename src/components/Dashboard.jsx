@@ -6,7 +6,7 @@ import {
   LUMEN_ACTIVITY, LUMEN_UPCOMING, LUMEN_INSIGHTS, LUMEN_FX,
 } from '../data'
 import { deriveHoldings, upsertCashAccount, deleteCashAccount, getGoals, getTransactions } from '../lib/db'
-import { fetchHistory } from '../lib/prices'
+import { fetchHistory, toYahooSymbol } from '../lib/prices'
 
 function makeGreeting(name, lang) {
   const h = new Date().getHours()
@@ -485,18 +485,44 @@ function LiveDashboardPage({ t, lang, ccy, setRoute, liveHoldings, prices = {}, 
   const periodDaysMap = { "1Y": 365, "3Y": 365 * 3, "5Y": 365 * 5, "All": daysSinceFirst }
   const isPeriodEnabled = (k) => k === "All" || periodDaysMap[k] <= daysSinceFirst + 7
 
-  // Fetch S&P 500 history — used only as a source of real market-day timestamps
-  // for x-axis date labels (same technique as Analytics page).
-  const [spxData, setSpxData] = useState(null)
+  // ── Earliest Buy timestamp per ticker (from recorded transactions) ──────────
+  const purchaseSecByTicker = useMemo(() => {
+    const map = {}
+    allTx.filter(tx => tx.type === 'Buy' && tx.transacted_at && tx.ticker).forEach(tx => {
+      const sec = new Date(tx.transacted_at).getTime() / 1000
+      if (!(tx.ticker in map) || sec < map[tx.ticker]) map[tx.ticker] = sec
+    })
+    return map
+  }, [allTx])
+
+  // ── Fetch historical prices for each holding (real portfolio chart) ────────
+  const [holdingHistories, setHoldingHistories] = useState({})
   useEffect(() => {
-    const range = daysSinceFirst >= 365 * 2 ? "5y"
-                : daysSinceFirst >= 365     ? "2y"
-                : daysSinceFirst >= 180     ? "1y"
-                : daysSinceFirst >= 90      ? "6mo" : "3mo"
+    if (liveHoldings.length === 0) return
     let cancelled = false
-    fetchHistory("^GSPC", range).then(d => { if (!cancelled) setSpxData(d) }).catch(() => {})
+    const range = daysSinceFirst >= 365 * 4 ? '5y' : daysSinceFirst >= 365 * 2 ? '2y' : '2y'
+    const symbols = [...new Set(
+      liveHoldings.map(h => toYahooSymbol(h.ticker, h.region || 'TH', h.asset_class || 'Equity'))
+    )]
+    Promise.all(
+      symbols.map(sym => fetchHistory(sym, range).then(d => [sym, d]).catch(() => [sym, { series: [] }]))
+    ).then(results => {
+      if (!cancelled) {
+        const map = {}
+        results.forEach(([sym, d]) => { map[sym] = d })
+        setHoldingHistories(map)
+      }
+    })
     return () => { cancelled = true }
-  }, [daysSinceFirst])
+  }, [liveHoldings, daysSinceFirst])
+
+  // True when at least one holding has real price history loaded
+  const hasRealHistory = useMemo(() =>
+    liveHoldings.some(h => {
+      const sym = toYahooSymbol(h.ticker, h.region || 'TH', h.asset_class || 'Equity')
+      return (holdingHistories[sym]?.series?.length || 0) >= 5
+    })
+  , [liveHoldings, holdingHistories])
 
   const totalValue    = rows.reduce((s, r) => s + r.value, 0)
   const totalPL       = rows.reduce((s, r) => s + r.pl, 0)
@@ -541,75 +567,102 @@ function LiveDashboardPage({ t, lang, ccy, setRoute, liveHoldings, prices = {}, 
     return list.slice(0, 5)
   }, [rows])
 
-  // Portfolio value chart — identical technique to Analytics "Common" tab:
-  //  • Uses real S&P 500 timestamps as x-axis anchors (real market-day dates)
-  //  • Portfolio curve: noise + ease from totalCostBasis → totalValue
-  //  • Falls back to synthetic timeline while S&P data loads
-  //  • Adaptive date labels (day-month / month-year / year only)
+  // ── Portfolio value chart ──────────────────────────────────────────────────
+  // Priority: real historical prices from Yahoo Finance (per holding × shares)
+  // Fallback: simulated cost→current path when history not yet loaded
   const histSeries = useMemo(() => {
     if (totalCostBasis <= 0 || totalValue <= 0) return []
     const now = new Date()
     const requestedDays = periodDaysMap[chartPeriod] || 365
     const totalDays = Math.max(7, Math.min(requestedDays, daysSinceFirst))
+    const cutoffSec = (now.getTime() - totalDays * 86400000) / 1000
 
-    const range = totalValue - totalCostBasis
-    const noiseScale = Math.max(Math.abs(range) * 0.1, totalCostBasis * 0.015)
-    const easeAt = p => p < 0.5 ? 2 * p * p : -1 + (4 - 2 * p) * p
-    const noiseAt = (i, seed) => (
-      Math.sin(i * 0.61 + seed) * 0.55 +
-      Math.sin(i * 1.43 + seed * 1.7) * 0.30 +
-      Math.sin(i * 2.91 + seed * 2.3) * 0.18 +
-      Math.cos(i * 4.27 + seed * 3.1) * 0.10
-    )
     const locale = th ? "th-TH" : "en-US"
     const mkLabel = d => {
       if (totalDays < 60) return d.toLocaleString(locale, { month: "short", day: "numeric" })
       return d.toLocaleString(locale, { month: "short" }) + " '" + String(d.getFullYear()).slice(2)
     }
 
-    // Slice real S&P 500 closes to the chosen window for timestamp anchoring
-    const spxAll   = spxData?.series || []
-    const cutoffSec = (now.getTime() - totalDays * 86400000) / 1000
-    const spxSlice  = spxAll.filter(p => p.t >= cutoffSec)
-    const hasSpx    = spxSlice.length >= 2
+    // ── Real data path ────────────────────────────────────────────────────────
+    const holdingData = liveHoldings.map(h => {
+      const sym = toYahooSymbol(h.ticker, h.region || 'TH', h.asset_class || 'Equity')
+      const series = (holdingHistories[sym]?.series || []).filter(p => p.t >= cutoffSec)
+      const purchaseSec = purchaseSecByTicker[h.ticker] || 0
+      const priceCcy = (h.region || 'TH') === 'TH' ? 'THB' : 'USD'
+      return { ...h, sym, series, purchaseSec, priceCcy }
+    })
 
-    if (!hasSpx) {
-      // S&P data not loaded yet — synthetic timeline fallback
-      const portPts  = Math.max(8, Math.min(60, Math.round(totalDays / 7)))
-      const portStepD = totalDays / (portPts - 1)
-      return [{
-        name: th ? "มูลค่าพอร์ต" : "Portfolio value",
-        color: "var(--ink)", fill: true,
-        data: Array.from({ length: portPts }, (_, i) => {
-          const p = i / (portPts - 1)
-          const fade = Math.sin(Math.PI * p)
-          const y = totalCostBasis + range * easeAt(p) + noiseAt(i, 1.7) * noiseScale * fade
-          const d = new Date(now); d.setDate(d.getDate() - (portPts - 1 - i) * portStepD)
-          return { x: i, y, label: mkLabel(d) }
-        })
-      }]
+    const hasReal = holdingData.some(h => h.series.length >= 5)
+
+    if (hasReal) {
+      // Collect all timestamps from all holdings within window
+      const allTs = new Set()
+      holdingData.forEach(h => h.series.forEach(p => allTs.add(p.t)))
+      const sortedTs = [...allTs].sort((a, b) => a - b)
+
+      if (sortedTs.length >= 2) {
+        // Downsample to ~60 points
+        const targetPts = Math.max(8, Math.min(60, Math.round(totalDays / 7)))
+        const stride = Math.max(1, Math.floor(sortedTs.length / targetPts))
+        let sampled = sortedTs.filter((_, i) => i % stride === 0)
+        if (sampled[sampled.length - 1] !== sortedTs[sortedTs.length - 1]) {
+          sampled = [...sampled, sortedTs[sortedTs.length - 1]]
+        }
+
+        // Pre-sort each holding's series for fast forward-fill lookups
+        const lookups = holdingData.map(h => ({
+          ...h, sorted: [...h.series].sort((a, b) => a.t - b.t)
+        }))
+
+        // Forward-fill: return last known price at or before `ts`
+        const getPriceAt = (sorted, ts) => {
+          let price = null
+          for (const p of sorted) {
+            if (p.t <= ts) price = p.c
+            else break
+          }
+          return price
+        }
+
+        const seriesData = sampled.map((ts, idx) => {
+          let val = 0
+          lookups.forEach(h => {
+            // Skip holding not yet purchased at this date (1-day buffer)
+            if (h.purchaseSec > 0 && ts < h.purchaseSec - 86400) return
+            const price = getPriceAt(h.sorted, ts)
+            if (!price || price <= 0) return
+            const priceTHB = h.priceCcy === 'USD' ? price * fxRate : price
+            val += h.shares * priceTHB
+          })
+          return { x: idx, y: val, label: mkLabel(new Date(ts * 1000)) }
+        }).filter(p => p.y > 50)   // drop near-zero points before first purchase
+
+        if (seriesData.length >= 2) {
+          return [{ name: th ? "มูลค่าพอร์ต" : "Portfolio value", color: "var(--ink)", fill: true, data: seriesData }]
+        }
+      }
     }
 
-    // Downsample S&P to ~weekly points; use its timestamps as date labels
-    const targetPts = Math.max(8, Math.min(60, Math.round(totalDays / 7)))
-    const stride = Math.max(1, Math.floor(spxSlice.length / targetPts))
-    let sampled = spxSlice.filter((_, i) => i % stride === 0)
-    if (sampled[sampled.length - 1] !== spxSlice[spxSlice.length - 1]) {
-      sampled = [...sampled, spxSlice[spxSlice.length - 1]]
-    }
-    const N = sampled.length
-
+    // ── Simulated fallback (while history loads) ──────────────────────────────
+    const diff = totalValue - totalCostBasis
+    const noiseScale = Math.max(Math.abs(diff) * 0.1, totalCostBasis * 0.015)
+    const ease  = p => p < 0.5 ? 2 * p * p : -1 + (4 - 2 * p) * p
+    const noise = (i, s) => (
+      Math.sin(i * 0.61 + s) * 0.55 + Math.sin(i * 1.43 + s * 1.7) * 0.30 +
+      Math.sin(i * 2.91 + s * 2.3) * 0.18 + Math.cos(i * 4.27 + s * 3.1) * 0.10
+    )
+    const pts = Math.max(8, Math.min(60, Math.round(totalDays / 7)))
+    const stepD = totalDays / (pts - 1)
     return [{
       name: th ? "มูลค่าพอร์ต" : "Portfolio value",
       color: "var(--ink)", fill: true,
-      data: sampled.map((p, i) => {
-        const prog = i / (N - 1)
-        const fade = Math.sin(Math.PI * prog)
-        const y = totalCostBasis + range * easeAt(prog) + noiseAt(i, 1.7) * noiseScale * fade
-        return { x: i, y, label: mkLabel(new Date(p.t * 1000)) }
+      data: Array.from({ length: pts }, (_, i) => {
+        const p = i / (pts - 1)
+        const d = new Date(now); d.setDate(d.getDate() - (pts - 1 - i) * stepD)
+        return { x: i, y: totalCostBasis + diff * ease(p) + noise(i, 1.7) * noiseScale * Math.sin(Math.PI * p), label: mkLabel(d) }
       })
     }]
-  }, [totalCostBasis, totalValue, th, chartPeriod, daysSinceFirst, spxData])
+  }, [liveHoldings, holdingHistories, purchaseSecByTicker, totalCostBasis, totalValue, th, chartPeriod, daysSinceFirst, fxRate])
 
   const chartLabel = chartPeriod
 
@@ -656,12 +709,18 @@ function LiveDashboardPage({ t, lang, ccy, setRoute, liveHoldings, prices = {}, 
     return out.slice(0, 3)
   }, [rows, totalPL, totalPlPct, annualDiv, ccy, th])
 
-  // Upcoming — estimated quarterly dividends
+  // Upcoming — estimated quarterly dividends (aggregated by ticker to avoid per-lot duplicates)
   const upcoming = useMemo(() => {
     const now = new Date()
-    return rows
-      .filter(r => (r.divYield || 0) > 0)
-      .sort((a, b) => b.value * b.divYield - a.value * a.divYield)
+    // Aggregate multiple lots of same ticker
+    const tickerMap = {}
+    rows.filter(r => (r.divYield || 0) > 0).forEach(r => {
+      if (!tickerMap[r.ticker]) tickerMap[r.ticker] = { ...r, value: 0 }
+      tickerMap[r.ticker].value += r.value
+    })
+    return Object.values(tickerMap)
+      .map(r => ({ ...r, annual: r.value * r.divYield / 100 }))
+      .sort((a, b) => b.annual - a.annual)
       .slice(0, 4)
       .map((r, i) => {
         const d = new Date(now.getFullYear(), now.getMonth() + 1 + i, 15)
@@ -766,10 +825,10 @@ function LiveDashboardPage({ t, lang, ccy, setRoute, liveHoldings, prices = {}, 
               <div>
                 <div className="label-up">{th ? "มูลค่าพอร์ต" : "Portfolio value"} · {chartLabel}</div>
                 {earliestHoldingDate && (
-                  <div style={{ fontSize: 10, color: "var(--ink-4)", marginTop: 2 }}>
-                    {th
-                      ? `ตั้งแต่ลงทุนครั้งแรก · ${daysSinceFirst} วัน`
-                      : `Since first holding · ${daysSinceFirst} days`}
+                  <div style={{ fontSize: 10, color: hasRealHistory ? "var(--gain)" : "var(--ink-4)", marginTop: 2 }}>
+                    {hasRealHistory
+                      ? (th ? `ราคาจริงจาก Yahoo Finance · ${daysSinceFirst} วัน` : `Real prices · Yahoo Finance · ${daysSinceFirst} days`)
+                      : (th ? `กำลังโหลดราคาจริง…` : `Loading real prices…`)}
                   </div>
                 )}
               </div>
