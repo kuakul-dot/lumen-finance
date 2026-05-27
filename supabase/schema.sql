@@ -104,6 +104,10 @@ create table if not exists price_cache (
   currency     text not null default 'THB',
   fetched_at   timestamptz not null default now()
 );
+alter table price_cache enable row level security;
+drop policy if exists "Price cache is publicly readable" on price_cache;
+create policy "Price cache is publicly readable"
+  on price_cache for select using (true);
 
 -- ── Indexes ──────────────────────────────────────────────────────────────────
 create index if not exists holdings_portfolio_idx on holdings(portfolio_id);
