@@ -139,14 +139,12 @@ function AnalyticsCommon({ t, lang, ccy, rows, totalValue, totalPL, totalPlPct, 
   ] : null
 
   // Live mode: simulated growth chart matching Demo's shape:
-  //  - portfolio: synthetic curve from cost basis → current value
-  //  - S&P 500:  synthetic benchmark on same scale (~13–16% trailing return)
-  //  - capped to earliest holding date so it doesn't show pre-investment history
+  //  - X-axis always spans the selected period (1m/3m/.../All) so button changes are visible
+  //  - For dates before the first investment, both series sit flat at cost basis
+  //  - After the first investment, ease curve toward current value (portfolio) / 10%/yr (S&P)
   const liveSeries = useMemo(() => {
     if (dataState !== "live" || totalCost <= 0 || totalValue <= 0) return null
     const now = new Date()
-
-    // Period in days
     const startOfYear = new Date(now.getFullYear(), 0, 1)
     const periodDays = {
       "1m":  30,
@@ -158,24 +156,23 @@ function AnalyticsCommon({ t, lang, ccy, rows, totalValue, totalPL, totalPlPct, 
       "all": 365 * 5,
     }[chartPeriod] || 365
 
-    // Cap to days since earliest holding (avoid showing pre-investment dates)
     const daysSinceFirst = earliestHoldingDate
       ? Math.max(1, Math.round((now - earliestHoldingDate) / 86400000))
       : periodDays
-    const totalDays = Math.min(periodDays, daysSinceFirst)
+    // Active investment window inside the visible period
+    const investedDays = Math.min(periodDays, daysSinceFirst)
 
-    // # of points scaled to range — more points for longer windows
-    const pts = totalDays <= 35 ? 8
-             : totalDays <= 100 ? 10
-             : totalDays <= 200 ? 12
-             : totalDays <= 400 ? 14
-             : totalDays <= 1100 ? 18 : 22
-    const stepD = totalDays / (pts - 1)
+    // Points scale with the FULL period (so 1y vs 5y vs All look different)
+    const pts = periodDays <= 35 ? 8
+             : periodDays <= 100 ? 10
+             : periodDays <= 200 ? 12
+             : periodDays <= 400 ? 14
+             : periodDays <= 1100 ? 18 : 22
+    const stepD = periodDays / (pts - 1)
 
-    // S&P 500 simulated trailing return scales mildly with window length (~10%/yr)
-    const yearsShown = totalDays / 365
-    const benchStart = totalCost
-    const benchEnd   = totalCost * (1 + 0.10 * Math.min(5, yearsShown))
+    // S&P 500 trailing return scales mildly with INVESTED window (~10%/yr while held)
+    const investedYears = investedDays / 365
+    const benchEnd = totalCost * (1 + 0.10 * Math.min(5, investedYears))
 
     const mkLabel = d => d.toLocaleString(th ? "th-TH" : "en-US", { month: "short" }) + " '" + String(d.getFullYear()).slice(2)
 
@@ -184,10 +181,19 @@ function AnalyticsCommon({ t, lang, ccy, rows, totalValue, totalPL, totalPlPct, 
         name: th ? "พอร์ตของคุณ" : "Your portfolio",
         color: "var(--ink)", fill: true,
         data: Array.from({ length: pts }, (_, i) => {
-          const p = i / (pts - 1)
-          const ease = p < 0.5 ? 2 * p * p : -1 + (4 - 2 * p) * p
-          const noise = (Math.sin(i * 2.3) * 0.012 + Math.cos(i * 4.1) * 0.008) * totalCost
-          const d = new Date(now); d.setDate(d.getDate() - (pts - 1 - i) * stepD)
+          const daysFromStart = i * stepD                       // 0 → periodDays
+          const daysFromNow   = periodDays - daysFromStart
+          const d = new Date(now); d.setDate(d.getDate() - daysFromNow)
+          // How far into the invested portion are we? (0 before first invest, 1 = today)
+          const investProgress = daysFromNow >= investedDays
+            ? 0
+            : (investedDays - daysFromNow) / investedDays
+          const ease = investProgress < 0.5
+            ? 2 * investProgress * investProgress
+            : -1 + (4 - 2 * investProgress) * investProgress
+          const noise = investProgress > 0
+            ? (Math.sin(i * 2.3) * 0.012 + Math.cos(i * 4.1) * 0.008) * totalCost
+            : 0
           return { x: i, y: totalCost + (totalValue - totalCost) * ease + noise, label: mkLabel(d) }
         })
       },
@@ -195,11 +201,19 @@ function AnalyticsCommon({ t, lang, ccy, rows, totalValue, totalPL, totalPlPct, 
         name: "S&P 500",
         color: "var(--accent)",
         data: Array.from({ length: pts }, (_, i) => {
-          const p = i / (pts - 1)
-          const ease = p < 0.5 ? 2 * p * p : -1 + (4 - 2 * p) * p
-          const noise = (Math.sin(i * 1.7 + 1) * 0.008 + Math.cos(i * 3.3 + 0.4) * 0.006) * benchStart
-          const d = new Date(now); d.setDate(d.getDate() - (pts - 1 - i) * stepD)
-          return { x: i, y: benchStart + (benchEnd - benchStart) * ease + noise, label: mkLabel(d) }
+          const daysFromStart = i * stepD
+          const daysFromNow   = periodDays - daysFromStart
+          const d = new Date(now); d.setDate(d.getDate() - daysFromNow)
+          const investProgress = daysFromNow >= investedDays
+            ? 0
+            : (investedDays - daysFromNow) / investedDays
+          const ease = investProgress < 0.5
+            ? 2 * investProgress * investProgress
+            : -1 + (4 - 2 * investProgress) * investProgress
+          const noise = investProgress > 0
+            ? (Math.sin(i * 1.7 + 1) * 0.008 + Math.cos(i * 3.3 + 0.4) * 0.006) * totalCost
+            : 0
+          return { x: i, y: totalCost + (benchEnd - totalCost) * ease + noise, label: mkLabel(d) }
         })
       },
     ]
@@ -282,32 +296,52 @@ function AnalyticsCommon({ t, lang, ccy, rows, totalValue, totalPL, totalPlPct, 
         </div>
       )}
 
-      <div className="grid grid-2">
-        <div className="card">
-          <h3 className="section-title" style={{ marginBottom: 16 }}>{th ? "ผลงานดีที่สุด" : "Top performers"}</h3>
-          {livePerformers.length === 0 ? (
-            <div className="muted" style={{ fontSize: 13, padding: "16px 0" }}>{th ? "รอราคาตลาด…" : "Waiting for live prices…"}</div>
-          ) : (
-            <div style={{ display: "grid", gap: 10 }}>
-              {[...livePerformers].sort((a, b) => b.plPct - a.plPct).slice(0, 4).map(r => (
-                <PerfRow key={r.ticker} r={r} ccy={ccy} />
-              ))}
+      {(() => {
+        // Demo mode: keep old behavior (no positive/negative split)
+        // Live mode: filter — Top = gainers only (plPct > 0), Under = losers only (plPct < 0)
+        const gainers = dataState === "live"
+          ? livePerformers.filter(r => r.plPct > 0)
+          : livePerformers
+        const losers  = dataState === "live"
+          ? livePerformers.filter(r => r.plPct < 0)
+          : livePerformers
+        return (
+          <div className="grid grid-2">
+            <div className="card">
+              <h3 className="section-title" style={{ marginBottom: 16 }}>{th ? "ผลงานดีที่สุด" : "Top performers"}</h3>
+              {livePerformers.length === 0 ? (
+                <div className="muted" style={{ fontSize: 13, padding: "16px 0" }}>{th ? "รอราคาตลาด…" : "Waiting for live prices…"}</div>
+              ) : gainers.length === 0 ? (
+                <div className="muted" style={{ fontSize: 13, padding: "16px 0" }}>
+                  {th ? "ยังไม่มีหลักทรัพย์ที่กำไร" : "No gaining positions yet"}
+                </div>
+              ) : (
+                <div style={{ display: "grid", gap: 10 }}>
+                  {[...gainers].sort((a, b) => b.plPct - a.plPct).slice(0, 4).map(r => (
+                    <PerfRow key={r.ticker} r={r} ccy={ccy} />
+                  ))}
+                </div>
+              )}
             </div>
-          )}
-        </div>
-        <div className="card">
-          <h3 className="section-title" style={{ marginBottom: 16 }}>{th ? "ผลงานที่แย่ที่สุด" : "Underperformers"}</h3>
-          {livePerformers.length === 0 ? (
-            <div className="muted" style={{ fontSize: 13, padding: "16px 0" }}>{th ? "รอราคาตลาด…" : "Waiting for live prices…"}</div>
-          ) : (
-            <div style={{ display: "grid", gap: 10 }}>
-              {[...livePerformers].sort((a, b) => a.plPct - b.plPct).slice(0, 4).map(r => (
-                <PerfRow key={r.ticker} r={r} ccy={ccy} />
-              ))}
+            <div className="card">
+              <h3 className="section-title" style={{ marginBottom: 16 }}>{th ? "ผลงานที่แย่ที่สุด" : "Underperformers"}</h3>
+              {livePerformers.length === 0 ? (
+                <div className="muted" style={{ fontSize: 13, padding: "16px 0" }}>{th ? "รอราคาตลาด…" : "Waiting for live prices…"}</div>
+              ) : losers.length === 0 ? (
+                <div className="muted" style={{ fontSize: 13, padding: "16px 0" }}>
+                  {th ? "ยังไม่มีหลักทรัพย์ที่ขาดทุน" : "No losing positions"}
+                </div>
+              ) : (
+                <div style={{ display: "grid", gap: 10 }}>
+                  {[...losers].sort((a, b) => a.plPct - b.plPct).slice(0, 4).map(r => (
+                    <PerfRow key={r.ticker} r={r} ccy={ccy} />
+                  ))}
+                </div>
+              )}
             </div>
-          )}
-        </div>
-      </div>
+          </div>
+        )
+      })()}
     </div>
   )
 }
@@ -479,7 +513,8 @@ function AnalyticsGrowth({ t, lang, ccy, totalValue, totalCost, totalPL, totalPl
     },
   ]
 
-  // Live mode: cumulative return curve (% from cost basis), simulated, capped to first-investment date
+  // Live mode: cumulative return curve (% from cost basis). X-axis spans the chosen
+  // period; pre-investment area is flat at 0%, then eases toward totalPlPct.
   const liveSeries = useMemo(() => {
     if (dataState !== "live" || totalCost <= 0 || totalValue <= 0) return null
     const now = new Date()
@@ -487,18 +522,26 @@ function AnalyticsGrowth({ t, lang, ccy, totalValue, totalCost, totalPL, totalPl
     const daysSinceFirst = earliestHoldingDate
       ? Math.max(1, Math.round((now - earliestHoldingDate) / 86400000))
       : periodDays
-    const totalDays = Math.min(periodDays, daysSinceFirst)
-    const pts = totalDays <= 200 ? 10 : totalDays <= 500 ? 14 : 18
-    const stepD = totalDays / (pts - 1)
+    const investedDays = Math.min(periodDays, daysSinceFirst)
+    const pts = periodDays <= 400 ? 12 : periodDays <= 1100 ? 16 : 20
+    const stepD = periodDays / (pts - 1)
     const finalPct = totalPlPct
     return [{
       name: th ? "พอร์ตของคุณ" : "Your portfolio",
       color: "var(--ink)", fill: true,
       data: Array.from({ length: pts }, (_, i) => {
-        const p = i / (pts - 1)
-        const ease = p < 0.5 ? 2 * p * p : -1 + (4 - 2 * p) * p
-        const noise = (Math.sin(i * 2.3) * 0.4 + Math.cos(i * 4.1) * 0.25)
-        const d = new Date(now); d.setDate(d.getDate() - (pts - 1 - i) * stepD)
+        const daysFromStart = i * stepD
+        const daysFromNow   = periodDays - daysFromStart
+        const investProgress = daysFromNow >= investedDays
+          ? 0
+          : (investedDays - daysFromNow) / investedDays
+        const ease = investProgress < 0.5
+          ? 2 * investProgress * investProgress
+          : -1 + (4 - 2 * investProgress) * investProgress
+        const noise = investProgress > 0
+          ? (Math.sin(i * 2.3) * 0.4 + Math.cos(i * 4.1) * 0.25)
+          : 0
+        const d = new Date(now); d.setDate(d.getDate() - daysFromNow)
         const lbl = d.toLocaleString(th ? "th-TH" : "en-US", { month: "short" }) + " '" + String(d.getFullYear()).slice(2)
         return { x: i, y: finalPct * ease + noise, label: lbl }
       })
