@@ -198,7 +198,16 @@ function AnalyticsCommon({ t, lang, ccy, rows, totalValue, totalPL, totalPlPct, 
       Math.sin(i * 2.91 + seed * 2.3) * 0.18 +
       Math.cos(i * 4.27 + seed * 3.1) * 0.10
     )
-    const mkLabel = d => d.toLocaleString(th ? "th-TH" : "en-US", { month: "short" }) + " '" + String(d.getFullYear()).slice(2)
+    // Adaptive date label — granularity scales with the visible window
+    //  <  60d: "May 5"
+    //  < 730d: "May '26"
+    //  ≥ 730d: "'26"  (year only when window spans multi-year)
+    const locale = th ? "th-TH" : "en-US"
+    const mkLabel = (d) => {
+      if (totalDays < 60)  return d.toLocaleString(locale, { month: "short", day: "numeric" })
+      if (totalDays < 730) return d.toLocaleString(locale, { month: "short" }) + " '" + String(d.getFullYear()).slice(2)
+      return "'" + String(d.getFullYear()).slice(2)
+    }
 
     // Slice real S&P 500 series to the chosen window
     const spxAll = spxData?.series || []
@@ -324,6 +333,13 @@ function AnalyticsCommon({ t, lang, ccy, rows, totalValue, totalPL, totalPlPct, 
                   <span style={{ fontSize: 11, color: "var(--ink-4)", marginLeft: 4 }}>
                     {th ? "(ราคาจริงจาก Yahoo Finance)" : "(real prices · Yahoo Finance)"}
                   </span>
+                )}
+                {dataState === "live" && earliestHoldingDate && (
+                  <div style={{ fontSize: 11, color: "var(--ink-4)", marginTop: 2 }}>
+                    {th
+                      ? `ตั้งแต่ลงทุนครั้งแรก · ${daysSinceFirst} วัน (${earliestHoldingDate.toLocaleDateString('th-TH', { day: 'numeric', month: 'short', year: '2-digit' })})`
+                      : `Since first holding · ${daysSinceFirst} days (${earliestHoldingDate.toLocaleDateString('en-US', { day: 'numeric', month: 'short', year: '2-digit' })})`}
+                  </div>
                 )}
               </div>
             </div>
@@ -597,6 +613,12 @@ function AnalyticsGrowth({ t, lang, ccy, totalValue, totalCost, totalPL, totalPl
       Math.sin(i * 2.91 + seed * 2.3) * 0.18 +
       Math.cos(i * 4.27 + seed * 3.1) * 0.10
     )
+    const locale = th ? "th-TH" : "en-US"
+    const mkLabel = (d) => {
+      if (totalDays < 60)  return d.toLocaleString(locale, { month: "short", day: "numeric" })
+      if (totalDays < 730) return d.toLocaleString(locale, { month: "short" }) + " '" + String(d.getFullYear()).slice(2)
+      return "'" + String(d.getFullYear()).slice(2)
+    }
     return [{
       name: th ? "พอร์ตของคุณ" : "Your portfolio",
       color: "var(--ink)", fill: true,
@@ -605,8 +627,7 @@ function AnalyticsGrowth({ t, lang, ccy, totalValue, totalCost, totalPL, totalPl
         const fade = Math.sin(Math.PI * p)
         const y = finalPct * easeAt(p) + noiseAt(i, 1.7) * noiseScale * fade
         const d = new Date(now); d.setDate(d.getDate() - (pts - 1 - i) * stepD)
-        const lbl = d.toLocaleString(th ? "th-TH" : "en-US", { month: "short" }) + " '" + String(d.getFullYear()).slice(2)
-        return { x: i, y, label: lbl }
+        return { x: i, y, label: mkLabel(d) }
       })
     }]
   }, [dataState, totalCost, totalValue, totalPlPct, th, chartPeriod, daysSinceFirst])
