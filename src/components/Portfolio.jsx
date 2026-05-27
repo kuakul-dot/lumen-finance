@@ -462,6 +462,7 @@ function AddHoldingModal({ lang, portfolioId, onClose, onSaved }) {
     ticker: '', name: '', asset_class: 'Equity', region: 'TH',
     sector: '',
     shares: '', cost_price: '', currency: 'THB', div_yield: '', div_frequency: '2',
+    fee: '', tax: '',
     purchased_at: today,
   })
   const [saving, setSaving] = useState(false)
@@ -509,6 +510,8 @@ function AddHoldingModal({ lang, portfolioId, onClose, onSaved }) {
         shares,
         price: cost_price,
         amount: shares * cost_price,
+        fee:    form.fee  ? parseFloat(form.fee)  : 0,
+        tax:    form.tax  ? parseFloat(form.tax)  : 0,
         currency: form.currency,
         transacted_at: txDate,
         note: form.name,
@@ -626,6 +629,20 @@ function AddHoldingModal({ lang, portfolioId, onClose, onSaved }) {
                 <option value="4">{th ? "4× — รายไตรมาส" : "4× — Quarterly"}</option>
                 <option value="12">{th ? "12× — รายเดือน" : "12× — Monthly"}</option>
               </select>
+            </Field>
+          </div>
+
+          {/* Fee + Tax */}
+          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
+            <Field label={th ? "ค่าธรรมเนียม (ไม่บังคับ)" : "Fee (optional)"}>
+              <input type="number" step="any" min="0" value={form.fee}
+                     onChange={e => set('fee', e.target.value)}
+                     placeholder="0.00" style={inputStyle} />
+            </Field>
+            <Field label={th ? "ภาษี / อากร (ไม่บังคับ)" : "Tax / Duty (optional)"}>
+              <input type="number" step="any" min="0" value={form.tax}
+                     onChange={e => set('tax', e.target.value)}
+                     placeholder="0.00" style={inputStyle} />
             </Field>
           </div>
 
@@ -1057,6 +1074,13 @@ function TransactionsTab({ transactions, loading, lang, ccy, fxRate = 36, onRelo
                   </td>
                   <td className="num" style={{ fontWeight: 500 }}>
                     {amountDisp > 0 ? LUMEN_FMT.money(amountDisp, ccy, { compact: true }) : "—"}
+                    {((tx.fee || 0) + (tx.tax || 0)) > 0 && (
+                      <div className="muted" style={{ fontSize: 10, marginTop: 1 }}>
+                        {tx.fee > 0 && <span>fee {priceCcy === 'USD' ? '$' : '฿'}{Number(tx.fee).toLocaleString(undefined, { maximumFractionDigits: 2 })}</span>}
+                        {tx.fee > 0 && tx.tax > 0 && <span> · </span>}
+                        {tx.tax > 0 && <span>tax {priceCcy === 'USD' ? '$' : '฿'}{Number(tx.tax).toLocaleString(undefined, { maximumFractionDigits: 2 })}</span>}
+                      </div>
+                    )}
                   </td>
                   <td className="num hide-mob">
                     <span className="muted" style={{ fontSize: 11 }}>{priceCcy}</span>
@@ -1112,6 +1136,8 @@ function EditTransactionModal({ tx, lang, onClose, onSaved }) {
     shares:       tx.shares != null ? String(tx.shares) : '',
     price:        tx.price  != null ? String(tx.price)  : '',
     amount:       tx.amount != null ? String(tx.amount) : '',
+    fee:          tx.fee    != null && tx.fee  !== 0 ? String(tx.fee)  : '',
+    tax:          tx.tax    != null && tx.tax  !== 0 ? String(tx.tax)  : '',
     currency:     tx.currency || 'THB',
     note:         tx.note || '',
     transacted_at: toDateInput(tx.transacted_at),
@@ -1133,6 +1159,8 @@ function EditTransactionModal({ tx, lang, onClose, onSaved }) {
       shares,
       price,
       amount,
+      fee:           form.fee  !== '' ? parseFloat(form.fee)  : 0,
+      tax:           form.tax  !== '' ? parseFloat(form.tax)  : 0,
       currency:      form.currency,
       note:          form.note || null,
       transacted_at: form.transacted_at,
@@ -1207,6 +1235,20 @@ function EditTransactionModal({ tx, lang, onClose, onSaved }) {
                 <option value="THB">THB</option>
                 <option value="USD">USD</option>
               </select>
+            </Field>
+          </div>
+
+          {/* Fee + Tax */}
+          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
+            <Field label={th ? "ค่าธรรมเนียม (ไม่บังคับ)" : "Fee (optional)"}>
+              <input type="number" step="any" min="0" value={form.fee}
+                     onChange={e => set('fee', e.target.value)}
+                     placeholder="0.00" style={inputStyle} />
+            </Field>
+            <Field label={th ? "ภาษี / อากร (ไม่บังคับ)" : "Tax / Duty (optional)"}>
+              <input type="number" step="any" min="0" value={form.tax}
+                     onChange={e => set('tax', e.target.value)}
+                     placeholder="0.00" style={inputStyle} />
             </Field>
           </div>
 

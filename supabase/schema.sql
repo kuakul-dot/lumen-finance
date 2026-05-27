@@ -51,6 +51,8 @@ create table if not exists transactions (
   price        numeric,
   amount       numeric,
   currency     text not null default 'THB',
+  fee          numeric default 0,
+  tax          numeric default 0,
   transacted_at date not null default current_date,
   note         text,
   created_at   timestamptz not null default now()
