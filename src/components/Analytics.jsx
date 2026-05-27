@@ -104,7 +104,7 @@ export function AnalyticsPage({ t, lang, ccy, dataState, liveHoldings = [], pric
 
       {tab === "common"          && <AnalyticsCommon t={t} lang={lang} ccy={ccy} rows={rows} totalValue={totalValue} totalPL={totalPL} totalPlPct={totalPlPct} totalCost={totalCost} hasLivePrices={hasLivePrices} demoData={demoData} dataState={dataState} earliestHoldingDate={earliestHoldingDate} />}
       {tab === "diversification" && <AnalyticsDiv t={t} lang={lang} ccy={ccy} rows={rows} totalValue={totalValue} demoData={demoData} dataState={dataState} />}
-      {tab === "dividends"       && <AnalyticsDiv2 t={t} lang={lang} ccy={ccy} rows={rows} totalValue={totalValue} dataState={dataState} liveHoldings={liveHoldings} fxRate={fxRate} />}
+      {tab === "dividends"       && <AnalyticsDiv2 t={t} lang={lang} ccy={ccy} rows={rows} totalValue={totalValue} dataState={dataState} liveHoldings={liveHoldings} fxRate={fxRate} transactions={transactions} />}
       {tab === "growth"          && <AnalyticsGrowth t={t} lang={lang} ccy={ccy} totalValue={totalValue} totalCost={totalCost} totalPL={totalPL} totalPlPct={totalPlPct} dataState={dataState} earliestHoldingDate={earliestHoldingDate} />}
       {tab === "metrics"         && <AnalyticsMetrics t={t} lang={lang} ccy={ccy} rows={rows} totalValue={totalValue} totalPL={totalPL} totalPlPct={totalPlPct} dataState={dataState} />}
     </div>
@@ -507,7 +507,7 @@ function DivCard({ title, data, className }) {
 }
 
 /* ─── Dividends tab ──────────────────────────────────────────────────────────── */
-function AnalyticsDiv2({ t, lang, ccy, rows, totalValue, dataState, liveHoldings = [], fxRate = 36 }) {
+function AnalyticsDiv2({ t, lang, ccy, rows, totalValue, dataState, liveHoldings = [], fxRate = 36, transactions = [] }) {
   const FMT = LUMEN_FMT
   const th = lang === "th"
 
@@ -530,6 +530,21 @@ function AnalyticsDiv2({ t, lang, ccy, rows, totalValue, dataState, liveHoldings
     return () => { cancelled = true }
   }, [dataState, liveHoldings])
 
+  // ── Earliest buy date per ticker from transactions (most reliable source) ───
+  // holdings.created_at = when the row was inserted into the app, NOT the real
+  // purchase date. transactions.transacted_at = the actual date the user entered.
+  const tickerPurchaseSec = useMemo(() => {
+    const map = {}
+    transactions
+      .filter(tx => (tx.type || 'Buy') === 'Buy' && tx.transacted_at)
+      .forEach(tx => {
+        const sec = new Date(tx.transacted_at).getTime() / 1000
+        const ticker = tx.ticker || tx.symbol || ''
+        if (ticker && (!(ticker in map) || sec < map[ticker])) map[ticker] = sec
+      })
+    return map
+  }, [transactions])
+
   // ── Calculate actual dividends received per holding since purchase date ─────
   const receivedData = useMemo(() => {
     if (dataState !== "live" || !divHistory) return null
@@ -540,9 +555,13 @@ function AnalyticsDiv2({ t, lang, ccy, rows, totalValue, dataState, liveHoldings
     liveHoldings.forEach(h => {
       const sym = toYahooSymbol(h.ticker, h.region || 'TH', h.asset_class || 'Equity')
       const events = divHistory[sym] || []
-      const purchaseSec = (h.purchased_at || h.created_at)
-        ? new Date(h.purchased_at || h.created_at).getTime() / 1000
-        : 0
+
+      // Priority: (1) earliest Buy transaction, (2) purchased_at field, (3) created_at, (4) 0 = all
+      const purchaseSec = tickerPurchaseSec[h.ticker]
+        ?? (h.purchased_at ? new Date(h.purchased_at).getTime() / 1000
+          : h.created_at   ? new Date(h.created_at).getTime()   / 1000
+          : 0)
+
       const isTHB = (h.region || 'TH') === 'TH'
 
       events
@@ -557,7 +576,7 @@ function AnalyticsDiv2({ t, lang, ccy, rows, totalValue, dataState, liveHoldings
     })
 
     return { totalReceived, byYear, byTicker }
-  }, [dataState, divHistory, liveHoldings, fxRate])
+  }, [dataState, divHistory, liveHoldings, fxRate, tickerPurchaseSec])
 
   // Historical received bar chart (years sorted asc)
   const histBarData = useMemo(() => {

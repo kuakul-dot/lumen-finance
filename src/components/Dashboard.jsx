@@ -627,12 +627,15 @@ function LiveDashboardPage({ t, lang, ccy, setRoute, liveHoldings, prices = {}, 
       })
     }
     if (rows.length > 0) {
-      const top = [...rows].sort((a, b) => b.weight - a.weight)[0]
-      if (top?.weight > 35) {
+      // Group lots by ticker before finding the top holding (avoids showing per-lot weight)
+      const tickerWeights = {}
+      rows.forEach(r => { tickerWeights[r.ticker] = (tickerWeights[r.ticker] || 0) + r.weight })
+      const topEntry = Object.entries(tickerWeights).sort((a, b) => b[1] - a[1])[0]
+      if (topEntry && topEntry[1] > 35) {
         out.push({
-          title: th ? `${top.ticker} ครอง ${top.weight.toFixed(1)}% ของพอร์ต` : `${top.ticker} is ${top.weight.toFixed(1)}% of portfolio`,
+          title: th ? `${topEntry[0]} ครอง ${topEntry[1].toFixed(1)}% ของพอร์ต` : `${topEntry[0]} is ${topEntry[1].toFixed(1)}% of portfolio`,
           body:  th ? "ความเสี่ยงกระจุกตัวสูง — ควรพิจารณา rebalance" : "High concentration risk — consider rebalancing",
-          tone: top.weight > 50 ? "warn" : "neutral"
+          tone: topEntry[1] > 50 ? "warn" : "neutral"
         })
       }
     }
