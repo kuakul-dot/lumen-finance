@@ -252,6 +252,7 @@ export function Icon({ name, size = 18 }) {
     case "user":     return (<svg {...props}><circle cx="12" cy="8" r="4"/><path d="M4 20c0-4 3.6-7 8-7s8 3 8 7"/></svg>)
     case "eye":      return (<svg {...props}><path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7S2 12 2 12Z"/><circle cx="12" cy="12" r="3"/></svg>)
     case "eye-off":  return (<svg {...props}><path d="M3 3l18 18"/><path d="M10.6 6.1A10.9 10.9 0 0 1 12 6c6.5 0 10 7 10 7a14 14 0 0 1-3.4 4.1"/><path d="M6.1 7.1A14 14 0 0 0 2 12s3.5 7 10 7a10.9 10.9 0 0 0 4.5-1"/><path d="M9 9a4 4 0 0 0 6 6"/></svg>)
+    case "refresh":  return (<svg {...props}><path d="M3 12a9 9 0 0 1 9-9 9.75 9.75 0 0 1 6.74 2.74L21 8"/><path d="M21 3v5h-5"/><path d="M21 12a9 9 0 0 1-9 9 9.75 9.75 0 0 1-6.74-2.74L3 16"/><path d="M8 16H3v5"/></svg>)
     default: return null
   }
 }

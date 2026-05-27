@@ -2,7 +2,7 @@ import { useState, useMemo, useEffect } from 'react'
 import { PageHead, Delta, Icon } from './Nav'
 import { LineChart, Donut, BarChart } from './Charts'
 import { LUMEN_FMT, LUMEN_DERIVE, LUMEN_HISTORY, LUMEN_BENCH } from '../data'
-import { deriveHoldings, getTransactions } from '../lib/db'
+import { deriveHoldings, getTransactions, addTransaction } from '../lib/db'
 import { fetchHistory, toYahooSymbol } from '../lib/prices'
 
 export function AnalyticsPage({ t, lang, ccy, dataState, liveHoldings = [], prices = {}, fxRate = 36, portfolio }) {
@@ -18,6 +18,11 @@ export function AnalyticsPage({ t, lang, ccy, dataState, liveHoldings = [], pric
       .catch(() => {})
     return () => { cancelled = true }
   }, [dataState, portfolio?.id])
+
+  // Called by AnalyticsDiv2 after new Dividend transactions are saved
+  const handleTransactionAdded = useCallback((newTxs) => {
+    setTransactions(prev => [...newTxs, ...prev])
+  }, [])
 
   const liveRows = useMemo(
     () => dataState === "live" ? deriveHoldings(liveHoldings, ccy, prices, fxRate) : [],
@@ -104,7 +109,7 @@ export function AnalyticsPage({ t, lang, ccy, dataState, liveHoldings = [], pric
 
       {tab === "common"          && <AnalyticsCommon t={t} lang={lang} ccy={ccy} rows={rows} totalValue={totalValue} totalPL={totalPL} totalPlPct={totalPlPct} totalCost={totalCost} hasLivePrices={hasLivePrices} demoData={demoData} dataState={dataState} earliestHoldingDate={earliestHoldingDate} />}
       {tab === "diversification" && <AnalyticsDiv t={t} lang={lang} ccy={ccy} rows={rows} totalValue={totalValue} demoData={demoData} dataState={dataState} />}
-      {tab === "dividends"       && <AnalyticsDiv2 t={t} lang={lang} ccy={ccy} rows={rows} totalValue={totalValue} dataState={dataState} liveHoldings={liveHoldings} fxRate={fxRate} transactions={transactions} />}
+      {tab === "dividends"       && <AnalyticsDiv2 t={t} lang={lang} ccy={ccy} rows={rows} totalValue={totalValue} dataState={dataState} liveHoldings={liveHoldings} fxRate={fxRate} transactions={transactions} portfolio={portfolio} onTransactionAdded={handleTransactionAdded} />}
       {tab === "growth"          && <AnalyticsGrowth t={t} lang={lang} ccy={ccy} totalValue={totalValue} totalCost={totalCost} totalPL={totalPL} totalPlPct={totalPlPct} dataState={dataState} earliestHoldingDate={earliestHoldingDate} />}
       {tab === "metrics"         && <AnalyticsMetrics t={t} lang={lang} ccy={ccy} rows={rows} totalValue={totalValue} totalPL={totalPL} totalPlPct={totalPlPct} dataState={dataState} />}
     </div>
@@ -507,7 +512,7 @@ function DivCard({ title, data, className }) {
 }
 
 /* ─── Dividends tab ──────────────────────────────────────────────────────────── */
-function AnalyticsDiv2({ t, lang, ccy, rows, totalValue, dataState, liveHoldings = [], fxRate = 36, transactions = [] }) {
+function AnalyticsDiv2({ t, lang, ccy, rows, totalValue, dataState, liveHoldings = [], fxRate = 36, transactions = [], portfolio = null, onTransactionAdded }) {
   const FMT = LUMEN_FMT
   const th = lang === "th"
 
@@ -563,21 +568,18 @@ function AnalyticsDiv2({ t, lang, ccy, rows, totalValue, dataState, liveHoldings
     return { totalReceived, byYear, byTicker, source: 'transactions' }
   }, [transactions, fxRate])
 
-  // ── Fallback: estimate from Yahoo Finance events × shares held ────────────
-  // Used only when the user has no recorded Dividend transactions.
-  // Earliest buy date per ticker from Buy transactions (for cutoff)
+  // ── Earliest Buy date per ticker (purchase date cutoff, also used by Sync) ──
   const tickerPurchaseSec = useMemo(() => {
-    if (receivedFromTx) return {}   // not needed when tx data available
     const map = {}
     transactions
-      .filter(tx => (tx.type || 'Buy') === 'Buy' && tx.transacted_at)
+      .filter(tx => tx.type === 'Buy' && tx.transacted_at)
       .forEach(tx => {
         const sec = new Date(tx.transacted_at).getTime() / 1000
-        const ticker = tx.ticker || tx.symbol || ''
+        const ticker = tx.ticker || ''
         if (ticker && (!(ticker in map) || sec < map[ticker])) map[ticker] = sec
       })
     return map
-  }, [transactions, receivedFromTx])
+  }, [transactions])
 
   const receivedFromApi = useMemo(() => {
     if (receivedFromTx || dataState !== "live" || !divHistory) return null
@@ -609,6 +611,93 @@ function AnalyticsDiv2({ t, lang, ccy, rows, totalValue, dataState, liveHoldings
 
   // receivedFromTx takes priority; fall back to API estimate
   const receivedData = receivedFromTx ?? receivedFromApi
+
+  // ── Sync: check Yahoo Finance for unrecorded dividends ────────────────────
+  const [syncModal, setSyncModal] = useState(null)  // null | 'loading' | suggestion[]
+  const [syncSaving, setSyncSaving] = useState(false)
+
+  async function handleSync() {
+    setSyncModal('loading')
+    try {
+      let history = divHistory
+      if (!history) {
+        const syms = liveHoldings
+          .map(h => toYahooSymbol(h.ticker, h.region || 'TH', h.asset_class || 'Equity'))
+          .filter((v, i, a) => a.indexOf(v) === i).join(',')
+        history = await fetch(`/api/dividends?symbols=${encodeURIComponent(syms)}`).then(r => r.json())
+        setDivHistory(history)
+      }
+      const nowSec = Date.now() / 1000
+      const divTxs = transactions.filter(tx => tx.type === 'Dividend')
+      // Is a Yahoo event already recorded for this ticker (within ±60 days)?
+      const alreadyRecorded = (ticker, eventSec) =>
+        divTxs
+          .filter(tx => tx.ticker === ticker && tx.transacted_at)
+          .some(tx => Math.abs(new Date(tx.transacted_at).getTime() / 1000 - eventSec) < 60 * 86400)
+      // Combine multiple lots of the same ticker
+      const tickerTotals = {}
+      liveHoldings.forEach(h => {
+        if (!tickerTotals[h.ticker]) tickerTotals[h.ticker] = { ...h, totalShares: h.shares }
+        else tickerTotals[h.ticker].totalShares += h.shares
+      })
+      const suggestions = []
+      Object.values(tickerTotals).forEach(h => {
+        const sym = toYahooSymbol(h.ticker, h.region || 'TH', h.asset_class || 'Equity')
+        const purchaseSec = tickerPurchaseSec[h.ticker]
+          ?? (h.purchased_at ? new Date(h.purchased_at).getTime() / 1000
+            : h.created_at   ? new Date(h.created_at).getTime()   / 1000
+            : 0);
+        (history[sym] || [])
+          .filter(e => e.date >= purchaseSec && e.date <= nowSec && !alreadyRecorded(h.ticker, e.date))
+          .forEach(e => {
+            const d = new Date(e.date * 1000)
+            const isTHB = (h.region || 'TH') === 'TH'
+            const gross   = +(e.amount * h.totalShares).toFixed(2)
+            const taxRate = isTHB ? 0.10 : 0
+            const net     = +(gross * (1 - taxRate)).toFixed(2)
+            suggestions.push({
+              ticker: h.ticker,
+              date:      d.toISOString().slice(0, 10),
+              dateLabel: d.toLocaleDateString(th ? 'th-TH' : 'en-US', { day: 'numeric', month: 'short', year: '2-digit' }),
+              pricePerShare: e.amount,
+              shares: h.totalShares,
+              gross, taxRate, net,
+              editedNet: net,
+              currency: isTHB ? 'THB' : 'USD',
+              checked: true,
+            })
+          })
+      })
+      suggestions.sort((a, b) => b.date.localeCompare(a.date))
+      setSyncModal(suggestions)
+    } catch (err) {
+      console.error('[Lumen] sync dividends:', err)
+      setSyncModal([])
+    }
+  }
+
+  async function handleConfirmSync(items) {
+    if (!portfolio?.id) return
+    setSyncSaving(true)
+    const toSave = items.filter(s => s.checked)
+    const newTxs = []
+    for (const s of toSave) {
+      const { data } = await addTransaction(portfolio.id, {
+        type: 'Dividend',
+        ticker: s.ticker,
+        shares: s.shares,
+        price:  s.pricePerShare,
+        amount: s.editedNet,
+        currency: s.currency,
+        transacted_at: s.date,
+        note: `Synced · ฿${s.pricePerShare}/share gross · WHT ${(s.taxRate * 100).toFixed(0)}%`,
+      })
+      if (data) newTxs.push(data)
+    }
+    if (newTxs.length > 0) onTransactionAdded?.(newTxs)
+    setSyncSaving(false)
+    setSyncModal(null)
+  }
 
   // Historical received bar chart (years sorted asc)
   const histBarData = useMemo(() => {
@@ -668,6 +757,18 @@ function AnalyticsDiv2({ t, lang, ccy, rows, totalValue, dataState, liveHoldings
       <BigKpi className="col-span-3" label={th ? "หลักทรัพย์จ่ายปันผล" : "Payers"}
         value={payers.length + "/" + rows.length}
         sub={th ? "หลักทรัพย์จ่ายปันผล" : "income-producing"} />
+
+      {/* ── Sync button (live mode, portfolio available) ── */}
+      {dataState === "live" && portfolio && (
+        <div className="col-span-12" style={{ display: "flex", justifyContent: "flex-end" }}>
+          <button className="btn btn-outline btn-sm" onClick={handleSync} disabled={syncModal === 'loading'}>
+            <Icon name="refresh" size={13} />
+            {syncModal === 'loading'
+              ? (th ? "กำลังตรวจสอบ…" : "Checking…")
+              : (th ? "ตรวจสอบปันผลใหม่" : "Sync dividends")}
+          </button>
+        </div>
+      )}
 
       {/* ── Historical received by year (only when real data exists) ── */}
       {hasReceivedData && (
@@ -739,6 +840,103 @@ function AnalyticsDiv2({ t, lang, ccy, rows, totalValue, dataState, liveHoldings
             })}
           </div>
         )}
+      </div>
+
+      {/* ── Sync modal ── */}
+      {syncModal && (
+        <div
+          style={{ position: "fixed", inset: 0, zIndex: 200, background: "rgba(0,0,0,0.45)", display: "flex", alignItems: "center", justifyContent: "center", padding: 16 }}
+          onClick={e => { if (e.target === e.currentTarget && !syncSaving) setSyncModal(null) }}>
+          <div style={{ background: "var(--bg)", borderRadius: 18, padding: 28, width: "100%", maxWidth: 540, maxHeight: "85vh", display: "flex", flexDirection: "column", gap: 20, boxShadow: "0 20px 60px rgba(0,0,0,0.2)" }}>
+            {syncModal === 'loading' ? (
+              <div style={{ padding: "48px 0", textAlign: "center", opacity: 0.5, fontSize: 14 }}>
+                {th ? "กำลังดึงข้อมูลจาก Yahoo Finance…" : "Fetching from Yahoo Finance…"}
+              </div>
+            ) : syncModal.length === 0 ? (
+              <>
+                <h3 style={{ margin: 0, fontSize: 16, fontWeight: 600 }}>
+                  {th ? "ไม่พบปันผลใหม่" : "No new dividends found"}
+                </h3>
+                <p className="muted" style={{ margin: 0, fontSize: 13 }}>
+                  {th ? "ทุกรายการปันผลบันทึกครบแล้ว" : "All dividend events are already recorded."}
+                </p>
+                <div style={{ display: "flex", justifyContent: "flex-end" }}>
+                  <button className="btn btn-outline" onClick={() => setSyncModal(null)}>
+                    {th ? "ปิด" : "Close"}
+                  </button>
+                </div>
+              </>
+            ) : (
+              <>
+                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start" }}>
+                  <div>
+                    <h3 style={{ margin: 0, fontSize: 16, fontWeight: 600 }}>
+                      {th ? `พบปันผลใหม่ ${syncModal.length} รายการ` : `${syncModal.length} unrecorded dividend${syncModal.length > 1 ? "s" : ""} found`}
+                    </h3>
+                    <p className="muted" style={{ margin: "4px 0 0", fontSize: 12 }}>
+                      {th ? "ตรวจสอบยอดสุทธิ (หลังหักภาษี 10%) ก่อนบันทึก — แก้ไขได้" : "Verify net amounts (WHT 10% estimated) — tap to edit"}
+                    </p>
+                  </div>
+                  <button onClick={() => !syncSaving && setSyncModal(null)}
+                    style={{ background: "none", border: "none", cursor: "pointer", fontSize: 20, color: "var(--ink-3)", lineHeight: 1, padding: 4 }}>✕</button>
+                </div>
+                <div style={{ overflow: "auto", flex: 1, margin: "0 -4px", padding: "0 4px" }}>
+                  {syncModal.map((s, i) => (
+                    <SyncRow key={i} s={s} th={th} FMT={FMT} ccy={ccy}
+                      onChange={upd => setSyncModal(prev => prev.map((p, j) => j === i ? { ...p, ...upd } : p))} />
+                  ))}
+                </div>
+                <div style={{ display: "flex", gap: 10, justifyContent: "flex-end", paddingTop: 12, borderTop: "1px solid var(--line)" }}>
+                  <button className="btn btn-outline" onClick={() => !syncSaving && setSyncModal(null)} disabled={syncSaving}>
+                    {th ? "ยกเลิก" : "Cancel"}
+                  </button>
+                  <button className="btn" disabled={syncSaving || syncModal.every(s => !s.checked)} onClick={() => handleConfirmSync(syncModal)}>
+                    {syncSaving
+                      ? (th ? "กำลังบันทึก…" : "Saving…")
+                      : th
+                        ? `บันทึก ${syncModal.filter(s => s.checked).length} รายการ`
+                        : `Save ${syncModal.filter(s => s.checked).length} item${syncModal.filter(s => s.checked).length !== 1 ? "s" : ""}`}
+                  </button>
+                </div>
+              </>
+            )}
+          </div>
+        </div>
+      )}
+    </div>
+  )
+}
+
+/* ─── Sync row (inside sync modal) ───────────────────────────────────────────── */
+function SyncRow({ s, th, FMT, ccy, onChange }) {
+  const tax = +(s.gross * s.taxRate).toFixed(2)
+  return (
+    <div style={{ display: "grid", gridTemplateColumns: "20px 36px 1fr auto 88px", gap: 10, alignItems: "center", padding: "10px 0", borderBottom: "1px solid var(--line)" }}>
+      <input type="checkbox" checked={s.checked} onChange={e => onChange({ checked: e.target.checked })}
+        style={{ width: 16, height: 16, cursor: "pointer", accentColor: "var(--accent)" }} />
+      <div className="ticker-mark" style={{ fontSize: 11 }}>{s.ticker.slice(0, 2)}</div>
+      <div>
+        <div style={{ fontWeight: 500, fontSize: 13 }}>{s.ticker} · {s.dateLabel}</div>
+        <div className="muted" style={{ fontSize: 11 }}>
+          {s.shares} {th ? "หุ้น" : "shares"} × ฿{s.pricePerShare}
+          {s.taxRate > 0 && (
+            <span style={{ color: "var(--loss)", marginLeft: 6 }}>
+              WHT {(s.taxRate * 100).toFixed(0)}% = −฿{tax}
+            </span>
+          )}
+        </div>
+      </div>
+      <div style={{ textAlign: "right", fontSize: 12, color: "var(--ink-3)" }}>
+        <div>{th ? "รวม" : "Gross"}</div>
+        <div className="mono">฿{s.gross}</div>
+      </div>
+      <div>
+        <div style={{ fontSize: 10, color: "var(--ink-4)", marginBottom: 3 }}>
+          {th ? "สุทธิ (แก้ได้)" : "Net (edit)"}
+        </div>
+        <input type="number" step="0.01" value={s.editedNet}
+          onChange={e => onChange({ editedNet: parseFloat(e.target.value) || 0 })}
+          style={{ width: "100%", padding: "4px 6px", fontSize: 13, fontFamily: "var(--font-mono)", textAlign: "right", border: "1px solid var(--line)", borderRadius: 6, background: "var(--bg-2)", color: "var(--ink)" }} />
       </div>
     </div>
   )
