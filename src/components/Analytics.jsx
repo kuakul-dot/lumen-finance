@@ -1,4 +1,4 @@
-import { useState, useMemo } from 'react'
+import { useState, useMemo, useEffect } from 'react'
 import { PageHead, Delta, Icon } from './Nav'
 import { LineChart, Donut, BarChart } from './Charts'
 import { LUMEN_FMT, LUMEN_DERIVE, LUMEN_HISTORY, LUMEN_BENCH } from '../data'
@@ -120,7 +120,31 @@ function groupRowsByTicker(rows) {
 function AnalyticsCommon({ t, lang, ccy, rows, totalValue, totalPL, totalPlPct, totalCost, hasLivePrices, demoData, dataState, earliestHoldingDate }) {
   const FMT = LUMEN_FMT
   const th = lang === "th"
-  const [chartPeriod, setChartPeriod] = useState("1y")
+
+  // Days of actual investment history available (for live mode)
+  const daysSinceFirst = useMemo(() => {
+    if (dataState !== "live" || !earliestHoldingDate) return 365 * 5
+    return Math.max(1, Math.round((Date.now() - earliestHoldingDate.getTime()) / 86400000))
+  }, [dataState, earliestHoldingDate])
+
+  // Auto-pick the largest period that fits within available history
+  const defaultPeriod = useMemo(() => {
+    if (dataState !== "live") return "1y"
+    if (daysSinceFirst >= 365)      return "1y"
+    if (daysSinceFirst >= 180)      return "6m"
+    if (daysSinceFirst >= 90)       return "3m"
+    return "1m"
+  }, [dataState, daysSinceFirst])
+  const [chartPeriod, setChartPeriod] = useState(defaultPeriod)
+  useEffect(() => { setChartPeriod(defaultPeriod) }, [defaultPeriod])
+
+  // Which buttons are usable in live mode? (need enough history)
+  const periodDaysMap = useMemo(() => {
+    const startOfYear = new Date(new Date().getFullYear(), 0, 1)
+    const ytdDays = Math.max(1, Math.round((Date.now() - startOfYear.getTime()) / 86400000))
+    return { "1m": 30, "3m": 90, "6m": 180, "ytd": ytdDays, "1y": 365, "5y": 365 * 5, "all": daysSinceFirst }
+  }, [daysSinceFirst])
+  const isPeriodEnabled = (k) => dataState !== "live" || periodDaysMap[k] <= daysSinceFirst + 7  // small tolerance
   const annualIncome = rows.reduce((a, r) => a + r.value * (r.divYield || 0) / 100, 0)
   const yieldOnPort  = totalValue > 0 ? (annualIncome / totalValue) * 100 : 0
 
@@ -138,86 +162,64 @@ function AnalyticsCommon({ t, lang, ccy, rows, totalValue, totalPL, totalPlPct, 
     },
   ] : null
 
-  // Live mode: simulated growth chart matching Demo's shape:
-  //  - X-axis always spans the selected period (1m/3m/.../All) so button changes are visible
-  //  - For dates before the first investment, both series sit flat at cost basis
-  //  - After the first investment, ease curve toward current value (portfolio) / 10%/yr (S&P)
+  // Live mode: simulated chart of the actual investment window only.
+  //  - X-axis = min(selected period, days of history available)
+  //  - Multi-octave noise so the line looks like daily price movement, not a smooth curve
+  //  - S&P 500 trends ~10%/yr over the visible window
   const liveSeries = useMemo(() => {
     if (dataState !== "live" || totalCost <= 0 || totalValue <= 0) return null
     const now = new Date()
-    const startOfYear = new Date(now.getFullYear(), 0, 1)
-    const periodDays = {
-      "1m":  30,
-      "3m":  90,
-      "6m":  180,
-      "ytd": Math.max(1, Math.round((now - startOfYear) / 86400000)),
-      "1y":  365,
-      "5y":  365 * 5,
-      "all": 365 * 5,
-    }[chartPeriod] || 365
+    const requestedDays = periodDaysMap[chartPeriod] || 365
+    const totalDays = Math.max(7, Math.min(requestedDays, daysSinceFirst))
 
-    const daysSinceFirst = earliestHoldingDate
-      ? Math.max(1, Math.round((now - earliestHoldingDate) / 86400000))
-      : periodDays
-    // Active investment window inside the visible period
-    const investedDays = Math.min(periodDays, daysSinceFirst)
+    // Denser points for natural noise (≈ weekly resolution, capped)
+    const pts = Math.max(8, Math.min(60, Math.round(totalDays / 7)))
+    const stepD = totalDays / (pts - 1)
 
-    // Points scale with the FULL period (so 1y vs 5y vs All look different)
-    const pts = periodDays <= 35 ? 8
-             : periodDays <= 100 ? 10
-             : periodDays <= 200 ? 12
-             : periodDays <= 400 ? 14
-             : periodDays <= 1100 ? 18 : 22
-    const stepD = periodDays / (pts - 1)
-
-    // S&P 500 trailing return scales mildly with INVESTED window (~10%/yr while held)
-    const investedYears = investedDays / 365
-    const benchEnd = totalCost * (1 + 0.10 * Math.min(5, investedYears))
+    const range = totalValue - totalCost
+    const noiseScale = Math.max(Math.abs(range) * 0.1, totalCost * 0.015)
+    const benchEnd = totalCost * (1 + 0.10 * Math.min(5, totalDays / 365))
+    const benchRange = benchEnd - totalCost
+    const benchNoiseScale = Math.max(Math.abs(benchRange) * 0.15, totalCost * 0.01)
 
     const mkLabel = d => d.toLocaleString(th ? "th-TH" : "en-US", { month: "short" }) + " '" + String(d.getFullYear()).slice(2)
+
+    // Smooth ease curve from cost → final
+    const easeAt = p => p < 0.5 ? 2 * p * p : -1 + (4 - 2 * p) * p
+    // Multi-octave deterministic noise — gives a "stocky" look at any density
+    const noiseAt = (i, seed) => (
+      Math.sin(i * 0.61 + seed) * 0.55 +
+      Math.sin(i * 1.43 + seed * 1.7) * 0.30 +
+      Math.sin(i * 2.91 + seed * 2.3) * 0.18 +
+      Math.cos(i * 4.27 + seed * 3.1) * 0.10
+    )
 
     return [
       {
         name: th ? "พอร์ตของคุณ" : "Your portfolio",
         color: "var(--ink)", fill: true,
         data: Array.from({ length: pts }, (_, i) => {
-          const daysFromStart = i * stepD                       // 0 → periodDays
-          const daysFromNow   = periodDays - daysFromStart
-          const d = new Date(now); d.setDate(d.getDate() - daysFromNow)
-          // How far into the invested portion are we? (0 before first invest, 1 = today)
-          const investProgress = daysFromNow >= investedDays
-            ? 0
-            : (investedDays - daysFromNow) / investedDays
-          const ease = investProgress < 0.5
-            ? 2 * investProgress * investProgress
-            : -1 + (4 - 2 * investProgress) * investProgress
-          const noise = investProgress > 0
-            ? (Math.sin(i * 2.3) * 0.012 + Math.cos(i * 4.1) * 0.008) * totalCost
-            : 0
-          return { x: i, y: totalCost + (totalValue - totalCost) * ease + noise, label: mkLabel(d) }
+          const p = i / (pts - 1)
+          // Fade noise in/out so the line still starts at cost and ends at totalValue
+          const fade = Math.sin(Math.PI * p)
+          const y = totalCost + range * easeAt(p) + noiseAt(i, 1.7) * noiseScale * fade
+          const d = new Date(now); d.setDate(d.getDate() - (pts - 1 - i) * stepD)
+          return { x: i, y, label: mkLabel(d) }
         })
       },
       {
         name: "S&P 500",
         color: "var(--accent)",
         data: Array.from({ length: pts }, (_, i) => {
-          const daysFromStart = i * stepD
-          const daysFromNow   = periodDays - daysFromStart
-          const d = new Date(now); d.setDate(d.getDate() - daysFromNow)
-          const investProgress = daysFromNow >= investedDays
-            ? 0
-            : (investedDays - daysFromNow) / investedDays
-          const ease = investProgress < 0.5
-            ? 2 * investProgress * investProgress
-            : -1 + (4 - 2 * investProgress) * investProgress
-          const noise = investProgress > 0
-            ? (Math.sin(i * 1.7 + 1) * 0.008 + Math.cos(i * 3.3 + 0.4) * 0.006) * totalCost
-            : 0
-          return { x: i, y: totalCost + (benchEnd - totalCost) * ease + noise, label: mkLabel(d) }
+          const p = i / (pts - 1)
+          const fade = Math.sin(Math.PI * p)
+          const y = totalCost + benchRange * easeAt(p) + noiseAt(i, 4.2) * benchNoiseScale * fade
+          const d = new Date(now); d.setDate(d.getDate() - (pts - 1 - i) * stepD)
+          return { x: i, y, label: mkLabel(d) }
         })
       },
     ]
-  }, [dataState, totalCost, totalValue, th, chartPeriod, earliestHoldingDate])
+  }, [dataState, totalCost, totalValue, th, chartPeriod, periodDaysMap, daysSinceFirst])
 
   // Merge same-ticker lots before sorting (so QH with 2 lots appears once)
   const livePerformers = useMemo(() => {
@@ -283,13 +285,20 @@ function AnalyticsCommon({ t, lang, ccy, rows, totalValue, totalPL, totalPlPct, 
               </div>
             </div>
             <div className="segmented">
-              {["1m","3m","6m","ytd","1y","5y","all"].map(k => (
-                <button key={k}
-                        className={(dataState === "live" ? chartPeriod === k : k === "all") ? "on" : ""}
-                        onClick={() => dataState === "live" && setChartPeriod(k)}>
-                  {t.analytics.timeRange[k]}
-                </button>
-              ))}
+              {["1m","3m","6m","ytd","1y","5y","all"].map(k => {
+                const enabled = isPeriodEnabled(k)
+                const active = dataState === "live" ? chartPeriod === k : k === "all"
+                return (
+                  <button key={k}
+                          className={active ? "on" : ""}
+                          disabled={dataState === "live" && !enabled}
+                          title={dataState === "live" && !enabled ? (th ? "ข้อมูลย้อนหลังไม่พอ" : "Not enough history yet") : undefined}
+                          style={{ opacity: dataState === "live" && !enabled ? 0.35 : 1, cursor: dataState === "live" && !enabled ? "not-allowed" : "pointer" }}
+                          onClick={() => dataState === "live" && enabled && setChartPeriod(k)}>
+                    {t.analytics.timeRange[k]}
+                  </button>
+                )
+              })}
             </div>
           </div>
           <LineChart series={dataState === "live" ? liveSeries : series} height={340} fmt={v => FMT.money(v, ccy, { compact: true })} />
@@ -496,7 +505,22 @@ function AnalyticsDiv2({ t, lang, ccy, rows, totalValue, dataState }) {
 function AnalyticsGrowth({ t, lang, ccy, totalValue, totalCost, totalPL, totalPlPct, dataState, earliestHoldingDate }) {
   const FMT = LUMEN_FMT
   const th = lang === "th"
-  const [chartPeriod, setChartPeriod] = useState("1Y")
+
+  const daysSinceFirst = useMemo(() => {
+    if (dataState !== "live" || !earliestHoldingDate) return 365 * 5
+    return Math.max(1, Math.round((Date.now() - earliestHoldingDate.getTime()) / 86400000))
+  }, [dataState, earliestHoldingDate])
+
+  const defaultGrowthPeriod = useMemo(() => {
+    if (dataState !== "live") return "1Y"
+    if (daysSinceFirst >= 365) return "1Y"
+    return "1Y" // 1Y always exists; we'll cap to available days
+  }, [dataState, daysSinceFirst])
+  const [chartPeriod, setChartPeriod] = useState(defaultGrowthPeriod)
+  useEffect(() => { setChartPeriod(defaultGrowthPeriod) }, [defaultGrowthPeriod])
+
+  const growthPeriodDaysMap = { "1Y": 365, "3Y": 365 * 3, "5Y": 365 * 5 }
+  const isGrowthEnabled = (k) => dataState !== "live" || growthPeriodDaysMap[k] <= daysSinceFirst + 7
   const monthLabels = ["Jun","Jul","Aug","Sep","Oct","Nov","Dec","Jan","Feb","Mar","Apr","May"]
   const port = LUMEN_HISTORY, bench = LUMEN_BENCH
   const v0 = port[0].v, b0 = bench[0].v
@@ -513,40 +537,36 @@ function AnalyticsGrowth({ t, lang, ccy, totalValue, totalCost, totalPL, totalPl
     },
   ]
 
-  // Live mode: cumulative return curve (% from cost basis). X-axis spans the chosen
-  // period; pre-investment area is flat at 0%, then eases toward totalPlPct.
+  // Live mode: cumulative return % within the actual investment window
   const liveSeries = useMemo(() => {
     if (dataState !== "live" || totalCost <= 0 || totalValue <= 0) return null
     const now = new Date()
-    const periodDays = { "1Y": 365, "3Y": 365 * 3, "5Y": 365 * 5 }[chartPeriod] || 365
-    const daysSinceFirst = earliestHoldingDate
-      ? Math.max(1, Math.round((now - earliestHoldingDate) / 86400000))
-      : periodDays
-    const investedDays = Math.min(periodDays, daysSinceFirst)
-    const pts = periodDays <= 400 ? 12 : periodDays <= 1100 ? 16 : 20
-    const stepD = periodDays / (pts - 1)
+    const requestedDays = growthPeriodDaysMap[chartPeriod] || 365
+    const totalDays = Math.max(7, Math.min(requestedDays, daysSinceFirst))
+    const pts = Math.max(8, Math.min(60, Math.round(totalDays / 7)))
+    const stepD = totalDays / (pts - 1)
     const finalPct = totalPlPct
+    const noiseScale = Math.max(Math.abs(finalPct) * 0.12, 1.0)
+    const easeAt = p => p < 0.5 ? 2 * p * p : -1 + (4 - 2 * p) * p
+    const noiseAt = (i, seed) => (
+      Math.sin(i * 0.61 + seed) * 0.55 +
+      Math.sin(i * 1.43 + seed * 1.7) * 0.30 +
+      Math.sin(i * 2.91 + seed * 2.3) * 0.18 +
+      Math.cos(i * 4.27 + seed * 3.1) * 0.10
+    )
     return [{
       name: th ? "พอร์ตของคุณ" : "Your portfolio",
       color: "var(--ink)", fill: true,
       data: Array.from({ length: pts }, (_, i) => {
-        const daysFromStart = i * stepD
-        const daysFromNow   = periodDays - daysFromStart
-        const investProgress = daysFromNow >= investedDays
-          ? 0
-          : (investedDays - daysFromNow) / investedDays
-        const ease = investProgress < 0.5
-          ? 2 * investProgress * investProgress
-          : -1 + (4 - 2 * investProgress) * investProgress
-        const noise = investProgress > 0
-          ? (Math.sin(i * 2.3) * 0.4 + Math.cos(i * 4.1) * 0.25)
-          : 0
-        const d = new Date(now); d.setDate(d.getDate() - daysFromNow)
+        const p = i / (pts - 1)
+        const fade = Math.sin(Math.PI * p)
+        const y = finalPct * easeAt(p) + noiseAt(i, 1.7) * noiseScale * fade
+        const d = new Date(now); d.setDate(d.getDate() - (pts - 1 - i) * stepD)
         const lbl = d.toLocaleString(th ? "th-TH" : "en-US", { month: "short" }) + " '" + String(d.getFullYear()).slice(2)
-        return { x: i, y: finalPct * ease + noise, label: lbl }
+        return { x: i, y, label: lbl }
       })
     }]
-  }, [dataState, totalCost, totalValue, totalPlPct, th, chartPeriod, earliestHoldingDate])
+  }, [dataState, totalCost, totalValue, totalPlPct, th, chartPeriod, daysSinceFirst])
 
   // Approximate CAGR assuming the simulated curve spans ~1 year baseline
   const approxYrs = chartPeriod === "1Y" ? 1 : chartPeriod === "3Y" ? 3 : 5
@@ -621,9 +641,19 @@ function AnalyticsGrowth({ t, lang, ccy, totalValue, totalCost, totalPL, totalPl
                 </div>
               </div>
               <div className="segmented">
-                {["1Y","3Y","5Y"].map(k => (
-                  <button key={k} className={chartPeriod === k ? "on" : ""} onClick={() => setChartPeriod(k)}>{k}</button>
-                ))}
+                {["1Y","3Y","5Y"].map(k => {
+                  const enabled = isGrowthEnabled(k)
+                  return (
+                    <button key={k}
+                            className={chartPeriod === k ? "on" : ""}
+                            disabled={!enabled}
+                            title={!enabled ? (th ? "ข้อมูลย้อนหลังไม่พอ" : "Not enough history yet") : undefined}
+                            style={{ opacity: enabled ? 1 : 0.35, cursor: enabled ? "pointer" : "not-allowed" }}
+                            onClick={() => enabled && setChartPeriod(k)}>
+                      {k}
+                    </button>
+                  )
+                })}
               </div>
             </div>
             <LineChart series={liveSeries} height={320} fmt={v => v.toFixed(0) + "%"} />
