@@ -6,7 +6,6 @@ import {
   LUMEN_ACTIVITY, LUMEN_UPCOMING, LUMEN_INSIGHTS, LUMEN_FX,
 } from '../data'
 import { deriveHoldings, upsertCashAccount, deleteCashAccount, getGoals, getTransactions } from '../lib/db'
-import { fetchHistory } from '../lib/prices'
 
 function makeGreeting(name, lang) {
   const h = new Date().getHours()
@@ -485,18 +484,6 @@ function LiveDashboardPage({ t, lang, ccy, setRoute, liveHoldings, prices = {}, 
   const periodDaysMap = { "1Y": 365, "3Y": 365 * 3, "5Y": 365 * 5 }
   const isPeriodEnabled = (k) => periodDaysMap[k] <= daysSinceFirst + 7
 
-  // Real S&P 500 history — fetched once per session, sliced per period
-  const [spxData, setSpxData] = useState(null)
-  useEffect(() => {
-    const range = daysSinceFirst >= 365 * 2 ? "5y"
-                : daysSinceFirst >= 365     ? "2y"
-                : daysSinceFirst >= 180     ? "1y"
-                : daysSinceFirst >= 90      ? "6mo" : "3mo"
-    let cancelled = false
-    fetchHistory("^GSPC", range).then(d => { if (!cancelled) setSpxData(d) }).catch(() => {})
-    return () => { cancelled = true }
-  }, [daysSinceFirst])
-
   const totalValue    = rows.reduce((s, r) => s + r.value, 0)
   const totalPL       = rows.reduce((s, r) => s + r.pl, 0)
   const totalCostBasis = totalValue - totalPL
@@ -540,11 +527,9 @@ function LiveDashboardPage({ t, lang, ccy, setRoute, liveHoldings, prices = {}, 
     return list.slice(0, 5)
   }, [rows])
 
-  // Portfolio value chart — matches Analytics behavior:
+  // Portfolio value chart
   //  - X-axis spans min(selected period, daysSinceFirst)
-  //  - Real S&P 500 line from Yahoo (^GSPC), rebased to start at cost basis
   //  - Adaptive date labels (day-month / month-year / year only)
-  //  - Both series share the same N points / x positions
   const histSeries = useMemo(() => {
     if (totalCostBasis <= 0 || totalValue <= 0) return []
     const now = new Date()
@@ -567,57 +552,20 @@ function LiveDashboardPage({ t, lang, ccy, setRoute, liveHoldings, prices = {}, 
       return "'" + String(d.getFullYear()).slice(2)
     }
 
-    const spxAll = spxData?.series || []
-    const cutoffSec = (now.getTime() - totalDays * 86400000) / 1000
-    const spxSlice = spxAll.filter(p => p.t >= cutoffSec)
-    const hasSpx = spxSlice.length >= 2
-
-    if (!hasSpx) {
-      const portPts = Math.max(8, Math.min(60, Math.round(totalDays / 7)))
-      const portStepD = totalDays / (portPts - 1)
-      return [{
-        name: th ? "มูลค่าพอร์ต" : "Portfolio value",
-        color: "var(--ink)", fill: true,
-        data: Array.from({ length: portPts }, (_, i) => {
-          const p = i / (portPts - 1)
-          const fade = Math.sin(Math.PI * p)
-          const y = totalCostBasis + range * easeAt(p) + noiseAt(i, 1.7) * noiseScale * fade
-          const d = new Date(now); d.setDate(d.getDate() - (portPts - 1 - i) * portStepD)
-          return { x: i, y, label: mkLabel(d) }
-        })
-      }]
-    }
-
-    const targetPts = Math.max(8, Math.min(60, Math.round(totalDays / 7)))
-    const stride = Math.max(1, Math.floor(spxSlice.length / targetPts))
-    let sampled = spxSlice.filter((_, i) => i % stride === 0)
-    if (sampled.length === 0 || sampled[sampled.length - 1] !== spxSlice[spxSlice.length - 1]) {
-      sampled = [...sampled, spxSlice[spxSlice.length - 1]]
-    }
-    const N = sampled.length
-    const baseClose = sampled[0].c
-
-    const portfolioSeries = {
+    const portPts = Math.max(8, Math.min(60, Math.round(totalDays / 7)))
+    const portStepD = totalDays / (portPts - 1)
+    return [{
       name: th ? "มูลค่าพอร์ต" : "Portfolio value",
       color: "var(--ink)", fill: true,
-      data: sampled.map((p, i) => {
-        const prog = i / (N - 1)
-        const fade = Math.sin(Math.PI * prog)
-        const y = totalCostBasis + range * easeAt(prog) + noiseAt(i, 1.7) * noiseScale * fade
-        return { x: i, y, label: mkLabel(new Date(p.t * 1000)) }
+      data: Array.from({ length: portPts }, (_, i) => {
+        const p = i / (portPts - 1)
+        const fade = Math.sin(Math.PI * p)
+        const y = totalCostBasis + range * easeAt(p) + noiseAt(i, 1.7) * noiseScale * fade
+        const d = new Date(now); d.setDate(d.getDate() - (portPts - 1 - i) * portStepD)
+        return { x: i, y, label: mkLabel(d) }
       })
-    }
-    const sp500Series = {
-      name: "S&P 500",
-      color: "var(--accent)",
-      data: sampled.map((p, i) => ({
-        x: i,
-        y: totalCostBasis * (p.c / baseClose),
-        label: mkLabel(new Date(p.t * 1000)),
-      }))
-    }
-    return [portfolioSeries, sp500Series]
-  }, [totalCostBasis, totalValue, th, chartPeriod, daysSinceFirst, spxData])
+    }]
+  }, [totalCostBasis, totalValue, th, chartPeriod, daysSinceFirst])
 
   const chartLabel = chartPeriod
 
@@ -769,7 +717,7 @@ function LiveDashboardPage({ t, lang, ccy, setRoute, liveHoldings, prices = {}, 
           <div>
             <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 8 }}>
               <div>
-                <div className="label-up">{th ? "มูลค่าพอร์ต vs. S&P 500" : "Portfolio vs. S&P 500"} · {chartLabel}</div>
+                <div className="label-up">{th ? "มูลค่าพอร์ต" : "Portfolio value"} · {chartLabel}</div>
                 {earliestHoldingDate && (
                   <div style={{ fontSize: 10, color: "var(--ink-4)", marginTop: 2 }}>
                     {th
