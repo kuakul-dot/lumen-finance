@@ -2,7 +2,7 @@ import { useState, useMemo, useEffect, useCallback } from 'react'
 import { PageHead, Delta, Icon } from './Nav'
 import { Sparkline } from './Charts'
 import { LUMEN_FMT, LUMEN_DERIVE } from '../data'
-import { addHolding, updateHolding, deleteHolding, deriveHoldings, addTransaction, getTransactions } from '../lib/db'
+import { addHolding, updateHolding, deleteHolding, deriveHoldings, addTransaction, getTransactions, updateTransaction, deleteTransaction } from '../lib/db'
 
 export function PortfolioPage({ t, lang, ccy, setRoute, dataState, portfolio, liveHoldings = [], prices = {}, refreshHoldings, loadingData, dataError, retryLoad, fxRate = 36 }) {
   const [showAdd, setShowAdd] = useState(false)
@@ -190,7 +190,7 @@ function LivePortfolioPage({ t, lang, ccy, portfolio, liveHoldings, prices = {},
       </div>
 
       {tab === "transactions" ? (
-        <TransactionsTab transactions={transactions} loading={txLoading} lang={lang} ccy={ccy} fxRate={fxRate} />
+        <TransactionsTab transactions={transactions} loading={txLoading} lang={lang} ccy={ccy} fxRate={fxRate} onReload={loadTransactions} />
       ) : rows.length === 0 ? (
         <div className="card empty">
           <h2 className="display" style={{ fontSize: 28, margin: 0 }}>
@@ -846,8 +846,18 @@ function DateSelectField({ label, value, onChange, lang }) {
 }
 
 // ─── Transactions Tab ────────────────────────────────────────────────────────
-function TransactionsTab({ transactions, loading, lang, ccy, fxRate = 36 }) {
+function TransactionsTab({ transactions, loading, lang, ccy, fxRate = 36, onReload }) {
   const th = lang === "th"
+  const [editTx, setEditTx] = useState(null)   // tx object being edited
+  const [deleting, setDeleting] = useState(null) // id being deleted
+
+  const handleDelete = async (tx) => {
+    if (!window.confirm(th ? `ลบรายการ ${tx.ticker || ''} ${tx.type} นี้?` : `Delete this ${tx.type} transaction for ${tx.ticker || ''}?`)) return
+    setDeleting(tx.id)
+    await deleteTransaction(tx.id)
+    setDeleting(null)
+    onReload?.()
+  }
 
   if (loading) return (
     <div style={{ padding: 48, textAlign: "center", color: "var(--ink-3)", fontSize: 14 }}>
@@ -866,72 +876,237 @@ function TransactionsTab({ transactions, loading, lang, ccy, fxRate = 36 }) {
     </div>
   )
 
-  const typeColor = { Buy: "var(--gain)", Sell: "var(--loss)", Dividend: "var(--accent-ink)", Deposit: "var(--ink-2)" }
-  const typeBg    = { Buy: "var(--gain-soft)", Sell: "var(--loss-soft)", Dividend: "var(--accent-soft)", Deposit: "var(--bg-2)" }
-  const typeLabel = { en: { Buy: "Buy", Sell: "Sell", Dividend: "Dividend", Deposit: "Deposit" }, th: { Buy: "ซื้อ", Sell: "ขาย", Dividend: "ปันผล", Deposit: "ฝาก" } }
-  const typeIcon  = { Buy: "buy", Sell: "sell", Dividend: "dividend", Deposit: "deposit" }
+  const typeColor = { Buy: "var(--gain)", Sell: "var(--loss)", Dividend: "var(--accent-ink)", Deposit: "var(--ink-2)", Withdraw: "var(--ink-2)" }
+  const typeBg    = { Buy: "var(--gain-soft)", Sell: "var(--loss-soft)", Dividend: "var(--accent-soft)", Deposit: "var(--bg-2)", Withdraw: "var(--bg-2)" }
+  const typeLabel = { en: { Buy: "Buy", Sell: "Sell", Dividend: "Dividend", Deposit: "Deposit", Withdraw: "Withdraw" }, th: { Buy: "ซื้อ", Sell: "ขาย", Dividend: "ปันผล", Deposit: "ฝาก", Withdraw: "ถอน" } }
+  const typeIcon  = { Buy: "buy", Sell: "sell", Dividend: "dividend", Deposit: "deposit", Withdraw: "deposit" }
 
   return (
-    <section className="card" style={{ padding: 0, overflow: "hidden" }}>
-      <table className="table">
-        <thead>
-          <tr>
-            <th style={{ width: 100 }}>{th ? "วันที่" : "Date"}</th>
-            <th>{th ? "ประเภท" : "Type"}</th>
-            <th>{th ? "หลักทรัพย์" : "Asset"}</th>
-            <th className="num">{th ? "จำนวน" : "Shares"}</th>
-            <th className="num">{th ? "ราคา" : "Price"}</th>
-            <th className="num">{th ? "มูลค่า" : "Amount"}</th>
-            <th className="num hide-mob">{th ? "สกุลเงิน" : "Ccy"}</th>
-          </tr>
-        </thead>
-        <tbody>
-          {transactions.map(tx => {
-            const type = tx.type || 'Buy'
-            const date = tx.transacted_at
-              ? new Date(tx.transacted_at).toLocaleDateString(th ? "th-TH" : "en-US", { day: "numeric", month: "short", year: "2-digit" })
-              : "—"
-            const priceCcy = tx.currency || 'THB'
-            // amountDisp always in THB; LUMEN_FMT.money handles display conversion
-            const amountDisp = (() => {
-              const a = tx.amount || (tx.shares * tx.price) || 0
-              return priceCcy === 'USD' ? a * fxRate : a
-            })()
-            return (
-              <tr key={tx.id}>
-                <td className="mono muted" style={{ fontSize: 12 }}>{date}</td>
-                <td>
-                  <span className="chip" style={{
-                    background: typeBg[type] || "var(--bg-2)",
-                    color: typeColor[type] || "var(--ink-2)",
-                    fontSize: 11, fontWeight: 600, display: "inline-flex", alignItems: "center", gap: 4,
-                  }}>
-                    <Icon name={typeIcon[type] || "buy"} size={11} />
-                    {(typeLabel[lang] || typeLabel.en)[type] || type}
-                  </span>
-                </td>
-                <td>
-                  <div style={{ fontWeight: 500, fontSize: 13 }}>{tx.ticker || "—"}</div>
-                  {tx.note && <div className="muted" style={{ fontSize: 11 }}>{tx.note}</div>}
-                </td>
-                <td className="num">{tx.shares != null ? tx.shares.toLocaleString(undefined, { maximumFractionDigits: 4 }) : "—"}</td>
-                <td className="num">
-                  {tx.price != null
-                    ? (priceCcy === 'USD' ? '$' : '฿') + tx.price.toLocaleString(undefined, { maximumFractionDigits: 2 })
-                    : "—"}
-                </td>
-                <td className="num" style={{ fontWeight: 500 }}>
-                  {amountDisp > 0 ? LUMEN_FMT.money(amountDisp, ccy, { compact: true }) : "—"}
-                </td>
-                <td className="num hide-mob">
-                  <span className="muted" style={{ fontSize: 11 }}>{priceCcy}</span>
-                </td>
-              </tr>
-            )
-          })}
-        </tbody>
-      </table>
-    </section>
+    <>
+      <section className="card" style={{ padding: 0, overflow: "hidden" }}>
+        <table className="table">
+          <thead>
+            <tr>
+              <th style={{ width: 100 }}>{th ? "วันที่" : "Date"}</th>
+              <th>{th ? "ประเภท" : "Type"}</th>
+              <th>{th ? "หลักทรัพย์" : "Asset"}</th>
+              <th className="num">{th ? "จำนวน" : "Shares"}</th>
+              <th className="num">{th ? "ราคา" : "Price"}</th>
+              <th className="num">{th ? "มูลค่า" : "Amount"}</th>
+              <th className="num hide-mob">{th ? "สกุล" : "Ccy"}</th>
+              <th style={{ width: 64 }} />
+            </tr>
+          </thead>
+          <tbody>
+            {transactions.map(tx => {
+              const type = tx.type || 'Buy'
+              const date = tx.transacted_at
+                ? new Date(tx.transacted_at).toLocaleDateString(th ? "th-TH" : "en-US", { day: "numeric", month: "short", year: "2-digit" })
+                : "—"
+              const priceCcy = tx.currency || 'THB'
+              const amountDisp = (() => {
+                const a = tx.amount || (tx.shares * tx.price) || 0
+                return priceCcy === 'USD' ? a * fxRate : a
+              })()
+              return (
+                <tr key={tx.id} style={{ opacity: deleting === tx.id ? 0.4 : 1 }}>
+                  <td className="mono muted" style={{ fontSize: 12 }}>{date}</td>
+                  <td>
+                    <span className="chip" style={{
+                      background: typeBg[type] || "var(--bg-2)",
+                      color: typeColor[type] || "var(--ink-2)",
+                      fontSize: 11, fontWeight: 600, display: "inline-flex", alignItems: "center", gap: 4,
+                    }}>
+                      <Icon name={typeIcon[type] || "buy"} size={11} />
+                      {(typeLabel[lang] || typeLabel.en)[type] || type}
+                    </span>
+                  </td>
+                  <td>
+                    <div style={{ fontWeight: 500, fontSize: 13 }}>{tx.ticker || "—"}</div>
+                    {tx.note && <div className="muted" style={{ fontSize: 11 }}>{tx.note}</div>}
+                  </td>
+                  <td className="num">{tx.shares != null ? tx.shares.toLocaleString(undefined, { maximumFractionDigits: 4 }) : "—"}</td>
+                  <td className="num">
+                    {tx.price != null
+                      ? (priceCcy === 'USD' ? '$' : '฿') + tx.price.toLocaleString(undefined, { maximumFractionDigits: 2 })
+                      : "—"}
+                  </td>
+                  <td className="num" style={{ fontWeight: 500 }}>
+                    {amountDisp > 0 ? LUMEN_FMT.money(amountDisp, ccy, { compact: true }) : "—"}
+                  </td>
+                  <td className="num hide-mob">
+                    <span className="muted" style={{ fontSize: 11 }}>{priceCcy}</span>
+                  </td>
+                  <td>
+                    <div style={{ display: "flex", gap: 4, justifyContent: "flex-end" }}>
+                      <button
+                        onClick={() => setEditTx(tx)}
+                        style={{ background: "none", border: "none", cursor: "pointer", padding: "4px 6px", borderRadius: 6, color: "var(--ink-3)", lineHeight: 1 }}
+                        title={th ? "แก้ไข" : "Edit"}
+                      >
+                        <Icon name="edit" size={13} />
+                      </button>
+                      <button
+                        onClick={() => handleDelete(tx)}
+                        disabled={deleting === tx.id}
+                        style={{ background: "none", border: "none", cursor: "pointer", padding: "4px 6px", borderRadius: 6, color: "var(--loss)", lineHeight: 1 }}
+                        title={th ? "ลบ" : "Delete"}
+                      >
+                        <Icon name="trash" size={13} />
+                      </button>
+                    </div>
+                  </td>
+                </tr>
+              )
+            })}
+          </tbody>
+        </table>
+      </section>
+
+      {editTx && (
+        <EditTransactionModal
+          tx={editTx}
+          lang={lang}
+          onClose={() => setEditTx(null)}
+          onSaved={() => { setEditTx(null); onReload?.() }}
+        />
+      )}
+    </>
+  )
+}
+
+// ─── Edit Transaction Modal ───────────────────────────────────────────────────
+function EditTransactionModal({ tx, lang, onClose, onSaved }) {
+  const th = lang === "th"
+  const toDateInput = (v) => {
+    if (!v) return new Date().toISOString().split('T')[0]
+    return new Date(v).toISOString().split('T')[0]
+  }
+  const [form, setForm] = useState({
+    type:         tx.type || 'Buy',
+    ticker:       tx.ticker || '',
+    shares:       tx.shares != null ? String(tx.shares) : '',
+    price:        tx.price  != null ? String(tx.price)  : '',
+    amount:       tx.amount != null ? String(tx.amount) : '',
+    currency:     tx.currency || 'THB',
+    note:         tx.note || '',
+    transacted_at: toDateInput(tx.transacted_at),
+  })
+  const [saving, setSaving] = useState(false)
+  const [error,  setError]  = useState(null)
+  const set = (k, v) => setForm(f => ({ ...f, [k]: v }))
+
+  const handleSubmit = async (e) => {
+    e.preventDefault()
+    setSaving(true)
+    setError(null)
+    const shares = form.shares !== '' ? parseFloat(form.shares) : null
+    const price  = form.price  !== '' ? parseFloat(form.price)  : null
+    const amount = form.amount !== '' ? parseFloat(form.amount) : (shares != null && price != null ? shares * price : null)
+    const { error: err } = await updateTransaction(tx.id, {
+      type:          form.type,
+      ticker:        form.ticker.toUpperCase() || null,
+      shares,
+      price,
+      amount,
+      currency:      form.currency,
+      note:          form.note || null,
+      transacted_at: form.transacted_at,
+    })
+    setSaving(false)
+    if (err) { setError(err.message); return }
+    onSaved()
+  }
+
+  const TX_TYPES = ['Buy', 'Sell', 'Dividend', 'Deposit', 'Withdraw']
+  const typeLabel = { en: { Buy: "Buy", Sell: "Sell", Dividend: "Dividend", Deposit: "Deposit", Withdraw: "Withdraw" }, th: { Buy: "ซื้อ", Sell: "ขาย", Dividend: "ปันผล", Deposit: "ฝาก", Withdraw: "ถอน" } }
+
+  return (
+    <div style={{
+      position: "fixed", inset: 0, background: "rgba(0,0,0,0.45)", backdropFilter: "blur(4px)",
+      display: "flex", alignItems: "flex-end", justifyContent: "center", zIndex: 1000,
+    }} onClick={e => e.target === e.currentTarget && onClose()}>
+      <div style={{
+        background: "var(--bg)", borderRadius: "20px 20px 0 0", padding: "32px 28px 40px",
+        width: "100%", maxWidth: 520, boxShadow: "0 -8px 40px rgba(0,0,0,0.12)",
+        animation: "slideUp 0.2s ease", maxHeight: "92dvh", overflowY: "auto",
+      }}>
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 24 }}>
+          <h3 style={{ margin: 0, fontSize: 20, fontFamily: "var(--font-display)" }}>
+            {th ? "แก้ไขธุรกรรม" : "Edit Transaction"}
+          </h3>
+          <button onClick={onClose} style={{ background: "none", border: "none", cursor: "pointer", fontSize: 20, color: "var(--ink-3)", lineHeight: 1 }}>×</button>
+        </div>
+
+        <form onSubmit={handleSubmit} style={{ display: "flex", flexDirection: "column", gap: 14 }}>
+          {error && (
+            <div style={{ padding: "10px 14px", borderRadius: 8, background: "oklch(0.96 0.05 25)", color: "oklch(0.40 0.12 25)", fontSize: 13 }}>
+              {error}
+            </div>
+          )}
+
+          {/* Type + Ticker */}
+          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
+            <Field label={th ? "ประเภท" : "Type"}>
+              <select value={form.type} onChange={e => set('type', e.target.value)} style={inputStyle}>
+                {TX_TYPES.map(t => <option key={t} value={t}>{(typeLabel[lang] || typeLabel.en)[t]}</option>)}
+              </select>
+            </Field>
+            <Field label={th ? "ติ๊กเกอร์" : "Ticker"}>
+              <input value={form.ticker} onChange={e => set('ticker', e.target.value)}
+                     placeholder="e.g. PTT" style={inputStyle} />
+            </Field>
+          </div>
+
+          {/* Shares + Price */}
+          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
+            <Field label={th ? "จำนวนหุ้น" : "Shares"}>
+              <input type="number" step="any" min="0" value={form.shares}
+                     onChange={e => set('shares', e.target.value)} placeholder="0" style={inputStyle} />
+            </Field>
+            <Field label={th ? "ราคา/หุ้น" : "Price/share"}>
+              <input type="number" step="any" min="0" value={form.price}
+                     onChange={e => set('price', e.target.value)} placeholder="0.00" style={inputStyle} />
+            </Field>
+          </div>
+
+          {/* Amount + Currency */}
+          <div style={{ display: "grid", gridTemplateColumns: "1fr 80px", gap: 12 }}>
+            <Field label={th ? "มูลค่ารวม (คำนวณอัตโนมัติหากเว้นว่าง)" : "Total amount (auto if blank)"}>
+              <input type="number" step="any" min="0" value={form.amount}
+                     onChange={e => set('amount', e.target.value)} placeholder={th ? "คำนวณอัตโนมัติ" : "Auto"} style={inputStyle} />
+            </Field>
+            <Field label={th ? "สกุล" : "Ccy"}>
+              <select value={form.currency} onChange={e => set('currency', e.target.value)} style={inputStyle}>
+                <option value="THB">THB</option>
+                <option value="USD">USD</option>
+              </select>
+            </Field>
+          </div>
+
+          {/* Date */}
+          <Field label={th ? "วันที่" : "Date"}>
+            <input type="date" value={form.transacted_at}
+                   onChange={e => set('transacted_at', e.target.value)} style={inputStyle} />
+          </Field>
+
+          {/* Note */}
+          <Field label={th ? "หมายเหตุ (ไม่บังคับ)" : "Note (optional)"}>
+            <input value={form.note} onChange={e => set('note', e.target.value)}
+                   placeholder={th ? "ชื่อหลักทรัพย์ หรือหมายเหตุ" : "Asset name or note"} style={inputStyle} />
+          </Field>
+
+          <div style={{ display: "flex", gap: 10, marginTop: 8 }}>
+            <button type="button" className="btn btn-outline" style={{ flex: 1 }} onClick={onClose}>
+              {th ? "ยกเลิก" : "Cancel"}
+            </button>
+            <button type="submit" className="btn" style={{ flex: 2 }} disabled={saving}>
+              {saving ? (th ? "กำลังบันทึก…" : "Saving…") : (th ? "บันทึกการเปลี่ยนแปลง" : "Save changes")}
+            </button>
+          </div>
+        </form>
+      </div>
+    </div>
   )
 }
 
