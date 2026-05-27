@@ -651,9 +651,10 @@ function AnalyticsDiv2({ t, lang, ccy, rows, totalValue, dataState, liveHoldings
           .filter(e => e.date >= purchaseSec && e.date <= nowSec && !alreadyRecorded(h.ticker, e.date))
           .forEach(e => {
             const d = new Date(e.date * 1000)
-            const isTHB = (h.region || 'TH') === 'TH'
+            const region  = h.region || 'TH'
+            const isTHB   = region === 'TH'
             const gross   = +(e.amount * h.totalShares).toFixed(2)
-            const taxRate = isTHB ? 0.10 : 0
+            const taxRate = region === 'TH' ? 0.10 : region === 'US' ? 0.15 : 0
             const net     = +(gross * (1 - taxRate)).toFixed(2)
             suggestions.push({
               ticker: h.ticker,
@@ -874,7 +875,7 @@ function AnalyticsDiv2({ t, lang, ccy, rows, totalValue, dataState, liveHoldings
                       {th ? `พบปันผลใหม่ ${syncModal.length} รายการ` : `${syncModal.length} unrecorded dividend${syncModal.length > 1 ? "s" : ""} found`}
                     </h3>
                     <p className="muted" style={{ margin: "4px 0 0", fontSize: 12 }}>
-                      {th ? "ตรวจสอบยอดสุทธิ (หลังหักภาษี 10%) ก่อนบันทึก — แก้ไขได้" : "Verify net amounts (WHT 10% estimated) — tap to edit"}
+                      {th ? "ตรวจสอบยอดสุทธิ (TH หัก 10%, US หัก 15%) ก่อนบันทึก — แก้ไขได้" : "Verify net amounts (TH WHT 10%, US WHT 15%) — tap to edit"}
                     </p>
                   </div>
                   <button onClick={() => !syncSaving && setSyncModal(null)}
