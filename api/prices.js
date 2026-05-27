@@ -40,42 +40,73 @@ const HEADERS = {
   Origin: 'https://finance.yahoo.com',
 }
 
-// Primary: v7/finance/quote (batch, returns trailingAnnualDividendYield reliably)
-// Fallback: v8/finance/chart per-symbol
 async function fetchQuotes(syms) {
-  const symbolsParam = syms.join(',')
+  const result = {}
 
+  // ── Step 1: batch v7/finance/quote (price + yield when available) ──────────
   for (const host of ['query1', 'query2']) {
     try {
       const r = await fetch(
-        `https://${host}.finance.yahoo.com/v7/finance/quote?symbols=${encodeURIComponent(symbolsParam)}`,
+        `https://${host}.finance.yahoo.com/v7/finance/quote?symbols=${encodeURIComponent(syms.join(','))}`,
         { headers: HEADERS, signal: AbortSignal.timeout(8000) }
       )
       if (r.ok) {
         const json = await r.json()
         const quotes = json?.quoteResponse?.result || []
-        if (quotes.length > 0) {
-          const result = {}
-          quotes.forEach(q => {
-            if (q.regularMarketPrice != null) result[q.symbol] = parseQuote(q)
-          })
-          // Fall back to v8/chart for any symbol the batch missed
-          const missing = syms.filter(s => !result[s])
-          if (missing.length > 0) {
-            const fallbacks = await Promise.all(missing.map(fetchChart))
-            fallbacks.forEach(({ sym, data }) => { if (data) result[sym] = data })
-          }
-          return result
-        }
+        quotes.forEach(q => {
+          if (q.regularMarketPrice != null) result[q.symbol] = parseQuote(q)
+        })
+        if (Object.keys(result).length > 0) break
       }
     } catch { /* try next host */ }
   }
 
-  // Full fallback: individual v8/chart calls
-  const entries = await Promise.all(syms.map(fetchChart))
-  const result = {}
-  entries.forEach(({ sym, data }) => { if (data) result[sym] = data })
+  // ── Step 2: v8/chart fallback for any symbol the batch missed ─────────────
+  const missing = syms.filter(s => !result[s])
+  if (missing.length > 0) {
+    const fallbacks = await Promise.all(missing.map(sym => fetchChart(sym)))
+    fallbacks.forEach(({ sym, data }) => { if (data) result[sym] = data })
+  }
+
+  // ── Step 3: for symbols with divYield=0 fetch trailing dividend events ────
+  // Yahoo Finance meta often omits yield for non-US stocks; the actual
+  // dividend payment history is reliably present in chart events.
+  const needsDiv = Object.entries(result)
+    .filter(([, d]) => d.divYield === 0 && d.price > 0)
+    .map(([sym]) => sym)
+
+  if (needsDiv.length > 0) {
+    await Promise.all(needsDiv.map(async sym => {
+      const divYield = await fetchDividendYield(sym, result[sym].price)
+      if (divYield > 0) result[sym] = { ...result[sym], divYield }
+    }))
+  }
+
   return result
+}
+
+// Trailing 12-month dividend yield from actual payment events
+async function fetchDividendYield(sym, currentPrice) {
+  if (currentPrice <= 0) return 0
+  const cutoffSec = Date.now() / 1000 - 365 * 86400
+  for (const host of ['query1', 'query2']) {
+    try {
+      const r = await fetch(
+        `https://${host}.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(sym)}?interval=1d&range=1y&events=div`,
+        { headers: HEADERS, signal: AbortSignal.timeout(8000) }
+      )
+      if (r.ok) {
+        const json = await r.json()
+        const dividends = json?.chart?.result?.[0]?.events?.dividends
+        if (!dividends) return 0
+        const annual = Object.values(dividends)
+          .filter(d => d.date >= cutoffSec)
+          .reduce((sum, d) => sum + (d.amount || 0), 0)
+        return annual > 0 ? (annual / currentPrice) * 100 : 0
+      }
+    } catch { /* try next host */ }
+  }
+  return 0
 }
 
 function parseQuote(q) {
@@ -100,11 +131,10 @@ function parseQuote(q) {
 }
 
 async function fetchChart(sym) {
-  const params = '?interval=1d&range=1d&events=div,splits'
   for (const host of ['query1', 'query2']) {
     try {
       const r = await fetch(
-        `https://${host}.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(sym)}${params}`,
+        `https://${host}.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(sym)}?interval=1d&range=1d`,
         { headers: HEADERS, signal: AbortSignal.timeout(8000) }
       )
       if (r.ok) {
