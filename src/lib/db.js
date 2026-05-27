@@ -80,6 +80,24 @@ export async function addTransaction(portfolioId, tx) {
   return { data, error }
 }
 
+export async function updateTransaction(id, updates) {
+  const { data, error } = await supabase
+    .from('transactions')
+    .update(updates)
+    .eq('id', id)
+    .select()
+    .single()
+  return { data, error }
+}
+
+export async function deleteTransaction(id) {
+  const { error } = await supabase
+    .from('transactions')
+    .delete()
+    .eq('id', id)
+  return { error }
+}
+
 export async function getGoals(userId) {
   const { data } = await supabase
     .from('goals')

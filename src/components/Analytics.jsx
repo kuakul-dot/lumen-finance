@@ -2,7 +2,7 @@ import { useState, useMemo, useEffect, useCallback } from 'react'
 import { PageHead, Delta, Icon } from './Nav'
 import { LineChart, Donut, BarChart } from './Charts'
 import { LUMEN_FMT, LUMEN_DERIVE, LUMEN_HISTORY, LUMEN_BENCH } from '../data'
-import { deriveHoldings, getTransactions, addTransaction } from '../lib/db'
+import { deriveHoldings, getTransactions, addTransaction, updateTransaction, deleteTransaction } from '../lib/db'
 import { fetchHistory, toYahooSymbol } from '../lib/prices'
 
 export function AnalyticsPage({ t, lang, ccy, dataState, liveHoldings = [], prices = {}, fxRate = 36, portfolio }) {
@@ -22,6 +22,14 @@ export function AnalyticsPage({ t, lang, ccy, dataState, liveHoldings = [], pric
   // Called by AnalyticsDiv2 after new Dividend transactions are saved
   const handleTransactionAdded = useCallback((newTxs) => {
     setTransactions(prev => [...newTxs, ...prev])
+  }, [])
+
+  const handleTransactionUpdated = useCallback((updated) => {
+    setTransactions(prev => prev.map(tx => tx.id === updated.id ? { ...tx, ...updated } : tx))
+  }, [])
+
+  const handleTransactionDeleted = useCallback((id) => {
+    setTransactions(prev => prev.filter(tx => tx.id !== id))
   }, [])
 
   const liveRows = useMemo(
@@ -109,7 +117,7 @@ export function AnalyticsPage({ t, lang, ccy, dataState, liveHoldings = [], pric
 
       {tab === "common"          && <AnalyticsCommon t={t} lang={lang} ccy={ccy} rows={rows} totalValue={totalValue} totalPL={totalPL} totalPlPct={totalPlPct} totalCost={totalCost} hasLivePrices={hasLivePrices} demoData={demoData} dataState={dataState} earliestHoldingDate={earliestHoldingDate} />}
       {tab === "diversification" && <AnalyticsDiv t={t} lang={lang} ccy={ccy} rows={rows} totalValue={totalValue} demoData={demoData} dataState={dataState} />}
-      {tab === "dividends"       && <AnalyticsDiv2 t={t} lang={lang} ccy={ccy} rows={rows} totalValue={totalValue} dataState={dataState} liveHoldings={liveHoldings} fxRate={fxRate} transactions={transactions} portfolio={portfolio} onTransactionAdded={handleTransactionAdded} />}
+      {tab === "dividends"       && <AnalyticsDiv2 t={t} lang={lang} ccy={ccy} rows={rows} totalValue={totalValue} dataState={dataState} liveHoldings={liveHoldings} fxRate={fxRate} transactions={transactions} portfolio={portfolio} onTransactionAdded={handleTransactionAdded} onTransactionUpdated={handleTransactionUpdated} onTransactionDeleted={handleTransactionDeleted} />}
       {tab === "growth"          && <AnalyticsGrowth t={t} lang={lang} ccy={ccy} totalValue={totalValue} totalCost={totalCost} totalPL={totalPL} totalPlPct={totalPlPct} dataState={dataState} earliestHoldingDate={earliestHoldingDate} />}
       {tab === "metrics"         && <AnalyticsMetrics t={t} lang={lang} ccy={ccy} rows={rows} totalValue={totalValue} totalPL={totalPL} totalPlPct={totalPlPct} dataState={dataState} />}
     </div>
@@ -512,7 +520,7 @@ function DivCard({ title, data, className }) {
 }
 
 /* ─── Dividends tab ──────────────────────────────────────────────────────────── */
-function AnalyticsDiv2({ t, lang, ccy, rows, totalValue, dataState, liveHoldings = [], fxRate = 36, transactions = [], portfolio = null, onTransactionAdded }) {
+function AnalyticsDiv2({ t, lang, ccy, rows, totalValue, dataState, liveHoldings = [], fxRate = 36, transactions = [], portfolio = null, onTransactionAdded, onTransactionUpdated, onTransactionDeleted }) {
   const FMT = LUMEN_FMT
   const th = lang === "th"
 
@@ -616,6 +624,49 @@ function AnalyticsDiv2({ t, lang, ccy, rows, totalValue, dataState, liveHoldings
   const [syncModal, setSyncModal] = useState(null)  // null | 'loading' | suggestion[]
   const [syncSaving, setSyncSaving] = useState(false)
 
+  // ── Edit recorded dividends ───────────────────────────────────────────────
+  const [editModal, setEditModal] = useState(null)  // null | [{...tx, editedAmount, editedDate, markedDelete}]
+  const [editSaving, setEditSaving] = useState(false)
+
+  function openEditModal() {
+    const divTxs = transactions
+      .filter(tx => tx.type === 'Dividend')
+      .sort((a, b) => new Date(b.transacted_at) - new Date(a.transacted_at))
+      .map(tx => ({
+        ...tx,
+        editedAmount: tx.amount ?? 0,
+        editedDate: tx.transacted_at ?? '',
+        markedDelete: false,
+      }))
+    setEditModal(divTxs)
+  }
+
+  async function handleSaveEdits() {
+    if (!editModal) return
+    setEditSaving(true)
+    try {
+      for (const row of editModal) {
+        if (row.markedDelete) {
+          await deleteTransaction(row.id)
+          onTransactionDeleted?.(row.id)
+        } else {
+          const amtChanged  = Number(row.editedAmount) !== Number(row.amount ?? 0)
+          const dateChanged = row.editedDate !== (row.transacted_at ?? '')
+          if (amtChanged || dateChanged) {
+            const updates = { amount: Number(row.editedAmount), transacted_at: row.editedDate }
+            const { data } = await updateTransaction(row.id, updates)
+            if (data) onTransactionUpdated?.(data)
+          }
+        }
+      }
+      setEditModal(null)
+    } catch (err) {
+      console.error('[Lumen] edit dividends:', err)
+    } finally {
+      setEditSaving(false)
+    }
+  }
+
   async function handleSync() {
     setSyncModal('loading')
     try {
@@ -711,9 +762,14 @@ function AnalyticsDiv2({ t, lang, ccy, rows, totalValue, dataState, liveHoldings
   // ── Forward-looking (projected) metrics ───────────────────────────────────
   const annual      = rows.reduce((a, r) => a + r.value * (r.divYield || 0) / 100, 0)
   const yieldOnPort = totalValue > 0 ? (annual / totalValue) * 100 : 0
-  const payers      = rows
-    .filter(r => r.divYield > 0)
-    .map(r => ({ ...r, annual: r.value * r.divYield / 100 }))
+  // Aggregate per-lot rows into one entry per ticker
+  const payerMap = {}
+  rows.filter(r => r.divYield > 0).forEach(r => {
+    if (!payerMap[r.ticker]) payerMap[r.ticker] = { ...r, value: 0 }
+    payerMap[r.ticker].value += r.value
+  })
+  const payers = Object.values(payerMap)
+    .map(p => ({ ...p, annual: p.value * p.divYield / 100 }))
     .sort((a, b) => b.annual - a.annual)
 
   // Estimated monthly payouts (next 12 months) — quarterly-weighted
@@ -759,9 +815,15 @@ function AnalyticsDiv2({ t, lang, ccy, rows, totalValue, dataState, liveHoldings
         value={payers.length + "/" + rows.length}
         sub={th ? "หลักทรัพย์จ่ายปันผล" : "income-producing"} />
 
-      {/* ── Sync button (live mode, portfolio available) ── */}
+      {/* ── Action buttons row (live mode, portfolio available) ── */}
       {dataState === "live" && portfolio && (
-        <div className="col-span-12" style={{ display: "flex", justifyContent: "flex-end" }}>
+        <div className="col-span-12" style={{ display: "flex", justifyContent: "flex-end", gap: 8 }}>
+          {transactions.some(tx => tx.type === 'Dividend') && (
+            <button className="btn btn-outline btn-sm" onClick={openEditModal}>
+              <Icon name="edit" size={13} />
+              {th ? "แก้ไขรายการ" : "Edit recorded"}
+            </button>
+          )}
           <button className="btn btn-outline btn-sm" onClick={handleSync} disabled={syncModal === 'loading'}>
             <Icon name="refresh" size={13} />
             {syncModal === 'loading'
@@ -901,6 +963,83 @@ function AnalyticsDiv2({ t, lang, ccy, rows, totalValue, dataState, liveHoldings
                 </div>
               </>
             )}
+          </div>
+        </div>
+      )}
+
+      {/* ── Edit recorded dividends modal ── */}
+      {editModal !== null && (
+        <div
+          style={{ position: "fixed", inset: 0, zIndex: 200, background: "rgba(0,0,0,0.45)", display: "flex", alignItems: "center", justifyContent: "center", padding: 16 }}
+          onClick={e => { if (e.target === e.currentTarget && !editSaving) setEditModal(null) }}>
+          <div style={{ background: "var(--bg)", borderRadius: 18, padding: 28, width: "100%", maxWidth: 560, maxHeight: "85vh", display: "flex", flexDirection: "column", gap: 20, boxShadow: "0 20px 60px rgba(0,0,0,0.2)" }}>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start" }}>
+              <div>
+                <h3 style={{ margin: 0, fontSize: 16, fontWeight: 600 }}>
+                  {th ? "แก้ไขรายการปันผลที่บันทึก" : "Edit recorded dividends"}
+                </h3>
+                <p className="muted" style={{ margin: "4px 0 0", fontSize: 12 }}>
+                  {th ? "แก้ไขยอด / วันที่ หรือกดลบ — กด 🗑 เพื่อลบรายการ" : "Edit amount / date, or tap 🗑 to delete"}
+                </p>
+              </div>
+              <button onClick={() => !editSaving && setEditModal(null)}
+                style={{ background: "none", border: "none", cursor: "pointer", fontSize: 20, color: "var(--ink-3)", lineHeight: 1, padding: 4 }}>✕</button>
+            </div>
+
+            {editModal.length === 0 ? (
+              <p className="muted" style={{ fontSize: 13, textAlign: "center", padding: "32px 0" }}>
+                {th ? "ยังไม่มีรายการปันผลที่บันทึก" : "No dividend records yet."}
+              </p>
+            ) : (
+              <div style={{ overflow: "auto", flex: 1, margin: "0 -4px", padding: "0 4px" }}>
+                {/* Header */}
+                <div style={{ display: "grid", gridTemplateColumns: "36px 1fr 100px 90px 36px", gap: 8, alignItems: "center", padding: "0 0 6px", borderBottom: "2px solid var(--line)", fontSize: 10, color: "var(--ink-4)", fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.05em" }}>
+                  <div />
+                  <div>{th ? "หลักทรัพย์ / วันที่" : "Ticker / Date"}</div>
+                  <div style={{ textAlign: "right" }}>{th ? "ยอดสุทธิ (฿)" : "Net amount"}</div>
+                  <div>{th ? "วันที่รับ" : "Pay date"}</div>
+                  <div />
+                </div>
+                {editModal.map((row, i) => (
+                  <div key={row.id} style={{
+                    display: "grid", gridTemplateColumns: "36px 1fr 100px 90px 36px", gap: 8,
+                    alignItems: "center", padding: "10px 0", borderBottom: "1px solid var(--line)",
+                    opacity: row.markedDelete ? 0.35 : 1, transition: "opacity 0.15s"
+                  }}>
+                    <div className="ticker-mark" style={{ fontSize: 11 }}>{(row.ticker || '?').slice(0, 2)}</div>
+                    <div>
+                      <div style={{ fontWeight: 500, fontSize: 13 }}>{row.ticker || '—'}</div>
+                      {row.note && <div className="muted" style={{ fontSize: 10 }}>{row.note}</div>}
+                    </div>
+                    <input
+                      type="number" step="0.01" value={row.editedAmount} disabled={row.markedDelete}
+                      onChange={e => setEditModal(prev => prev.map((r, j) => j === i ? { ...r, editedAmount: e.target.value } : r))}
+                      style={{ padding: "4px 6px", fontSize: 13, fontFamily: "var(--font-mono)", textAlign: "right", border: "1px solid var(--line)", borderRadius: 6, background: "var(--bg-2)", color: "var(--ink)", width: "100%" }}
+                    />
+                    <input
+                      type="date" value={row.editedDate} disabled={row.markedDelete}
+                      onChange={e => setEditModal(prev => prev.map((r, j) => j === i ? { ...r, editedDate: e.target.value } : r))}
+                      style={{ padding: "4px 6px", fontSize: 12, border: "1px solid var(--line)", borderRadius: 6, background: "var(--bg-2)", color: "var(--ink)", width: "100%" }}
+                    />
+                    <button
+                      onClick={() => setEditModal(prev => prev.map((r, j) => j === i ? { ...r, markedDelete: !r.markedDelete } : r))}
+                      title={row.markedDelete ? (th ? "ยกเลิกลบ" : "Undo") : (th ? "ลบรายการ" : "Delete")}
+                      style={{ background: "none", border: "none", cursor: "pointer", fontSize: 16, color: row.markedDelete ? "var(--gain)" : "var(--loss)", padding: 4, lineHeight: 1 }}>
+                      {row.markedDelete ? "↩" : "🗑"}
+                    </button>
+                  </div>
+                ))}
+              </div>
+            )}
+
+            <div style={{ display: "flex", gap: 10, justifyContent: "flex-end", paddingTop: 12, borderTop: "1px solid var(--line)" }}>
+              <button className="btn btn-outline" onClick={() => !editSaving && setEditModal(null)} disabled={editSaving}>
+                {th ? "ยกเลิก" : "Cancel"}
+              </button>
+              <button className="btn" disabled={editSaving || editModal.length === 0} onClick={handleSaveEdits}>
+                {editSaving ? (th ? "กำลังบันทึก…" : "Saving…") : (th ? "บันทึกการแก้ไข" : "Save changes")}
+              </button>
+            </div>
           </div>
         </div>
       )}

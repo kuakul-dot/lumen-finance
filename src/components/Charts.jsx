@@ -178,7 +178,10 @@ export function BarChart({ data, height = 180, color = "var(--ink)", fmt }) {
   const padL = 36, padR = 8, padT = 8, padB = 24
   const innerW = w - padL - padR
   const innerH = height - padT - padB
-  const barW = innerW / data.length
+  // Cap slot width so few bars don't stretch across the whole chart
+  const slotW = Math.min(innerW / data.length, 72)
+  const groupW = slotW * data.length
+  const xBase = padL + (innerW - groupW) / 2  // center bars in available space
   return (
     <div ref={wrapRef} style={{ width: "100%" }}>
       <svg width={w} height={height} viewBox={`0 0 ${w} ${height}`} style={{ display: "block" }}>
@@ -195,14 +198,14 @@ export function BarChart({ data, height = 180, color = "var(--ink)", fmt }) {
           )
         })}
         {data.map((d, i) => {
-          const h = (d.value / max) * innerH
-          const x = padL + i * barW + barW * 0.18
-          const y = padT + innerH - h
-          const bw = barW * 0.64
+          const bh = (d.value / max) * innerH
+          const x = xBase + i * slotW + slotW * 0.15
+          const y = padT + innerH - bh
+          const bw = slotW * 0.70
           return (
             <g key={i}>
-              <rect x={x} y={y} width={bw} height={h} fill={color} rx="2" />
-              <text x={padL + i * barW + barW / 2} y={height - 6} textAnchor="middle" fontSize="10" fill="var(--ink-3)">
+              <rect x={x} y={y} width={bw} height={bh} fill={color} rx="3" />
+              <text x={xBase + i * slotW + slotW / 2} y={height - 6} textAnchor="middle" fontSize="10" fill="var(--ink-3)">
                 {d.label}
               </text>
             </g>
