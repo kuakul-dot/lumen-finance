@@ -98,6 +98,15 @@ export async function deleteTransaction(id) {
   return { error }
 }
 
+export async function deleteTransactionsByTicker(portfolioId, ticker) {
+  const { error } = await supabase
+    .from('transactions')
+    .delete()
+    .eq('portfolio_id', portfolioId)
+    .eq('ticker', ticker)
+  return { error }
+}
+
 export async function getGoals(userId) {
   const { data } = await supabase
     .from('goals')

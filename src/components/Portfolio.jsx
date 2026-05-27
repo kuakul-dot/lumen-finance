@@ -2,7 +2,7 @@ import { useState, useMemo, useEffect, useCallback, useRef } from 'react'
 import { PageHead, Delta, Icon } from './Nav'
 import { Sparkline } from './Charts'
 import { LUMEN_FMT, LUMEN_DERIVE } from '../data'
-import { addHolding, updateHolding, deleteHolding, deriveHoldings, addTransaction, getTransactions, updateTransaction, deleteTransaction } from '../lib/db'
+import { addHolding, updateHolding, deleteHolding, deriveHoldings, addTransaction, getTransactions, updateTransaction, deleteTransaction, deleteTransactionsByTicker } from '../lib/db'
 
 export function PortfolioPage({ t, lang, ccy, setRoute, dataState, portfolio, liveHoldings = [], prices = {}, refreshHoldings, loadingData, dataError, retryLoad, fxRate = 36 }) {
   const [showAdd, setShowAdd] = useState(false)
@@ -144,12 +144,15 @@ function LivePortfolioPage({ t, lang, ccy, portfolio, liveHoldings, prices = {},
 
   const handleDelete = async (ids, ticker = '') => {
     const idArr = Array.isArray(ids) ? ids : [ids]
-    const msg = idArr.length > 1
-      ? (th ? `ลบทั้งหมด ${idArr.length} lots ของ ${ticker}?` : `Delete all ${idArr.length} lots of ${ticker}?`)
-      : (th ? "ลบหลักทรัพย์นี้?" : "Delete this holding?")
+    const msg = th
+      ? `ลบ ${ticker} และ Transactions ทั้งหมดของ ${ticker}?\n\nรายการซื้อ/ขาย/ปันผลของ ${ticker} จะถูกลบด้วย`
+      : `Delete ${ticker} and all its transactions?\n\nAll Buy/Sell/Dividend records for ${ticker} will also be removed.`
     if (!window.confirm(msg)) return
     setDeleting(idArr[0])
     for (const id of idArr) await deleteHolding(id)
+    if (ticker && portfolio?.id) {
+      await deleteTransactionsByTicker(portfolio.id, ticker)
+    }
     setDeleting(null)
     await refreshHoldings()
   }
