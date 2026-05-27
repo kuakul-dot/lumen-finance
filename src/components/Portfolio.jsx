@@ -885,7 +885,8 @@ function TickerSearch({ lang, value, onType, onSelect }) {
         <div style={{
           position: 'absolute', top: '100%', left: 0, right: 0, zIndex: 200,
           background: 'var(--bg)', border: '1.5px solid var(--line)', borderRadius: 12,
-          marginTop: 4, boxShadow: '0 8px 32px rgba(0,0,0,0.14)', overflow: 'hidden',
+          marginTop: 4, boxShadow: '0 8px 32px rgba(0,0,0,0.14)',
+          maxHeight: 300, overflowY: 'auto',
         }}>
           {results.map((r, i) => (
             <div key={i} onMouseDown={() => handlePick(r)} style={{
