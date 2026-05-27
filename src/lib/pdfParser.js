@@ -1,5 +1,14 @@
 // PDF text extraction + transaction detection using pdfjs-dist
 // Supports column-header detection (Thai & English) + heuristic fallback
+//
+// Confirmed working brokers:
+//   ✅ Dime! (ไดม์)          — Confirmation Note / Tax Invoice (US stocks, USD)
+//   ✅ Settrade / SET-linked  — รายงานการซื้อขาย, ใบยืนยัน (TH stocks, THB)
+//   ✅ Bualuang Securities    — ใบยืนยันการซื้อขาย (THB)
+//   ✅ KGI Securities         — Trade Confirmation (THB / USD)
+//   ✅ Finansia Syrus         — ใบยืนยัน (THB)
+//   🟡 KTBST / KS / ASL      — works if PDF is text-based (heuristic mode)
+//   ❌ Scanned / image PDFs   — no OCR support
 
 import * as pdfjs from 'pdfjs-dist'
 import workerSrc from 'pdfjs-dist/build/pdf.worker.min.mjs?url'
@@ -8,7 +17,7 @@ pdfjs.GlobalWorkerOptions.workerSrc = workerSrc
 
 // ─── Text extraction ──────────────────────────────────────────────────────────
 
-const Y_SNAP = 3  // group text items within 3px vertically (same row)
+const Y_SNAP = 3  // group text items within 3 px vertically
 
 export async function extractPDFRows(file, password = '') {
   const buf  = await file.arrayBuffer()
@@ -22,7 +31,6 @@ export async function extractPDFRows(file, password = '') {
     const page    = await doc.getPage(p)
     const content = await page.getTextContent()
 
-    // Group items by snapped y-coordinate
     const byY = new Map()
     for (const item of content.items) {
       if (typeof item.str !== 'string' || !item.str.trim()) continue
@@ -31,7 +39,6 @@ export async function extractPDFRows(file, password = '') {
       byY.get(y).push({ x: item.transform[4], text: item.str.trim() })
     }
 
-    // Sort rows top-to-bottom, cells left-to-right
     const rows = [...byY.entries()]
       .sort((a, b) => b[0] - a[0])
       .map(([, items]) => items.sort((a, b) => a.x - b.x).map(i => i.text))
@@ -43,16 +50,94 @@ export async function extractPDFRows(file, password = '') {
 }
 
 // ─── Header detection ─────────────────────────────────────────────────────────
+// Each field lists patterns in priority order (most specific → most generic).
+// The loop assigns each header cell to the FIRST field whose pattern matches,
+// so put generic patterns AFTER specific ones.
 
 const HEADER_PATS = {
-  transacted_at: [/วันที่/i, /^date$/i, /trade.?date/i, /^day$/i],
-  type:          [/ประเภท/i, /^type$/i, /^action$/i, /^side$/i],
-  ticker:        [/หลักทรัพย์/i, /^symbol$/i, /^ticker$/i, /^code$/i, /scrip/i],
-  shares:        [/จำนวน/, /^shares?$/i, /^vol/i, /^qty$/i, /^quantity/i],
-  price:         [/ราคา/, /^price$/i, /avg.?price/i, /trade.?price/i],
-  amount:        [/มูลค่า/, /^amount$/i, /^total$/i, /^value$/i, /^net$/i],
-  fee:           [/ค่านายหน้า/, /ค่าธรรมเนียม/, /^fee$/i, /commission/i],
-  tax:           [/ภาษี/, /อากร/, /^tax$/i, /^vat$/i, /^stamp/i],
+  transacted_at: [
+    /วันที่ครบกำหนด/i,       // Dime!: วันที่ครบกำหนดชำระ
+    /วันที่/i,                // generic Thai date
+    /settlement.?date/i,      // Dime! English
+    /effective.?date/i,
+    /trade.?date/i,
+    /^date$/i,
+    /^day$/i,
+  ],
+  type: [
+    /ประเภทรายการ/i,          // Dime! Thai
+    /ประเภท/i,
+    /transaction.?type/i,     // Dime! English
+    /order.?type/i,
+    /^type$/i,
+    /^action$/i,
+    /^side$/i,
+  ],
+  ticker: [
+    /ชื่อหลักทรัพย์/i,        // Dime! Thai: ชื่อหลักทรัพย์ [ตลาด]
+    /หลักทรัพย์/i,
+    /securities/i,             // Dime! English: Securities [Exchange]
+    /^symbol$/i,
+    /^ticker$/i,
+    /^code$/i,
+    /scrip/i,
+    /^stock/i,
+  ],
+  shares: [
+    /จำนวนหน่วย/i,            // Dime! Thai: จำนวนหน่วย
+    /^unit$/i,                 // Dime! English: Unit (exact)
+    /^shares?$/i,
+    /^vol(?:ume)?$/i,
+    /^qty$/i,
+    /^quantity$/i,
+  ],
+  price: [
+    /ราคาต่อหน่วย/i,          // Dime! Thai: ราคาต่อหน่วย
+    /unit.?price/i,            // Dime! English: Unit Price
+    /avg.?price/i,
+    /trade.?price/i,
+    /^price$/i,
+    /ราคา/i,
+  ],
+  amount: [
+    /จำนวนเงิน(?!รวม)/i,      // "จำนวนเงิน" but NOT "จำนวนเงินรวม" (that's total)
+    /gross.?amount/i,          // Dime! English: Gross Amount
+    /มูลค่า/i,
+    /^amount$/i,
+    /^gross$/i,
+    /^value$/i,
+    /net.?amount/i,
+    /^net$/i,
+  ],
+  total: [
+    /จำนวนเงินรวม/i,          // Dime! Thai: จำนวนเงินรวม
+    /total.?amount/i,          // Dime! English: Total Amount
+    /^total$/i,
+    /รวมสุทธิ/i,
+  ],
+  fee: [
+    /ค่าธรรมเนียมรวม/i,       // Dime! Thai: ค่าธรรมเนียมรวมภาษีมูลค่าเพิ่ม
+    /ค่าธรรมเนียม/i,
+    /ค่านายหน้า/i,
+    /fee.?include/i,           // Dime! English: Fee Include Vat
+    /^fee/i,                   // any header starting with "fee"
+    /commission/i,
+  ],
+  tax: [
+    /ภาษีหัก/i,               // Dime! Thai: ภาษีหัก ณ ที่จ่าย
+    /ภาษี/i,
+    /อากร/i,
+    /withholding/i,            // Dime! English: Withholding Tax
+    /^wht$/i,
+    /^tax$/i,
+    /^vat$/i,
+    /^stamp/i,
+  ],
+  currency: [
+    /สกุลเงิน/i,              // Dime! Thai: สกุลเงิน
+    /^ccy$/i,                  // Dime! English: CCY
+    /^currency$/i,
+  ],
 }
 
 function findHeader(rows) {
@@ -62,7 +147,7 @@ function findHeader(rows) {
     const colMap = {}; let score = 0
     row.forEach((cell, ci) => {
       for (const [field, pats] of Object.entries(HEADER_PATS)) {
-        if (!colMap[field] && pats.some(p => p.test(cell))) {
+        if (colMap[field] === undefined && pats.some(p => p.test(cell))) {
           colMap[field] = ci; score++; break
         }
       }
@@ -112,14 +197,20 @@ function snum(v) {
   return isNaN(n) ? null : n
 }
 
-const SKIP_TICKER = new Set(['SET','THB','USD','VAT','TAX','FEE','BKK','PST','AMP','GET','PUT','NET','ALL'])
+// Words / exchange codes to exclude from auto-ticker detection
+const SKIP_TICKER = new Set([
+  'SET','THB','USD','VAT','TAX','FEE','BKK','AMP','GET','PUT','NET','ALL',
+  'BUY','SELL','DIV','CCY','THB',
+  // Exchange codes (Dime! shows these as [ARCX], [XNAS], etc.)
+  'NYSE','ARCX','XNAS','XNYS','NMS','NGM','PCX','AMEX','ASE','BATS',
+  'LSE','TYO','HKG','SGX','KRX','XTAI',
+])
 
 function pickTicker(cells) {
-  return cells.find(c =>
-    /^[A-Z][A-Z0-9\-]{1,7}(\.BK)?$/.test(c) &&
-    !SKIP_TICKER.has(c) &&
-    !/^\d/.test(c)
-  ) ?? null
+  return cells.find(c => {
+    const clean = c.replace(/\[.*?\]/g, '').trim()
+    return /^[A-Z][A-Z0-9\-]{1,7}$/.test(clean) && !SKIP_TICKER.has(clean)
+  })?.replace(/\[.*?\]/g, '').trim() ?? null
 }
 
 // ─── Main export ──────────────────────────────────────────────────────────────
@@ -143,7 +234,20 @@ export function detectTransactions(rows) {
       const date    = parseDate(rawDate)
       if (!date) continue
 
-      const ticker = (g('ticker') || pickTicker(row) || '').replace(/\.BK$/i, '').toUpperCase() || null
+      // Ticker: clean [EXCHANGE] suffix e.g. "VOO [ARCX]" → "VOO"
+      const rawTicker = g('ticker') || ''
+      const ticker    = (rawTicker.replace(/\[.*?\]/g, '').trim().toUpperCase()
+                         || pickTicker(row)
+                         || '').replace(/\.BK$/i, '') || null
+
+      // Currency: USD or THB based on the CCY column
+      const rawCcy  = g('currency').trim().toUpperCase()
+      const currency = rawCcy === 'USD' ? 'USD' : 'THB'
+
+      // Prefer gross amount; fall back to total if gross not mapped
+      const amtRaw   = g('amount') || g('total')
+      const feeRaw   = g('fee')
+      const taxRaw   = g('tax')
 
       results.push({
         transacted_at: date,
@@ -151,10 +255,10 @@ export function detectTransactions(rows) {
         ticker,
         shares: snum(g('shares')),
         price:  snum(g('price')),
-        amount: snum(g('amount')),
-        fee:    snum(g('fee'))  || 0,
-        tax:    snum(g('tax'))  || 0,
-        currency: 'THB',
+        amount: snum(amtRaw),
+        fee:    snum(feeRaw)  || 0,
+        tax:    snum(taxRaw)  || 0,
+        currency,
         note: null,
       })
     }
@@ -173,9 +277,8 @@ export function detectTransactions(rows) {
     if (!date) continue
 
     const typeMatch  = line.match(/ซื้อ|Buy|ขาย|Sell|ปันผล|Dividend|ฝาก|Deposit|ถอน|Withdraw/i)
-    const ticker     = pickTicker(row)?.replace(/\.BK$/i, '') || null
+    const ticker     = pickTicker(row)
 
-    // Collect all numbers, excluding date components
     const dateParts  = new Set((dateMatch[0].match(/\d+/g) || []).map(Number))
     const nums = (line.match(/[\d,]+(?:\.\d+)?/g) || [])
       .map(n => parseFloat(n.replace(/,/g, '')))
@@ -187,7 +290,6 @@ export function detectTransactions(rows) {
     let shares = null, price = null, amount = large, fee = 0, tax = 0
 
     if (nums.length >= 3) {
-      // Try to find a (shares, price) pair whose product ≈ largest number
       let best = null, bestDiff = Infinity
       for (let i = 0; i < nums.length; i++) {
         for (let j = 0; j < nums.length; j++) {
@@ -207,6 +309,9 @@ export function detectTransactions(rows) {
       shares = nums[0]; amount = nums[1]
     }
 
+    // Detect currency from line content
+    const currency = /\bUSD\b/.test(line) ? 'USD' : 'THB'
+
     results.push({
       transacted_at: date,
       type:   typeMatch ? mapType(typeMatch[0]) : 'Buy',
@@ -216,7 +321,7 @@ export function detectTransactions(rows) {
       amount,
       fee,
       tax,
-      currency: 'THB',
+      currency,
       note: null,
     })
   }
