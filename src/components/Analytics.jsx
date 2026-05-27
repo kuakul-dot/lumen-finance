@@ -118,7 +118,7 @@ export function AnalyticsPage({ t, lang, ccy, dataState, liveHoldings = [], pric
       {tab === "common"          && <AnalyticsCommon t={t} lang={lang} ccy={ccy} rows={rows} totalValue={totalValue} totalPL={totalPL} totalPlPct={totalPlPct} totalCost={totalCost} hasLivePrices={hasLivePrices} demoData={demoData} dataState={dataState} earliestHoldingDate={earliestHoldingDate} />}
       {tab === "diversification" && <AnalyticsDiv t={t} lang={lang} ccy={ccy} rows={rows} totalValue={totalValue} demoData={demoData} dataState={dataState} />}
       {tab === "dividends"       && <AnalyticsDiv2 t={t} lang={lang} ccy={ccy} rows={rows} totalValue={totalValue} dataState={dataState} liveHoldings={liveHoldings} fxRate={fxRate} transactions={transactions} portfolio={portfolio} onTransactionAdded={handleTransactionAdded} onTransactionUpdated={handleTransactionUpdated} onTransactionDeleted={handleTransactionDeleted} />}
-      {tab === "growth"          && <AnalyticsGrowth t={t} lang={lang} ccy={ccy} totalValue={totalValue} totalCost={totalCost} totalPL={totalPL} totalPlPct={totalPlPct} dataState={dataState} earliestHoldingDate={earliestHoldingDate} />}
+      {tab === "growth"          && <AnalyticsGrowth t={t} lang={lang} ccy={ccy} rows={rows} fxRate={fxRate} totalValue={totalValue} totalCost={totalCost} totalPL={totalPL} totalPlPct={totalPlPct} dataState={dataState} earliestHoldingDate={earliestHoldingDate} />}
       {tab === "metrics"         && <AnalyticsMetrics t={t} lang={lang} ccy={ccy} rows={rows} totalValue={totalValue} totalPL={totalPL} totalPlPct={totalPlPct} dataState={dataState} />}
     </div>
   )
@@ -1083,42 +1083,37 @@ function SyncRow({ s, th, FMT, ccy, onChange }) {
 }
 
 /* ─── Growth tab ─────────────────────────────────────────────────────────────── */
-function AnalyticsGrowth({ t, lang, ccy, totalValue, totalCost, totalPL, totalPlPct, dataState, earliestHoldingDate }) {
+function AnalyticsGrowth({ t, lang, ccy, rows = [], fxRate = 36, totalValue, totalCost, totalPL, totalPlPct, dataState, earliestHoldingDate }) {
   const FMT = LUMEN_FMT
   const th = lang === "th"
 
+  // ── How many calendar days since first purchase ────────────────────────────
   const daysSinceFirst = useMemo(() => {
     if (dataState !== "live" || !earliestHoldingDate) return 365 * 5
     return Math.max(1, Math.round((Date.now() - earliestHoldingDate.getTime()) / 86400000))
   }, [dataState, earliestHoldingDate])
 
-  const defaultGrowthPeriod = useMemo(() => {
-    if (dataState !== "live") return "1Y"
-    if (daysSinceFirst >= 365) return "1Y"
-    return "1Y" // 1Y always exists; we'll cap to available days
-  }, [dataState, daysSinceFirst])
-  const [chartPeriod, setChartPeriod] = useState(defaultGrowthPeriod)
-  useEffect(() => { setChartPeriod(defaultGrowthPeriod) }, [defaultGrowthPeriod])
+  const holdingYears = daysSinceFirst / 365   // e.g. 2.7
 
+  // ── Period picker for chart ────────────────────────────────────────────────
+  const [chartPeriod, setChartPeriod] = useState("1Y")
   const growthPeriodDaysMap = { "1Y": 365, "3Y": 365 * 3, "5Y": 365 * 5 }
-  const isGrowthEnabled = (k) => dataState !== "live" || growthPeriodDaysMap[k] <= daysSinceFirst + 7
+  const isGrowthEnabled = k => dataState !== "live" || growthPeriodDaysMap[k] <= daysSinceFirst + 14
+
+  // ── Demo series ────────────────────────────────────────────────────────────
   const monthLabels = ["Jun","Jul","Aug","Sep","Oct","Nov","Dec","Jan","Feb","Mar","Apr","May"]
   const port = LUMEN_HISTORY, bench = LUMEN_BENCH
   const v0 = port[0].v, b0 = bench[0].v
-  const series = [
-    {
-      name: th ? "พอร์ตของคุณ" : "Your portfolio",
-      color: "var(--ink)", fill: true,
-      data: port.map((p, i) => ({ x: i, y: (p.v / v0 - 1) * 100, label: monthLabels[i % 12] + " '" + (24 + Math.floor(i / 12)) })),
-    },
-    {
-      name: "S&P 500",
-      color: "var(--accent)", dashed: true,
-      data: bench.map((p, i) => ({ x: i, y: (p.v / b0 - 1) * 100, label: monthLabels[i % 12] + " '" + (24 + Math.floor(i / 12)) })),
-    },
+  const demoSeries = [
+    { name: th ? "พอร์ตตัวอย่าง" : "Demo portfolio", color: "var(--ink)", fill: true,
+      data: port.map((p, i) => ({ x: i, y: (p.v / v0 - 1) * 100, label: monthLabels[i % 12] + " '" + (24 + Math.floor(i / 12)) })) },
+    { name: "S&P 500", color: "var(--accent)", dashed: true,
+      data: bench.map((p, i) => ({ x: i, y: (p.v / b0 - 1) * 100, label: monthLabels[i % 12] + " '" + (24 + Math.floor(i / 12)) })) },
   ]
 
-  // Live mode: cumulative return % within the actual investment window
+  // ── Live: estimated cumulative-return path (start=0%, end=totalPlPct) ──────
+  // We don't store daily NAV, so we simulate a plausible growth path that
+  // anchors to the real start date and the real current return.
   const liveSeries = useMemo(() => {
     if (dataState !== "live" || totalCost <= 0 || totalValue <= 0) return null
     const now = new Date()
@@ -1128,15 +1123,13 @@ function AnalyticsGrowth({ t, lang, ccy, totalValue, totalCost, totalPL, totalPl
     const stepD = totalDays / (pts - 1)
     const finalPct = totalPlPct
     const noiseScale = Math.max(Math.abs(finalPct) * 0.12, 1.0)
-    const easeAt = p => p < 0.5 ? 2 * p * p : -1 + (4 - 2 * p) * p
-    const noiseAt = (i, seed) => (
-      Math.sin(i * 0.61 + seed) * 0.55 +
-      Math.sin(i * 1.43 + seed * 1.7) * 0.30 +
-      Math.sin(i * 2.91 + seed * 2.3) * 0.18 +
-      Math.cos(i * 4.27 + seed * 3.1) * 0.10
+    const ease = p => p < 0.5 ? 2 * p * p : -1 + (4 - 2 * p) * p
+    const noise = (i, s) => (
+      Math.sin(i * 0.61 + s) * 0.55 + Math.sin(i * 1.43 + s * 1.7) * 0.30 +
+      Math.sin(i * 2.91 + s * 2.3) * 0.18 + Math.cos(i * 4.27 + s * 3.1) * 0.10
     )
     const locale = th ? "th-TH" : "en-US"
-    const mkLabel = (d) => {
+    const mkLabel = d => {
       if (totalDays < 60)  return d.toLocaleString(locale, { month: "short", day: "numeric" })
       if (totalDays < 730) return d.toLocaleString(locale, { month: "short" }) + " '" + String(d.getFullYear()).slice(2)
       return "'" + String(d.getFullYear()).slice(2)
@@ -1147,20 +1140,20 @@ function AnalyticsGrowth({ t, lang, ccy, totalValue, totalCost, totalPL, totalPl
       data: Array.from({ length: pts }, (_, i) => {
         const p = i / (pts - 1)
         const fade = Math.sin(Math.PI * p)
-        const y = finalPct * easeAt(p) + noiseAt(i, 1.7) * noiseScale * fade
+        const y = finalPct * ease(p) + noise(i, 1.7) * noiseScale * fade
         const d = new Date(now); d.setDate(d.getDate() - (pts - 1 - i) * stepD)
         return { x: i, y, label: mkLabel(d) }
       })
     }]
   }, [dataState, totalCost, totalValue, totalPlPct, th, chartPeriod, daysSinceFirst])
 
-  // Approximate CAGR assuming the simulated curve spans ~1 year baseline
-  const approxYrs = chartPeriod === "1Y" ? 1 : chartPeriod === "3Y" ? 3 : 5
-  const cagr = dataState === "live" && totalCost > 0 && totalValue > 0
-    ? (Math.pow(totalValue / totalCost, 1 / approxYrs) - 1) * 100
+  // ── CAGR using actual holding period ─────────────────────────────────────
+  // Formula: (market_value / cost_basis) ^ (1 / years) - 1
+  const cagr = dataState === "live" && totalCost > 0 && totalValue > 0 && holdingYears >= 0.08
+    ? (Math.pow(totalValue / totalCost, 1 / holdingYears) - 1) * 100
     : null
 
-  // Simulated max drawdown from synthetic curve (rough indicator)
+  // ── Max drawdown from simulated curve ────────────────────────────────────
   const drawdown = useMemo(() => {
     if (!liveSeries?.[0]?.data?.length) return null
     let peak = -Infinity, maxDd = 0
@@ -1172,6 +1165,25 @@ function AnalyticsGrowth({ t, lang, ccy, totalValue, totalCost, totalPL, totalPl
     return maxDd
   }, [liveSeries])
 
+  // ── Per-ticker performance (aggregated from multi-lot rows) ───────────────
+  // cost (THB) = value - pl  (both are already in THB from deriveHoldings)
+  const holdingPerf = useMemo(() => {
+    if (!rows.length) return []
+    const map = {}
+    rows.forEach(r => {
+      if (!map[r.ticker]) map[r.ticker] = { ticker: r.ticker, name: r.name, value: 0, pl: 0 }
+      map[r.ticker].value += r.value
+      map[r.ticker].pl   += r.pl
+    })
+    return Object.values(map)
+      .map(h => {
+        const cost = h.value - h.pl
+        return { ...h, cost, plPct: cost > 0 ? (h.pl / cost) * 100 : 0 }
+      })
+      .sort((a, b) => b.plPct - a.plPct)
+  }, [rows])
+
+  // ── Demo annual-returns table ─────────────────────────────────────────────
   const yrs = [
     { label: "2023", port: 12.4, bench: 24.2 },
     { label: "2024", port: 18.9, bench: 23.3 },
@@ -1179,70 +1191,94 @@ function AnalyticsGrowth({ t, lang, ccy, totalValue, totalCost, totalPL, totalPl
     { label: "2026 YTD", port: 8.4, bench: 5.1 },
   ]
 
+  // ── Helpers ───────────────────────────────────────────────────────────────
+  const sign = v => v >= 0 ? "+" : ""
+  const periodLabel = holdingYears >= 1
+    ? holdingYears.toFixed(1) + (th ? " ปี" : " yr" + (holdingYears.toFixed(1) !== "1.0" ? "s" : ""))
+    : Math.round(daysSinceFirst / 30.5) + (th ? " เดือน" : " mo")
+
   return (
     <div className="fade-in">
+
+      {/* ── KPI row ── */}
       <div className="grid grid-12" style={{ marginBottom: 16 }}>
         {dataState === "live" ? (
           <>
+            {/* Total Return: (current_value − cost) / cost */}
             <BigKpi className="col-span-3"
-              label={th ? "ผลตอบแทนรวม (จากต้นทุน)" : "Total return (vs. cost)"}
-              value={(totalPlPct >= 0 ? "+" : "") + totalPlPct.toFixed(1) + "%"}
-              sub={(totalPL >= 0 ? "+" : "") + FMT.money(totalPL, ccy, { compact: true })}
+              label={th ? "ผลตอบแทนรวม" : "Total return"}
+              value={sign(totalPlPct) + totalPlPct.toFixed(1) + "%"}
+              sub={th
+                ? `(มูลค่า − ต้นทุน) ÷ ต้นทุน`
+                : `(value − cost) ÷ cost`}
               tone={totalPlPct >= 0 ? "gain" : "loss"} />
+
+            {/* CAGR: (value/cost)^(1/yrs) − 1 */}
             <BigKpi className="col-span-3"
-              label={"CAGR (" + chartPeriod + " approx)"}
-              value={cagr != null ? (cagr >= 0 ? "+" : "") + cagr.toFixed(1) + "%" : "—"}
-              sub={th ? "ประมาณการจากจำนวนปี" : "estimated annualized"}
+              label={`CAGR · ${periodLabel}`}
+              value={cagr != null ? sign(cagr) + cagr.toFixed(1) + "%/yr" : "—"}
+              sub={th
+                ? `(มูลค่า÷ต้นทุน)^(1/${holdingYears.toFixed(2)}) − 1`
+                : `(value÷cost)^(1/${holdingYears.toFixed(2)}) − 1`}
               tone={cagr != null ? (cagr >= 0 ? "gain" : "loss") : undefined} />
+
+            {/* Absolute P&L: market_value − cost_basis */}
             <BigKpi className="col-span-3"
-              label={t.analytics.vsBench}
-              value={th ? "ต้องการประวัติจริง" : "Needs real history"}
-              sub={th ? "เทียบ S&P 500 ยังไม่พร้อม" : "S&P 500 baseline unavailable"} />
+              label={th ? "กำไร/ขาดทุน (unrealized)" : "Unrealized P&L"}
+              value={sign(totalPL) + FMT.money(totalPL, ccy, { compact: true })}
+              sub={th
+                ? `${FMT.money(totalValue, ccy, { compact: true })} − ${FMT.money(totalCost, ccy, { compact: true })}`
+                : `mkt value − cost basis`}
+              tone={totalPL >= 0 ? "gain" : "loss"} />
+
+            {/* Max drawdown from simulated path */}
             <BigKpi className="col-span-3"
-              label={t.analytics.drawdown + (th ? " (จำลอง)" : " (sim)")}
+              label={th ? "Max Drawdown (ประมาณ)" : "Max Drawdown (est.)"}
               value={drawdown != null ? drawdown.toFixed(1) + "%" : "—"}
-              sub={th ? "จากเส้นโค้งจำลอง" : "from simulated curve"}
+              sub={th
+                ? "ลดลงสูงสุดจากจุดสูงสุด (เส้นโค้งประมาณ)"
+                : "peak-to-trough on estimated path"}
               tone={drawdown != null && drawdown < -5 ? "loss" : undefined} />
           </>
         ) : (
           <>
-            <BigKpi className="col-span-3" label={th ? "ผลตอบแทนรวม" : "Total return"} value="+58.7%" sub={th ? "ตั้งแต่เริ่ม" : "since inception"} tone="gain" />
-            <BigKpi className="col-span-3" label="CAGR" value="+16.6%" sub={th ? "3 ปีถ่วงเวลา" : "3-yr annualized"} tone="gain" />
-            <BigKpi className="col-span-3" label={t.analytics.vsBench} value="+4.2pp" sub={th ? "ดีกว่า S&P 500" : "outperforming"} tone="gain" />
-            <BigKpi className="col-span-3" label={t.analytics.drawdown} value="-9.8%" sub={th ? "ก.ค. 2024" : "Jul 2024"} tone="loss" />
+            <BigKpi className="col-span-3" label={th ? "ผลตอบแทนรวม" : "Total return"} value="+58.7%" sub={th ? "ตั้งแต่เริ่มพอร์ต" : "since inception"} tone="gain" />
+            <BigKpi className="col-span-3" label="CAGR · 3 yrs" value="+16.6%/yr" sub={th ? "(มูลค่า÷ต้นทุน)^(1/3) − 1" : "(value÷cost)^(1/3) − 1"} tone="gain" />
+            <BigKpi className="col-span-3" label={t.analytics.vsBench} value="+4.2pp" sub={th ? "ดีกว่า S&P 500 · ข้อมูลตัวอย่าง" : "vs S&P 500 · demo data"} tone="gain" />
+            <BigKpi className="col-span-3" label={t.analytics.drawdown} value="-9.8%" sub={th ? "ก.ค. 2024 · peak-to-trough" : "Jul 2024 · peak-to-trough"} tone="loss" />
           </>
         )}
       </div>
 
+      {/* ── Growth chart ── */}
       {dataState === "live" ? (
         liveSeries ? (
           <div className="card" style={{ marginBottom: 16 }}>
             <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-end", marginBottom: 16 }}>
               <div>
-                <h3 className="section-title">{th ? "ผลตอบแทนสะสม (จำลอง)" : "Cumulative return (simulated)"}</h3>
-                <div className="muted" style={{ fontSize: 12, marginTop: 4 }}>
+                <h3 className="section-title">
+                  {th ? "เส้นทางผลตอบแทนสะสม" : "Cumulative return path"}
+                </h3>
+                <div className="muted" style={{ fontSize: 11, marginTop: 4 }}>
                   {th
-                    ? "% เปลี่ยนแปลงจากต้นทุน · เส้นโค้งจำลอง"
-                    : "% change from cost basis · simulated curve"}
+                    ? "จุดเริ่ม = 0% (ต้นทุน) · จุดสิ้นสุด = มูลค่าปัจจุบัน · เส้นทางประมาณการ (ยังไม่มีประวัติราคารายวัน)"
+                    : "Start = 0% (cost) · End = current return · Estimated path — no daily NAV history yet"}
                 </div>
               </div>
               <div className="segmented">
                 {["1Y","3Y","5Y"].map(k => {
                   const enabled = isGrowthEnabled(k)
                   return (
-                    <button key={k}
-                            className={chartPeriod === k ? "on" : ""}
-                            disabled={!enabled}
-                            title={!enabled ? (th ? "ข้อมูลย้อนหลังไม่พอ" : "Not enough history yet") : undefined}
-                            style={{ opacity: enabled ? 1 : 0.35, cursor: enabled ? "pointer" : "not-allowed" }}
-                            onClick={() => enabled && setChartPeriod(k)}>
-                      {k}
-                    </button>
+                    <button key={k} className={chartPeriod === k ? "on" : ""}
+                      disabled={!enabled}
+                      title={!enabled ? (th ? "ข้อมูลย้อนหลังไม่พอ" : "Not enough history yet") : undefined}
+                      style={{ opacity: enabled ? 1 : 0.35, cursor: enabled ? "pointer" : "not-allowed" }}
+                      onClick={() => enabled && setChartPeriod(k)}>{k}</button>
                   )
                 })}
               </div>
             </div>
-            <LineChart series={liveSeries} height={320} fmt={v => v.toFixed(0) + "%"} />
+            <LineChart series={liveSeries} height={300} fmt={v => (v >= 0 ? "+" : "") + v.toFixed(1) + "%"} />
           </div>
         ) : (
           <div className="card" style={{ marginBottom: 16, padding: "36px 48px", display: "flex", alignItems: "center", gap: 24 }}>
@@ -1251,12 +1287,8 @@ function AnalyticsGrowth({ t, lang, ccy, totalValue, totalCost, totalPL, totalPl
               <path d="M8 28 L18 18 L26 22 L36 12 L44 16" fill="none" stroke="var(--ink-4)" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
             </svg>
             <div>
-              <div style={{ fontWeight: 500, fontSize: 14, marginBottom: 4 }}>
-                {th ? "ยังไม่มีข้อมูลพอร์ต" : "No portfolio data yet"}
-              </div>
-              <div className="muted" style={{ fontSize: 13 }}>
-                {th ? "เพิ่มหลักทรัพย์เพื่อดูกราฟ" : "Add holdings to see the chart"}
-              </div>
+              <div style={{ fontWeight: 500, fontSize: 14, marginBottom: 4 }}>{th ? "ยังไม่มีข้อมูลพอร์ต" : "No portfolio data yet"}</div>
+              <div className="muted" style={{ fontSize: 13 }}>{th ? "เพิ่มหลักทรัพย์เพื่อดูกราฟ" : "Add holdings to see the chart"}</div>
             </div>
           </div>
         )
@@ -1264,34 +1296,115 @@ function AnalyticsGrowth({ t, lang, ccy, totalValue, totalCost, totalPL, totalPl
         <>
           <div className="card" style={{ marginBottom: 16 }}>
             <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-end", marginBottom: 16 }}>
-              <h3 className="section-title">{th ? "ผลตอบแทนสะสม (เริ่มที่ 0%)" : "Cumulative return (rebased to 0%)"}</h3>
+              <div>
+                <h3 className="section-title">{th ? "ผลตอบแทนสะสม (เริ่มที่ 0%)" : "Cumulative return (rebased to 0%)"}</h3>
+                <div className="muted" style={{ fontSize: 11, marginTop: 4 }}>
+                  {th ? "ข้อมูลตัวอย่าง · เส้นทึบ = พอร์ต, เส้นประ = S&P 500" : "Demo data · solid = portfolio, dashed = S&P 500"}
+                </div>
+              </div>
               <div className="segmented">
                 {["3m","6m","ytd","1y","3y","all"].map(k => (
                   <button key={k} className={k === "all" ? "on" : ""}>{t.analytics.timeRange[k] || k.toUpperCase()}</button>
                 ))}
               </div>
             </div>
-            <LineChart series={series} height={320} fmt={v => v.toFixed(0) + "%"} />
+            <LineChart series={demoSeries} height={300} fmt={v => v.toFixed(0) + "%"} />
           </div>
           <div className="card">
-            <h3 className="section-title" style={{ marginBottom: 16 }}>{th ? "ผลตอบแทนรายปี" : "Annual returns"}</h3>
+            <h3 className="section-title" style={{ marginBottom: 16 }}>{th ? "ผลตอบแทนรายปี (ข้อมูลตัวอย่าง)" : "Annual returns (demo data)"}</h3>
             <div className="grid grid-4" style={{ gap: 14 }}>
               {yrs.map(y => (
                 <div key={y.label} style={{ padding: 16, border: "1px solid var(--line)", borderRadius: 12 }}>
                   <div className="label-up" style={{ marginBottom: 8 }}>{y.label}</div>
                   <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-end", marginBottom: 6 }}>
-                    <div className="display" style={{ fontSize: 24, color: y.port > y.bench ? "var(--gain)" : "var(--loss)" }}>+{y.port}%</div>
-                    <div className="mono muted" style={{ fontSize: 12 }}>S&P {y.bench >= 0 ? "+" : ""}{y.bench}%</div>
+                    <div className="display" style={{ fontSize: 24, color: y.port >= 0 ? "var(--gain)" : "var(--loss)" }}>{sign(y.port)}{y.port}%</div>
+                    <div className="mono muted" style={{ fontSize: 12 }}>S&P {sign(y.bench)}{y.bench}%</div>
                   </div>
-                  <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
-                    <div className="bar" style={{ flex: 1, height: 4 }}><span style={{ width: Math.min(100, y.port / 30 * 100) + "%", background: "var(--ink)" }} /></div>
-                    <div className="bar" style={{ flex: 1, height: 4 }}><span style={{ width: Math.min(100, y.bench / 30 * 100) + "%", background: "var(--accent)" }} /></div>
+                  <div style={{ display: "flex", gap: 6, alignItems: "center" }}>
+                    <div style={{ fontSize: 10, color: "var(--ink-4)" }}>{th ? "พอร์ต" : "Port"}</div>
+                    <div className="bar" style={{ flex: 1, height: 4 }}><span style={{ width: Math.min(100, Math.abs(y.port) / 30 * 100) + "%", background: y.port >= 0 ? "var(--gain)" : "var(--loss)" }} /></div>
+                    <div style={{ fontSize: 10, color: "var(--ink-4)" }}>S&P</div>
+                    <div className="bar" style={{ flex: 1, height: 4 }}><span style={{ width: Math.min(100, Math.abs(y.bench) / 30 * 100) + "%", background: "var(--accent)" }} /></div>
                   </div>
                 </div>
               ))}
             </div>
           </div>
         </>
+      )}
+
+      {/* ── Per-holding performance table (live only) ── */}
+      {dataState === "live" && holdingPerf.length > 0 && (
+        <div className="card" style={{ marginTop: 16 }}>
+          <h3 className="section-title" style={{ marginBottom: 4 }}>
+            {th ? "ผลตอบแทนแต่ละหลักทรัพย์" : "Per-holding breakdown"}
+          </h3>
+          <p className="muted" style={{ fontSize: 11, margin: "0 0 14px" }}>
+            {th
+              ? "ต้นทุน = ราคาซื้อ × จำนวนหุ้น (THB) · กำไร/ขาดทุน = มูลค่าตลาด − ต้นทุน (unrealized)"
+              : "Cost = avg buy price × shares (THB) · P&L = market value − cost · unrealized"}
+          </p>
+          {/* Header */}
+          <div style={{ display: "grid", gridTemplateColumns: "36px 1fr 110px 110px 110px 70px", gap: 8, alignItems: "center", padding: "0 0 8px", borderBottom: "2px solid var(--line)", fontSize: 10, color: "var(--ink-4)", fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.05em" }}>
+            <div />
+            <div>{th ? "หลักทรัพย์" : "Ticker"}</div>
+            <div style={{ textAlign: "right" }}>{th ? "ต้นทุน" : "Cost"}</div>
+            <div style={{ textAlign: "right" }}>{th ? "มูลค่าปัจจุบัน" : "Mkt value"}</div>
+            <div style={{ textAlign: "right" }}>P&L</div>
+            <div style={{ textAlign: "right" }}>Return</div>
+          </div>
+          {holdingPerf.map(h => (
+            <div key={h.ticker} style={{ display: "grid", gridTemplateColumns: "36px 1fr 110px 110px 110px 70px", gap: 8, alignItems: "center", padding: "10px 0", borderBottom: "1px solid var(--line)" }}>
+              <div className="ticker-mark" style={{ fontSize: 11 }}>{h.ticker.slice(0, 2)}</div>
+              <div>
+                <div style={{ fontWeight: 500, fontSize: 13 }}>{h.ticker}</div>
+                <div className="muted" style={{ fontSize: 11 }}>{h.name}</div>
+              </div>
+              <div className="mono" style={{ fontSize: 12, textAlign: "right", color: "var(--ink-3)" }}>
+                {FMT.money(h.cost, ccy, { compact: true })}
+              </div>
+              <div className="mono" style={{ fontSize: 12, textAlign: "right" }}>
+                {FMT.money(h.value, ccy, { compact: true })}
+              </div>
+              <div className="mono" style={{ fontSize: 12, textAlign: "right", color: h.pl >= 0 ? "var(--gain)" : "var(--loss)" }}>
+                {sign(h.pl)}{FMT.money(h.pl, ccy, { compact: true })}
+              </div>
+              <div style={{ textAlign: "right" }}>
+                <span style={{ fontSize: 13, fontWeight: 600, color: h.plPct >= 0 ? "var(--gain)" : "var(--loss)" }}>
+                  {sign(h.plPct)}{h.plPct.toFixed(1)}%
+                </span>
+              </div>
+            </div>
+          ))}
+          {/* Total row */}
+          <div style={{ display: "grid", gridTemplateColumns: "36px 1fr 110px 110px 110px 70px", gap: 8, alignItems: "center", padding: "10px 0 0", fontSize: 12, fontWeight: 600 }}>
+            <div />
+            <div style={{ color: "var(--ink-3)" }}>{th ? "รวมพอร์ต" : "Portfolio total"}</div>
+            <div className="mono" style={{ textAlign: "right", color: "var(--ink-3)" }}>{FMT.money(totalCost, ccy, { compact: true })}</div>
+            <div className="mono" style={{ textAlign: "right" }}>{FMT.money(totalValue, ccy, { compact: true })}</div>
+            <div className="mono" style={{ textAlign: "right", color: totalPL >= 0 ? "var(--gain)" : "var(--loss)" }}>
+              {sign(totalPL)}{FMT.money(totalPL, ccy, { compact: true })}
+            </div>
+            <div style={{ textAlign: "right", color: totalPlPct >= 0 ? "var(--gain)" : "var(--loss)" }}>
+              {sign(totalPlPct)}{totalPlPct.toFixed(1)}%
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ── Methodology note (live only) ── */}
+      {dataState === "live" && (
+        <div className="card" style={{ marginTop: 16, padding: "16px 20px", background: "var(--bg-2)" }}>
+          <div style={{ fontWeight: 600, fontSize: 12, marginBottom: 8 }}>
+            {th ? "📐 วิธีคำนวณ" : "📐 How it's calculated"}
+          </div>
+          <div style={{ display: "grid", gap: 6, fontSize: 11, color: "var(--ink-3)", lineHeight: 1.6 }}>
+            <div><span style={{ fontWeight: 500, color: "var(--ink-2)" }}>{th ? "ผลตอบแทนรวม" : "Total Return"}</span>{" — "}{th ? "(มูลค่าตลาดทุกหลักทรัพย์ − ต้นทุนรวม) ÷ ต้นทุนรวม · ยังไม่รวมปันผลที่ได้รับ (unrealized)" : "(sum of market values − total cost) ÷ total cost · excludes dividends received · unrealized gain only"}</div>
+            <div><span style={{ fontWeight: 500, color: "var(--ink-2)" }}>CAGR</span>{" — "}{th ? "(มูลค่า ÷ ต้นทุน)^(1 ÷ จำนวนปีที่ถือ) − 1 · จำนวนปีนับจากวันที่ Buy แรกในบันทึก" : "(value ÷ cost)^(1 ÷ years held) − 1 · years counted from earliest recorded Buy transaction"}</div>
+            <div><span style={{ fontWeight: 500, color: "var(--ink-2)" }}>{th ? "กราฟเส้นทาง" : "Return path chart"}</span>{" — "}{th ? "ประมาณการเส้นทางจากจุดเริ่ม (ต้นทุน = 0%) ถึงปัจจุบัน — ยังไม่มีประวัติ NAV รายวัน เส้นโค้งไม่ใช่ข้อมูลจริง" : "Estimated trajectory from start (cost = 0%) to current return — no daily NAV history stored yet, path is illustrative"}</div>
+            <div><span style={{ fontWeight: 500, color: "var(--ink-2)" }}>Max Drawdown</span>{" — "}{th ? "ลดลงมากที่สุดจากจุดสูงสุด วัดจากเส้นโค้งประมาณ (ไม่ใช่ข้อมูลจริง)" : "Largest peak-to-trough drop on the estimated curve — not from real price history"}</div>
+          </div>
+        </div>
       )}
     </div>
   )
