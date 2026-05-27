@@ -6,6 +6,7 @@ import {
   LUMEN_ACTIVITY, LUMEN_UPCOMING, LUMEN_INSIGHTS, LUMEN_FX,
 } from '../data'
 import { deriveHoldings, upsertCashAccount, deleteCashAccount, getGoals, getTransactions } from '../lib/db'
+import { fetchHistory } from '../lib/prices'
 
 function makeGreeting(name, lang) {
   const h = new Date().getHours()
@@ -441,30 +442,60 @@ function LiveDashboardPage({ t, lang, ccy, setRoute, liveHoldings, prices = {}, 
   const th = lang === "th"
   const [showCashModal, setShowCashModal] = useState(null)
   const [goals, setGoals] = useState([])
-  const [recentTx, setRecentTx] = useState([])
-  const [chartPeriod, setChartPeriod] = useState("1Y")
+  const [allTx, setAllTx] = useState([])
+  const recentTx = useMemo(() => allTx.slice(0, 5), [allTx])
 
   useEffect(() => {
     if (!portfolio) return
     if (portfolio.user_id) {
       getGoals(portfolio.user_id).then(setGoals).catch(() => {})
     }
-    getTransactions(portfolio.id).then(d => setRecentTx((d || []).slice(0, 5))).catch(() => {})
+    getTransactions(portfolio.id).then(d => setAllTx(d || [])).catch(() => {})
   }, [portfolio?.id, portfolio?.user_id])
 
   const rows          = useMemo(() => deriveHoldings(liveHoldings, ccy, prices, fxRate), [liveHoldings, ccy, prices, fxRate])
 
-  // Earliest purchase date across all holdings — used to cap the chart start
+  // Earliest *real* investment date — prefer Buy transactions' transacted_at
+  // (user-entered), fall back to holdings.purchased_at / created_at.
   const earliestHoldingDate = useMemo(() => {
-    if (!liveHoldings || liveHoldings.length === 0) return null
-    const dates = liveHoldings
-      .map(h => h.purchased_at || h.created_at)
-      .filter(Boolean)
-      .map(d => new Date(d))
-      .filter(d => !isNaN(d.getTime()))
-    if (dates.length === 0) return null
-    return new Date(Math.min(...dates.map(d => d.getTime())))
-  }, [liveHoldings])
+    const candidates = []
+    allTx.filter(tx => (tx.type || 'Buy') === 'Buy')
+         .forEach(tx => { if (tx.transacted_at) candidates.push(new Date(tx.transacted_at)) })
+    liveHoldings.forEach(h => {
+      if (h.purchased_at) candidates.push(new Date(h.purchased_at))
+      else if (h.created_at) candidates.push(new Date(h.created_at))
+    })
+    const valid = candidates.filter(d => !isNaN(d.getTime()))
+    return valid.length ? new Date(Math.min(...valid.map(d => d.getTime()))) : null
+  }, [allTx, liveHoldings])
+
+  const daysSinceFirst = useMemo(() => {
+    if (!earliestHoldingDate) return 365 * 5
+    return Math.max(1, Math.round((Date.now() - earliestHoldingDate.getTime()) / 86400000))
+  }, [earliestHoldingDate])
+
+  // Auto-pick default period to fit available history
+  const defaultPeriod = useMemo(() => {
+    if (daysSinceFirst >= 365 * 3) return "3Y"
+    if (daysSinceFirst >= 365)     return "1Y"
+    return "1Y"
+  }, [daysSinceFirst])
+  const [chartPeriod, setChartPeriod] = useState(defaultPeriod)
+  useEffect(() => { setChartPeriod(defaultPeriod) }, [defaultPeriod])
+  const periodDaysMap = { "1Y": 365, "3Y": 365 * 3, "5Y": 365 * 5 }
+  const isPeriodEnabled = (k) => periodDaysMap[k] <= daysSinceFirst + 7
+
+  // Real S&P 500 history — fetched once per session, sliced per period
+  const [spxData, setSpxData] = useState(null)
+  useEffect(() => {
+    const range = daysSinceFirst >= 365 * 2 ? "5y"
+                : daysSinceFirst >= 365     ? "2y"
+                : daysSinceFirst >= 180     ? "1y"
+                : daysSinceFirst >= 90      ? "6mo" : "3mo"
+    let cancelled = false
+    fetchHistory("^GSPC", range).then(d => { if (!cancelled) setSpxData(d) }).catch(() => {})
+    return () => { cancelled = true }
+  }, [daysSinceFirst])
 
   const totalValue    = rows.reduce((s, r) => s + r.value, 0)
   const totalPL       = rows.reduce((s, r) => s + r.pl, 0)
@@ -509,25 +540,84 @@ function LiveDashboardPage({ t, lang, ccy, setRoute, liveHoldings, prices = {}, 
     return list.slice(0, 5)
   }, [rows])
 
-  // Simulated growth chart — full 1Y / 3Y / 5Y range, no date cap (data is synthetic anyway)
+  // Portfolio value chart — matches Analytics behavior:
+  //  - X-axis spans min(selected period, daysSinceFirst)
+  //  - Real S&P 500 line from Yahoo (^GSPC), rebased to start at cost basis
+  //  - Adaptive date labels (day-month / month-year / year only)
+  //  - Both series share the same N points / x positions
   const histSeries = useMemo(() => {
     if (totalCostBasis <= 0 || totalValue <= 0) return []
-    const cfg = { "1Y": { pts: 12, stepM: 1 }, "3Y": { pts: 18, stepM: 2 }, "5Y": { pts: 20, stepM: 3 } }
-    const { pts, stepM } = cfg[chartPeriod] || cfg["1Y"]
     const now = new Date()
-    return [{
+    const requestedDays = periodDaysMap[chartPeriod] || 365
+    const totalDays = Math.max(7, Math.min(requestedDays, daysSinceFirst))
+
+    const range = totalValue - totalCostBasis
+    const noiseScale = Math.max(Math.abs(range) * 0.1, totalCostBasis * 0.015)
+    const easeAt = p => p < 0.5 ? 2 * p * p : -1 + (4 - 2 * p) * p
+    const noiseAt = (i, seed) => (
+      Math.sin(i * 0.61 + seed) * 0.55 +
+      Math.sin(i * 1.43 + seed * 1.7) * 0.30 +
+      Math.sin(i * 2.91 + seed * 2.3) * 0.18 +
+      Math.cos(i * 4.27 + seed * 3.1) * 0.10
+    )
+    const locale = th ? "th-TH" : "en-US"
+    const mkLabel = (d) => {
+      if (totalDays < 60)  return d.toLocaleString(locale, { month: "short", day: "numeric" })
+      if (totalDays < 730) return d.toLocaleString(locale, { month: "short" }) + " '" + String(d.getFullYear()).slice(2)
+      return "'" + String(d.getFullYear()).slice(2)
+    }
+
+    const spxAll = spxData?.series || []
+    const cutoffSec = (now.getTime() - totalDays * 86400000) / 1000
+    const spxSlice = spxAll.filter(p => p.t >= cutoffSec)
+    const hasSpx = spxSlice.length >= 2
+
+    if (!hasSpx) {
+      const portPts = Math.max(8, Math.min(60, Math.round(totalDays / 7)))
+      const portStepD = totalDays / (portPts - 1)
+      return [{
+        name: th ? "มูลค่าพอร์ต" : "Portfolio value",
+        color: "var(--ink)", fill: true,
+        data: Array.from({ length: portPts }, (_, i) => {
+          const p = i / (portPts - 1)
+          const fade = Math.sin(Math.PI * p)
+          const y = totalCostBasis + range * easeAt(p) + noiseAt(i, 1.7) * noiseScale * fade
+          const d = new Date(now); d.setDate(d.getDate() - (portPts - 1 - i) * portStepD)
+          return { x: i, y, label: mkLabel(d) }
+        })
+      }]
+    }
+
+    const targetPts = Math.max(8, Math.min(60, Math.round(totalDays / 7)))
+    const stride = Math.max(1, Math.floor(spxSlice.length / targetPts))
+    let sampled = spxSlice.filter((_, i) => i % stride === 0)
+    if (sampled.length === 0 || sampled[sampled.length - 1] !== spxSlice[spxSlice.length - 1]) {
+      sampled = [...sampled, spxSlice[spxSlice.length - 1]]
+    }
+    const N = sampled.length
+    const baseClose = sampled[0].c
+
+    const portfolioSeries = {
       name: th ? "มูลค่าพอร์ต" : "Portfolio value",
       color: "var(--ink)", fill: true,
-      data: Array.from({ length: pts }, (_, i) => {
-        const p = i / (pts - 1)
-        const ease = p < 0.5 ? 2 * p * p : -1 + (4 - 2 * p) * p
-        const noise = (Math.sin(i * 2.3) * 0.012 + Math.cos(i * 4.1) * 0.008) * totalCostBasis
-        const d = new Date(now.getFullYear(), now.getMonth() - (pts - 1 - i) * stepM, 1)
-        const lbl = d.toLocaleString(th ? "th-TH" : "en-US", { month: "short" }) + " '" + String(d.getFullYear()).slice(2)
-        return { x: i, y: totalCostBasis + (totalValue - totalCostBasis) * ease + noise, label: lbl }
+      data: sampled.map((p, i) => {
+        const prog = i / (N - 1)
+        const fade = Math.sin(Math.PI * prog)
+        const y = totalCostBasis + range * easeAt(prog) + noiseAt(i, 1.7) * noiseScale * fade
+        return { x: i, y, label: mkLabel(new Date(p.t * 1000)) }
       })
-    }]
-  }, [totalCostBasis, totalValue, th, chartPeriod])
+    }
+    const sp500Series = {
+      name: "S&P 500",
+      color: "var(--accent)",
+      data: sampled.map((p, i) => ({
+        x: i,
+        y: totalCostBasis * (p.c / baseClose),
+        label: mkLabel(new Date(p.t * 1000)),
+      }))
+    }
+    return [portfolioSeries, sp500Series]
+  }, [totalCostBasis, totalValue, th, chartPeriod, daysSinceFirst, spxData])
 
   const chartLabel = chartPeriod
 
@@ -678,12 +768,27 @@ function LiveDashboardPage({ t, lang, ccy, setRoute, liveHoldings, prices = {}, 
           </div>
           <div>
             <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 8 }}>
-              <div className="label-up">{th ? "มูลค่าพอร์ต" : "Portfolio"} · {chartLabel}</div>
+              <div>
+                <div className="label-up">{th ? "มูลค่าพอร์ต vs. S&P 500" : "Portfolio vs. S&P 500"} · {chartLabel}</div>
+                {earliestHoldingDate && (
+                  <div style={{ fontSize: 10, color: "var(--ink-4)", marginTop: 2 }}>
+                    {th
+                      ? `ตั้งแต่ลงทุนครั้งแรก · ${daysSinceFirst} วัน`
+                      : `Since first holding · ${daysSinceFirst} days`}
+                  </div>
+                )}
+              </div>
               <div className="segmented" style={{ gap: 0 }}>
-                {["1Y", "3Y", "5Y"].map(p => (
-                  <button key={p} className={chartPeriod === p ? "on" : ""} onClick={() => setChartPeriod(p)}
-                    style={{ fontSize: 12, padding: "4px 10px" }}>{p}</button>
-                ))}
+                {["1Y", "3Y", "5Y"].map(p => {
+                  const enabled = isPeriodEnabled(p)
+                  return (
+                    <button key={p} className={chartPeriod === p ? "on" : ""}
+                      disabled={!enabled}
+                      title={!enabled ? (th ? "ข้อมูลย้อนหลังไม่พอ" : "Not enough history") : undefined}
+                      onClick={() => enabled && setChartPeriod(p)}
+                      style={{ fontSize: 12, padding: "4px 10px", opacity: enabled ? 1 : 0.35, cursor: enabled ? "pointer" : "not-allowed" }}>{p}</button>
+                  )
+                })}
               </div>
             </div>
             {histSeries.length > 0
