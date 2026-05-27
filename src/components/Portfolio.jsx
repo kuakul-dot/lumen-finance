@@ -1,4 +1,4 @@
-import { useState, useMemo, useEffect, useCallback } from 'react'
+import { useState, useMemo, useEffect, useCallback, useRef } from 'react'
 import { PageHead, Delta, Icon } from './Nav'
 import { Sparkline } from './Charts'
 import { LUMEN_FMT, LUMEN_DERIVE } from '../data'
@@ -540,17 +540,23 @@ function AddHoldingModal({ lang, portfolioId, onClose, onSaved }) {
             </div>
           )}
 
-          {/* Ticker + Name */}
-          <div style={{ display: "grid", gridTemplateColumns: "1fr 2fr", gap: 12 }}>
-            <Field label={th ? "ติ๊กเกอร์" : "Ticker"}>
-              <input required value={form.ticker} onChange={e => set('ticker', e.target.value)}
-                     placeholder="e.g. PTT" style={inputStyle} />
-            </Field>
-            <Field label={th ? "ชื่อ" : "Name"}>
-              <input required value={form.name} onChange={e => set('name', e.target.value)}
-                     placeholder={th ? "ชื่อเต็ม" : "Full name"} style={inputStyle} />
-            </Field>
-          </div>
+          {/* Ticker search autocomplete */}
+          <Field label={th ? "ค้นหาหลักทรัพย์" : "Search stock / ETF / Crypto"}>
+            <TickerSearch
+              lang={lang}
+              value={form.ticker}
+              onType={v => set('ticker', v.toUpperCase())}
+              onSelect={({ ticker, name, region, asset_class, currency, div_frequency }) =>
+                setForm(f => ({ ...f, ticker, name, region, asset_class, currency, div_frequency }))
+              }
+            />
+          </Field>
+
+          {/* Name (auto-filled by search, or type manually) */}
+          <Field label={th ? "ชื่อหลักทรัพย์" : "Name"}>
+            <input required value={form.name} onChange={e => set('name', e.target.value)}
+                   placeholder={th ? "ชื่อเต็ม (กรอกเองหรือเลือกจากรายการ)" : "Full name (auto-filled or type manually)"} style={inputStyle} />
+          </Field>
 
           {/* Asset Class + Region */}
           <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
@@ -789,6 +795,116 @@ function EditHoldingModal({ lang, holding, onClose, onSaved }) {
           </div>
         </form>
       </div>
+    </div>
+  )
+}
+
+// ─── Ticker Search (autocomplete) ────────────────────────────────────────────
+// Maps Yahoo Finance exchange codes → our region values
+function yahooRegion(exchange) {
+  const ex = (exchange || '').toUpperCase()
+  if (['BKK', 'SET', 'BKS'].includes(ex)) return 'TH'
+  if (['NYQ', 'NMS', 'NGM', 'PCX', 'ASE', 'NNM', 'NAS', 'CCC'].includes(ex)) return 'US'
+  return 'Other'
+}
+function yahooAssetClass(type) {
+  const t = (type || '').toUpperCase()
+  if (t === 'ETF') return 'ETF'
+  if (t === 'CRYPTOCURRENCY') return 'Crypto'
+  if (t === 'FUTURE' || t === 'COMMODITY') return 'Commodity'
+  if (t === 'BOND') return 'Bond'
+  return 'Equity'
+}
+
+function TickerSearch({ lang, value, onType, onSelect }) {
+  const th = lang === 'th'
+  const [results, setResults] = useState([])
+  const [loading, setLoading] = useState(false)
+  const [open, setOpen] = useState(false)
+  const debounceRef = useRef(null)
+
+  const doSearch = useCallback((q) => {
+    if (q.length < 1) { setResults([]); setOpen(false); return }
+    setLoading(true)
+    fetch(`/api/search?q=${encodeURIComponent(q)}`)
+      .then(r => r.json())
+      .then(data => { setResults(data); setOpen(data.length > 0); setLoading(false) })
+      .catch(() => setLoading(false))
+  }, [])
+
+  const handleChange = (e) => {
+    const v = e.target.value
+    onType(v)
+    clearTimeout(debounceRef.current)
+    debounceRef.current = setTimeout(() => doSearch(v), 280)
+  }
+
+  const handlePick = (item) => {
+    const region = yahooRegion(item.exchange)
+    const asset_class = yahooAssetClass(item.type)
+    const currency = region === 'US' ? 'USD' : 'THB'
+    const div_frequency = String(region === 'TH' ? 2 : 4)
+    // Strip .BK suffix from ticker for Thai stocks
+    const ticker = item.symbol.replace(/\.BK$/i, '')
+    onSelect({ ticker, name: item.name, region, asset_class, currency, div_frequency })
+    setOpen(false)
+  }
+
+  return (
+    <div style={{ position: 'relative' }}>
+      <div style={{ position: 'relative' }}>
+        <Icon name="search" size={14} style={{
+          position: 'absolute', left: 10, top: '50%', transform: 'translateY(-50%)',
+          color: 'var(--ink-4)', pointerEvents: 'none',
+        }} />
+        <input
+          value={value}
+          onChange={handleChange}
+          onFocus={() => results.length > 0 && setOpen(true)}
+          onBlur={() => setTimeout(() => setOpen(false), 180)}
+          placeholder={th ? "ค้นหาชื่อหรือ Ticker เช่น PTT, Apple…" : "Search ticker or name, e.g. PTT, Apple…"}
+          style={{ ...inputStyle, paddingLeft: 32 }}
+          autoComplete="off"
+          spellCheck={false}
+        />
+        {loading && (
+          <span style={{ position: 'absolute', right: 10, top: '50%', transform: 'translateY(-50%)', fontSize: 11, color: 'var(--ink-4)' }}>
+            {th ? 'กำลังค้นหา…' : 'searching…'}
+          </span>
+        )}
+      </div>
+
+      {open && results.length > 0 && (
+        <div style={{
+          position: 'absolute', top: '100%', left: 0, right: 0, zIndex: 200,
+          background: 'var(--bg)', border: '1.5px solid var(--line)', borderRadius: 12,
+          marginTop: 4, boxShadow: '0 8px 32px rgba(0,0,0,0.14)', overflow: 'hidden',
+        }}>
+          {results.map((r, i) => (
+            <div key={i} onMouseDown={() => handlePick(r)} style={{
+              padding: '10px 14px', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 10,
+              borderBottom: i < results.length - 1 ? '1px solid var(--line)' : 'none',
+              background: 'transparent', transition: 'background 0.1s',
+            }}
+            onMouseEnter={e => e.currentTarget.style.background = 'var(--bg-2)'}
+            onMouseLeave={e => e.currentTarget.style.background = 'transparent'}
+            >
+              <span style={{ fontWeight: 700, fontSize: 13, fontFamily: 'var(--font-mono)', minWidth: 72, color: 'var(--ink)' }}>
+                {r.symbol}
+              </span>
+              <span style={{ fontSize: 12, color: 'var(--ink-2)', flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                {r.name}
+              </span>
+              <span style={{ fontSize: 10, color: 'var(--ink-4)', fontFamily: 'var(--font-mono)', flexShrink: 0 }}>
+                {r.exchange}
+              </span>
+            </div>
+          ))}
+          <div style={{ padding: '6px 14px', fontSize: 10, color: 'var(--ink-4)', borderTop: '1px solid var(--line)' }}>
+            {th ? 'ข้อมูลจาก Yahoo Finance · คลิกเพื่อเลือก' : 'Powered by Yahoo Finance · click to select'}
+          </div>
+        </div>
+      )}
     </div>
   )
 }
