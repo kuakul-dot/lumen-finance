@@ -1,9 +1,32 @@
 // Yahoo Finance prices via Vercel Edge Function proxy (/api/prices)
 
-const CACHE_TTL    = 15 * 60 * 1000   // 15 min for stock prices
-const FX_CACHE_TTL = 60 * 60 * 1000   // 1 hr for FX rate
-let _cache   = { key: '', ts: 0, data: {} }
-let _fxCache = { ts: 0, rate: null }
+const CACHE_TTL         = 15 * 60 * 1000      // 15 min for stock prices
+const FX_CACHE_TTL      = 60 * 60 * 1000      // 1 hr for FX rate
+const HISTORY_CACHE_TTL = 60 * 60 * 1000      // 1 hr for historical series
+let _cache        = { key: '', ts: 0, data: {} }
+let _fxCache      = { ts: 0, rate: null }
+const _histCache  = {}   // key: "symbol|range" → { ts, series, currency }
+
+// Fetch historical close-price series for an index/symbol (e.g. ^GSPC, ^DJI).
+// Returns: { series: [{ t: unixSeconds, c: close }], currency }
+// Cached per symbol+range for 1 hour. Falls back to empty series on error.
+export async function fetchHistory(symbol, range = '1y') {
+  const key = `${symbol}|${range}`
+  const now = Date.now()
+  const cached = _histCache[key]
+  if (cached && now - cached.ts < HISTORY_CACHE_TTL) return cached
+  try {
+    const res = await fetch(`/api/history?symbol=${encodeURIComponent(symbol)}&range=${encodeURIComponent(range)}`)
+    if (res.ok) {
+      const data = await res.json()
+      const series = data?.series || []
+      const out = { ts: now, series, currency: data?.currency || 'USD' }
+      _histCache[key] = out
+      return out
+    }
+  } catch {}
+  return cached || { ts: now, series: [], currency: 'USD' }
+}
 
 // Fetch live USD → THB exchange rate (USDTHB=X via Yahoo Finance)
 export async function fetchFxRate() {
