@@ -190,7 +190,7 @@ export function deriveHoldings(holdings, currency = 'THB', prices = {}, fxRate =
       value: currentValue,  // total current value in THB
       pl, plPct,            // P&L in THB
       weight: 0, // filled below
-      divYield: h.div_yield || 0,
+      divYield: priceData?.divYield ?? h.div_yield ?? 0,
       currency: holdingCcy,
       hasLivePrice,
       changePct,

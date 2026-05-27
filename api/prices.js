@@ -66,6 +66,9 @@ function parseChart(json) {
   const prev      = meta.previousClose ?? meta.chartPreviousClose ?? price
   const changeAbs = price - prev
   const changePct = prev > 0 ? (changeAbs / prev) * 100 : 0
+  // Yahoo returns yield as a decimal (0.05 = 5%); convert to percentage
+  const rawYield = meta.dividendYield ?? meta.trailingAnnualDividendYield ?? 0
+  const divYield = rawYield > 0 ? rawYield * 100 : 0
   return {
     price,
     currency:  meta.currency || 'USD',
@@ -75,5 +78,6 @@ function parseChart(json) {
     low:    meta.regularMarketDayLow   ?? price,
     volume: meta.regularMarketVolume   ?? 0,
     name:   meta.longName || meta.shortName || '',
+    divYield,
   }
 }
