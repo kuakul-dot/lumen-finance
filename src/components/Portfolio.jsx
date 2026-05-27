@@ -522,12 +522,14 @@ function AddHoldingModal({ lang, portfolioId, onClose, onSaved }) {
   return (
     <div style={{
       position: "fixed", inset: 0, background: "rgba(0,0,0,0.45)", backdropFilter: "blur(4px)",
-      display: "flex", alignItems: "flex-end", justifyContent: "center", zIndex: 1000,
+      display: "flex", alignItems: "flex-start", justifyContent: "center", zIndex: 1000,
+      overflowY: "auto", padding: "24px 16px",
     }} onClick={e => e.target === e.currentTarget && onClose()}>
       <div style={{
-        background: "var(--bg)", borderRadius: "20px 20px 0 0", padding: "32px 28px 40px",
-        width: "100%", maxWidth: 560, boxShadow: "0 -8px 40px rgba(0,0,0,0.12)",
-        animation: "slideUp 0.2s ease", maxHeight: "92dvh", overflowY: "auto",
+        background: "var(--bg)", borderRadius: 20, padding: "32px 28px 40px",
+        width: "100%", maxWidth: 560, margin: "auto",
+        boxShadow: "0 8px 48px rgba(0,0,0,0.18)",
+        animation: "fadeIn 0.18s ease",
       }}>
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 24 }}>
           <h3 style={{ margin: 0, fontSize: 20, fontFamily: "var(--font-display)" }}>
@@ -692,12 +694,14 @@ function EditHoldingModal({ lang, holding, onClose, onSaved }) {
   return (
     <div style={{
       position: "fixed", inset: 0, background: "rgba(0,0,0,0.45)", backdropFilter: "blur(4px)",
-      display: "flex", alignItems: "flex-end", justifyContent: "center", zIndex: 1000,
+      display: "flex", alignItems: "flex-start", justifyContent: "center", zIndex: 1000,
+      overflowY: "auto", padding: "24px 16px",
     }} onClick={e => e.target === e.currentTarget && onClose()}>
       <div style={{
-        background: "var(--bg)", borderRadius: "20px 20px 0 0", padding: "32px 28px 40px",
-        width: "100%", maxWidth: 560, boxShadow: "0 -8px 40px rgba(0,0,0,0.12)",
-        animation: "slideUp 0.2s ease", maxHeight: "92dvh", overflowY: "auto",
+        background: "var(--bg)", borderRadius: 20, padding: "32px 28px 40px",
+        width: "100%", maxWidth: 560, margin: "auto",
+        boxShadow: "0 8px 48px rgba(0,0,0,0.18)",
+        animation: "fadeIn 0.18s ease",
       }}>
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 24 }}>
           <h3 style={{ margin: 0, fontSize: 20, fontFamily: "var(--font-display)" }}>
@@ -1143,12 +1147,14 @@ function EditTransactionModal({ tx, lang, onClose, onSaved }) {
   return (
     <div style={{
       position: "fixed", inset: 0, background: "rgba(0,0,0,0.45)", backdropFilter: "blur(4px)",
-      display: "flex", alignItems: "flex-end", justifyContent: "center", zIndex: 1000,
+      display: "flex", alignItems: "flex-start", justifyContent: "center", zIndex: 1000,
+      overflowY: "auto", padding: "24px 16px",
     }} onClick={e => e.target === e.currentTarget && onClose()}>
       <div style={{
-        background: "var(--bg)", borderRadius: "20px 20px 0 0", padding: "32px 28px 40px",
-        width: "100%", maxWidth: 520, boxShadow: "0 -8px 40px rgba(0,0,0,0.12)",
-        animation: "slideUp 0.2s ease", maxHeight: "92dvh", overflowY: "auto",
+        background: "var(--bg)", borderRadius: 20, padding: "32px 28px 40px",
+        width: "100%", maxWidth: 520, margin: "auto",
+        boxShadow: "0 8px 48px rgba(0,0,0,0.18)",
+        animation: "fadeIn 0.18s ease",
       }}>
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 24 }}>
           <h3 style={{ margin: 0, fontSize: 20, fontFamily: "var(--font-display)" }}>
