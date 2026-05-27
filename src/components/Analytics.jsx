@@ -20,6 +20,17 @@ export function AnalyticsPage({ t, lang, ccy, dataState, liveHoldings = [], pric
   const totalPlPct = totalCost > 0 ? (totalPL / totalCost) * 100 : 0
   const hasLivePrices = rows.some(r => r.hasLivePrice)
 
+  // Earliest holding date — caps chart start so it doesn't show pre-investment history
+  const earliestHoldingDate = useMemo(() => {
+    if (dataState !== "live" || !liveHoldings.length) return null
+    const dates = liveHoldings
+      .map(h => h.purchased_at || h.created_at)
+      .filter(Boolean)
+      .map(d => new Date(d))
+      .filter(d => !isNaN(d.getTime()))
+    return dates.length ? new Date(Math.min(...dates.map(d => d.getTime()))) : null
+  }, [liveHoldings, dataState])
+
   if (dataState === "empty") {
     return (
       <div className="shell fade-in">
@@ -71,17 +82,42 @@ export function AnalyticsPage({ t, lang, ccy, dataState, liveHoldings = [], pric
         ))}
       </div>
 
-      {tab === "common"          && <AnalyticsCommon t={t} lang={lang} ccy={ccy} rows={rows} totalValue={totalValue} totalPL={totalPL} totalPlPct={totalPlPct} totalCost={totalCost} hasLivePrices={hasLivePrices} demoData={demoData} dataState={dataState} />}
+      {tab === "common"          && <AnalyticsCommon t={t} lang={lang} ccy={ccy} rows={rows} totalValue={totalValue} totalPL={totalPL} totalPlPct={totalPlPct} totalCost={totalCost} hasLivePrices={hasLivePrices} demoData={demoData} dataState={dataState} earliestHoldingDate={earliestHoldingDate} />}
       {tab === "diversification" && <AnalyticsDiv t={t} lang={lang} ccy={ccy} rows={rows} totalValue={totalValue} demoData={demoData} dataState={dataState} />}
       {tab === "dividends"       && <AnalyticsDiv2 t={t} lang={lang} ccy={ccy} rows={rows} totalValue={totalValue} dataState={dataState} />}
-      {tab === "growth"          && <AnalyticsGrowth t={t} lang={lang} ccy={ccy} totalValue={totalValue} totalCost={totalCost} totalPL={totalPL} totalPlPct={totalPlPct} dataState={dataState} />}
+      {tab === "growth"          && <AnalyticsGrowth t={t} lang={lang} ccy={ccy} totalValue={totalValue} totalCost={totalCost} totalPL={totalPL} totalPlPct={totalPlPct} dataState={dataState} earliestHoldingDate={earliestHoldingDate} />}
       {tab === "metrics"         && <AnalyticsMetrics t={t} lang={lang} ccy={ccy} rows={rows} totalValue={totalValue} totalPL={totalPL} totalPlPct={totalPlPct} dataState={dataState} />}
     </div>
   )
 }
 
+/* ─── Helper: merge same-ticker lots into a single row ──────────────────────── */
+function groupRowsByTicker(rows) {
+  const map = new Map()
+  rows.forEach(r => {
+    if (!map.has(r.ticker)) {
+      map.set(r.ticker, { ...r, _lots: 1 })
+    } else {
+      const g = map.get(r.ticker)
+      const totalShares = g.shares + r.shares
+      const totalValue  = g.value + r.value
+      const totalPL     = g.pl + r.pl
+      const costBasis   = totalValue - totalPL
+      map.set(r.ticker, {
+        ...g,
+        shares: totalShares,
+        value:  totalValue,
+        pl:     totalPL,
+        plPct:  costBasis > 0 ? (totalPL / costBasis) * 100 : 0,
+        _lots:  g._lots + 1,
+      })
+    }
+  })
+  return [...map.values()]
+}
+
 /* ─── Common tab ─────────────────────────────────────────────────────────────── */
-function AnalyticsCommon({ t, lang, ccy, rows, totalValue, totalPL, totalPlPct, totalCost, hasLivePrices, demoData, dataState }) {
+function AnalyticsCommon({ t, lang, ccy, rows, totalValue, totalPL, totalPlPct, totalCost, hasLivePrices, demoData, dataState, earliestHoldingDate }) {
   const FMT = LUMEN_FMT
   const th = lang === "th"
   const [chartPeriod, setChartPeriod] = useState("1y")
@@ -105,23 +141,43 @@ function AnalyticsCommon({ t, lang, ccy, rows, totalValue, totalPL, totalPlPct, 
   // Live mode: simulated growth chart matching Demo's shape:
   //  - portfolio: synthetic curve from cost basis → current value
   //  - S&P 500:  synthetic benchmark on same scale (~13–16% trailing return)
+  //  - capped to earliest holding date so it doesn't show pre-investment history
   const liveSeries = useMemo(() => {
     if (dataState !== "live" || totalCost <= 0 || totalValue <= 0) return null
-    const cfg = {
-      "1m":  { pts: 8,  stepD: 4 },   // weekly-ish across ~1 month
-      "3m":  { pts: 10, stepD: 9 },
-      "6m":  { pts: 12, stepD: 16 },
-      "ytd": { pts: Math.max(3, new Date().getMonth() + 1), stepD: 30 },
-      "1y":  { pts: 12, stepD: 30 },
-      "5y":  { pts: 20, stepD: 90 },
-      "all": { pts: 24, stepD: 75 },
-    }
-    const { pts, stepD } = cfg[chartPeriod] || cfg["1y"]
     const now = new Date()
 
-    // Bench grows ~14% over the visible window (smooth curve, mild noise)
+    // Period in days
+    const startOfYear = new Date(now.getFullYear(), 0, 1)
+    const periodDays = {
+      "1m":  30,
+      "3m":  90,
+      "6m":  180,
+      "ytd": Math.max(1, Math.round((now - startOfYear) / 86400000)),
+      "1y":  365,
+      "5y":  365 * 5,
+      "all": 365 * 5,
+    }[chartPeriod] || 365
+
+    // Cap to days since earliest holding (avoid showing pre-investment dates)
+    const daysSinceFirst = earliestHoldingDate
+      ? Math.max(1, Math.round((now - earliestHoldingDate) / 86400000))
+      : periodDays
+    const totalDays = Math.min(periodDays, daysSinceFirst)
+
+    // # of points scaled to range — more points for longer windows
+    const pts = totalDays <= 35 ? 8
+             : totalDays <= 100 ? 10
+             : totalDays <= 200 ? 12
+             : totalDays <= 400 ? 14
+             : totalDays <= 1100 ? 18 : 22
+    const stepD = totalDays / (pts - 1)
+
+    // S&P 500 simulated trailing return scales mildly with window length (~10%/yr)
+    const yearsShown = totalDays / 365
     const benchStart = totalCost
-    const benchEnd   = totalCost * 1.14
+    const benchEnd   = totalCost * (1 + 0.10 * Math.min(5, yearsShown))
+
+    const mkLabel = d => d.toLocaleString(th ? "th-TH" : "en-US", { month: "short" }) + " '" + String(d.getFullYear()).slice(2)
 
     return [
       {
@@ -131,10 +187,8 @@ function AnalyticsCommon({ t, lang, ccy, rows, totalValue, totalPL, totalPlPct, 
           const p = i / (pts - 1)
           const ease = p < 0.5 ? 2 * p * p : -1 + (4 - 2 * p) * p
           const noise = (Math.sin(i * 2.3) * 0.012 + Math.cos(i * 4.1) * 0.008) * totalCost
-          const d = new Date(now)
-          d.setDate(d.getDate() - (pts - 1 - i) * stepD)
-          const lbl = d.toLocaleString(th ? "th-TH" : "en-US", { month: "short" }) + " '" + String(d.getFullYear()).slice(2)
-          return { x: i, y: totalCost + (totalValue - totalCost) * ease + noise, label: lbl }
+          const d = new Date(now); d.setDate(d.getDate() - (pts - 1 - i) * stepD)
+          return { x: i, y: totalCost + (totalValue - totalCost) * ease + noise, label: mkLabel(d) }
         })
       },
       {
@@ -144,16 +198,18 @@ function AnalyticsCommon({ t, lang, ccy, rows, totalValue, totalPL, totalPlPct, 
           const p = i / (pts - 1)
           const ease = p < 0.5 ? 2 * p * p : -1 + (4 - 2 * p) * p
           const noise = (Math.sin(i * 1.7 + 1) * 0.008 + Math.cos(i * 3.3 + 0.4) * 0.006) * benchStart
-          const d = new Date(now)
-          d.setDate(d.getDate() - (pts - 1 - i) * stepD)
-          const lbl = d.toLocaleString(th ? "th-TH" : "en-US", { month: "short" }) + " '" + String(d.getFullYear()).slice(2)
-          return { x: i, y: benchStart + (benchEnd - benchStart) * ease + noise, label: lbl }
+          const d = new Date(now); d.setDate(d.getDate() - (pts - 1 - i) * stepD)
+          return { x: i, y: benchStart + (benchEnd - benchStart) * ease + noise, label: mkLabel(d) }
         })
       },
     ]
-  }, [dataState, totalCost, totalValue, th, chartPeriod])
+  }, [dataState, totalCost, totalValue, th, chartPeriod, earliestHoldingDate])
 
-  const livePerformers = hasLivePrices ? rows.filter(r => r.hasLivePrice) : rows
+  // Merge same-ticker lots before sorting (so QH with 2 lots appears once)
+  const livePerformers = useMemo(() => {
+    const src = hasLivePrices ? rows.filter(r => r.hasLivePrice) : rows
+    return dataState === "live" ? groupRowsByTicker(src) : src
+  }, [rows, hasLivePrices, dataState])
 
   return (
     <div className="fade-in">
@@ -403,7 +459,7 @@ function AnalyticsDiv2({ t, lang, ccy, rows, totalValue, dataState }) {
 }
 
 /* ─── Growth tab ─────────────────────────────────────────────────────────────── */
-function AnalyticsGrowth({ t, lang, ccy, totalValue, totalCost, totalPL, totalPlPct, dataState }) {
+function AnalyticsGrowth({ t, lang, ccy, totalValue, totalCost, totalPL, totalPlPct, dataState, earliestHoldingDate }) {
   const FMT = LUMEN_FMT
   const th = lang === "th"
   const [chartPeriod, setChartPeriod] = useState("1Y")
@@ -423,12 +479,17 @@ function AnalyticsGrowth({ t, lang, ccy, totalValue, totalCost, totalPL, totalPl
     },
   ]
 
-  // Live mode: cumulative return curve (% from cost basis), simulated
+  // Live mode: cumulative return curve (% from cost basis), simulated, capped to first-investment date
   const liveSeries = useMemo(() => {
     if (dataState !== "live" || totalCost <= 0 || totalValue <= 0) return null
-    const cfg = { "1Y": { pts: 12, stepM: 1 }, "3Y": { pts: 18, stepM: 2 }, "5Y": { pts: 20, stepM: 3 } }
-    const { pts, stepM } = cfg[chartPeriod] || cfg["1Y"]
     const now = new Date()
+    const periodDays = { "1Y": 365, "3Y": 365 * 3, "5Y": 365 * 5 }[chartPeriod] || 365
+    const daysSinceFirst = earliestHoldingDate
+      ? Math.max(1, Math.round((now - earliestHoldingDate) / 86400000))
+      : periodDays
+    const totalDays = Math.min(periodDays, daysSinceFirst)
+    const pts = totalDays <= 200 ? 10 : totalDays <= 500 ? 14 : 18
+    const stepD = totalDays / (pts - 1)
     const finalPct = totalPlPct
     return [{
       name: th ? "พอร์ตของคุณ" : "Your portfolio",
@@ -437,12 +498,12 @@ function AnalyticsGrowth({ t, lang, ccy, totalValue, totalCost, totalPL, totalPl
         const p = i / (pts - 1)
         const ease = p < 0.5 ? 2 * p * p : -1 + (4 - 2 * p) * p
         const noise = (Math.sin(i * 2.3) * 0.4 + Math.cos(i * 4.1) * 0.25)
-        const d = new Date(now.getFullYear(), now.getMonth() - (pts - 1 - i) * stepM, 1)
+        const d = new Date(now); d.setDate(d.getDate() - (pts - 1 - i) * stepD)
         const lbl = d.toLocaleString(th ? "th-TH" : "en-US", { month: "short" }) + " '" + String(d.getFullYear()).slice(2)
         return { x: i, y: finalPct * ease + noise, label: lbl }
       })
     }]
-  }, [dataState, totalCost, totalValue, totalPlPct, th, chartPeriod])
+  }, [dataState, totalCost, totalValue, totalPlPct, th, chartPeriod, earliestHoldingDate])
 
   // Approximate CAGR assuming the simulated curve spans ~1 year baseline
   const approxYrs = chartPeriod === "1Y" ? 1 : chartPeriod === "3Y" ? 3 : 5
