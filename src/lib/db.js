@@ -209,6 +209,7 @@ export function deriveHoldings(holdings, currency = 'THB', prices = {}, fxRate =
       pl, plPct,            // P&L in THB
       weight: 0, // filled below
       divYield: priceData?.divYield ?? h.div_yield ?? 0,
+      divFrequency: h.div_frequency || (h.region === 'TH' ? 2 : 4),
       currency: holdingCcy,
       hasLivePrice,
       changePct,

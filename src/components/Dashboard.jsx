@@ -500,7 +500,7 @@ function LiveDashboardPage({ t, lang, ccy, setRoute, liveHoldings, prices = {}, 
   useEffect(() => {
     if (liveHoldings.length === 0) return
     let cancelled = false
-    const range = daysSinceFirst >= 365 * 4 ? '5y' : daysSinceFirst >= 365 * 2 ? '2y' : '2y'
+    const range = daysSinceFirst > 365 * 2 ? '5y' : daysSinceFirst > 365 ? '2y' : '1y'
     const symbols = [...new Set(
       liveHoldings.map(h => toYahooSymbol(h.ticker, h.region || 'TH', h.asset_class || 'Equity'))
     )]
@@ -723,11 +723,17 @@ function LiveDashboardPage({ t, lang, ccy, setRoute, liveHoldings, prices = {}, 
       .sort((a, b) => b.annual - a.annual)
       .slice(0, 4)
       .map((r, i) => {
-        const d = new Date(now.getFullYear(), now.getMonth() + 1 + i, 15)
+        const freq = r.divFrequency || 4
+        const monthsInterval = Math.round(12 / freq)
+        const d = new Date(now.getFullYear(), now.getMonth() + monthsInterval * (i + 1), 15)
+        const freqLabel = th
+          ? (freq === 1 ? "รายปี" : freq === 2 ? "ราย 6 เดือน" : freq === 4 ? "รายไตรมาส" : "รายเดือน")
+          : (freq === 1 ? "Annual" : freq === 2 ? "Semi-annual" : freq === 4 ? "Quarterly" : "Monthly")
         return {
           ticker: r.ticker,
-          amount: r.value * r.divYield / 100 / 4,
+          amount: r.value * r.divYield / 100 / freq,
           date: d.toLocaleString(th ? "th-TH" : "en-US", { month: "short" }) + " " + d.getDate(),
+          freqLabel,
         }
       })
   }, [rows, th])
@@ -1074,11 +1080,16 @@ function LiveDashboardPage({ t, lang, ccy, setRoute, liveHoldings, prices = {}, 
                   </div>
                   <div>
                     <div style={{ fontSize: 13, fontWeight: 500 }}>{u.ticker}</div>
-                    <div className="muted" style={{ fontSize: 11 }}>{th ? "ปันผล (ประมาณรายไตรมาส)" : "Dividend (est. quarterly)"}</div>
+                    <div className="muted" style={{ fontSize: 11 }}>{th ? `ปันผล (${u.freqLabel})` : `Dividend (est. ${u.freqLabel})`}</div>
                   </div>
                   <div className="mono" style={{ fontSize: 13 }}>{LUMEN_FMT.money(u.amount, ccy, { compact: true })}</div>
                 </div>
               ))}
+              <p style={{ fontSize: 11, color: "var(--ink-4)", marginTop: 4, lineHeight: 1.5 }}>
+                {th
+                  ? "📅 วันที่เป็นการประมาณการเท่านั้น — คำนวณจากรอบถัดไปทุกๆ 3 เดือน ยังไม่ใช่วันจ่ายจริงจากบริษัท"
+                  : "📅 Dates are estimates only — projected as quarterly intervals, not actual company payment dates."}
+              </p>
             </div>
           )}
         </div>

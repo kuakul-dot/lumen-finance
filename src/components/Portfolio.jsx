@@ -458,13 +458,18 @@ function AddHoldingModal({ lang, portfolioId, onClose, onSaved }) {
   const [form, setForm] = useState({
     ticker: '', name: '', asset_class: 'Equity', region: 'TH',
     sector: '',
-    shares: '', cost_price: '', currency: 'THB', div_yield: '',
+    shares: '', cost_price: '', currency: 'THB', div_yield: '', div_frequency: '2',
     purchased_at: today,
   })
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState(null)
 
-  const set = (k, v) => setForm(f => ({ ...f, [k]: v }))
+  // Auto-update frequency default when region changes (TH=2×, US=4×)
+  const set = (k, v) => setForm(f => ({
+    ...f,
+    [k]: v,
+    ...(k === 'region' ? { div_frequency: v === 'TH' ? '2' : '4' } : {}),
+  }))
 
   const handleSubmit = async (e) => {
     e.preventDefault()
@@ -486,6 +491,7 @@ function AddHoldingModal({ lang, portfolioId, onClose, onSaved }) {
       cost_price,
       currency: form.currency,
       div_yield: form.div_yield ? parseFloat(form.div_yield) : 0,
+      div_frequency: form.div_frequency ? parseInt(form.div_frequency) : 4,
     })
     setSaving(false)
     if (addErr) { setError(addErr.message); return }
@@ -595,12 +601,22 @@ function AddHoldingModal({ lang, portfolioId, onClose, onSaved }) {
             </Field>
           </div>
 
-          {/* Dividend yield */}
-          <Field label={th ? "อัตราปันผล % (ไม่บังคับ)" : "Dividend yield % (optional)"}>
-            <input type="number" step="any" min="0" max="100" value={form.div_yield}
-                   onChange={e => set('div_yield', e.target.value)}
-                   placeholder="0.00" style={inputStyle} />
-          </Field>
+          {/* Dividend yield + Frequency */}
+          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
+            <Field label={th ? "อัตราปันผล % (ไม่บังคับ)" : "Dividend yield % (optional)"}>
+              <input type="number" step="any" min="0" max="100" value={form.div_yield}
+                     onChange={e => set('div_yield', e.target.value)}
+                     placeholder="0.00" style={inputStyle} />
+            </Field>
+            <Field label={th ? "จ่ายปีละ (ครั้ง)" : "Payments / year"}>
+              <select value={form.div_frequency} onChange={e => set('div_frequency', e.target.value)} style={inputStyle}>
+                <option value="1">{th ? "1× — รายปี" : "1× — Annual"}</option>
+                <option value="2">{th ? "2× — ราย 6 เดือน" : "2× — Semi-annual"}</option>
+                <option value="4">{th ? "4× — รายไตรมาส" : "4× — Quarterly"}</option>
+                <option value="12">{th ? "12× — รายเดือน" : "12× — Monthly"}</option>
+              </select>
+            </Field>
+          </div>
 
           {/* Purchase date — custom selector avoids OS locale issues */}
           <DateSelectField
@@ -635,8 +651,9 @@ function EditHoldingModal({ lang, holding, onClose, onSaved }) {
     sector:      holding.sector || '',
     shares:      String(holding.shares),
     cost_price:  String(holding.cost_price),
-    currency:    holding.currency || 'THB',
-    div_yield:   String(holding.div_yield || ''),
+    currency:      holding.currency || 'THB',
+    div_yield:     String(holding.div_yield || ''),
+    div_frequency: String(holding.div_frequency || (holding.region === 'TH' ? 2 : 4)),
   })
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState(null)
@@ -655,7 +672,8 @@ function EditHoldingModal({ lang, holding, onClose, onSaved }) {
       shares:      parseFloat(form.shares),
       cost_price:  parseFloat(form.cost_price),
       currency:    form.currency,
-      div_yield:   form.div_yield ? parseFloat(form.div_yield) : 0,
+      div_yield:     form.div_yield ? parseFloat(form.div_yield) : 0,
+      div_frequency: form.div_frequency ? parseInt(form.div_frequency) : 4,
     })
     setSaving(false)
     if (updateErr) { setError(updateErr.message); return }
@@ -744,12 +762,22 @@ function EditHoldingModal({ lang, holding, onClose, onSaved }) {
             </Field>
           </div>
 
-          {/* Dividend yield */}
-          <Field label={th ? "อัตราปันผล % (ไม่บังคับ)" : "Dividend yield % (optional)"}>
-            <input type="number" step="any" min="0" max="100" value={form.div_yield}
-                   onChange={e => set('div_yield', e.target.value)}
-                   placeholder="0.00" style={{ ...inputStyle, maxWidth: 200 }} />
-          </Field>
+          {/* Dividend yield + Frequency */}
+          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
+            <Field label={th ? "อัตราปันผล % (ไม่บังคับ)" : "Dividend yield % (optional)"}>
+              <input type="number" step="any" min="0" max="100" value={form.div_yield}
+                     onChange={e => set('div_yield', e.target.value)}
+                     placeholder="0.00" style={inputStyle} />
+            </Field>
+            <Field label={th ? "จ่ายปีละ (ครั้ง)" : "Payments / year"}>
+              <select value={form.div_frequency} onChange={e => set('div_frequency', e.target.value)} style={inputStyle}>
+                <option value="1">{th ? "1× — รายปี" : "1× — Annual"}</option>
+                <option value="2">{th ? "2× — ราย 6 เดือน" : "2× — Semi-annual"}</option>
+                <option value="4">{th ? "4× — รายไตรมาส" : "4× — Quarterly"}</option>
+                <option value="12">{th ? "12× — รายเดือน" : "12× — Monthly"}</option>
+              </select>
+            </Field>
+          </div>
 
           <div style={{ display: "flex", gap: 10, marginTop: 8 }}>
             <button type="button" className="btn btn-outline" style={{ flex: 1 }} onClick={onClose}>

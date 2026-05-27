@@ -29,7 +29,8 @@ create table if not exists holdings (
   shares       numeric not null default 0,
   cost_price   numeric not null default 0,
   currency     text not null default 'THB',
-  div_yield    numeric default 0,
+  div_yield      numeric default 0,
+  div_frequency  integer default 4,
   created_at   timestamptz not null default now(),
   updated_at   timestamptz not null default now()
 );
