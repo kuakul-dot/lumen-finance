@@ -2,11 +2,22 @@ import { useState, useMemo, useEffect } from 'react'
 import { PageHead, Delta, Icon } from './Nav'
 import { LineChart, Donut, BarChart } from './Charts'
 import { LUMEN_FMT, LUMEN_DERIVE, LUMEN_HISTORY, LUMEN_BENCH } from '../data'
-import { deriveHoldings } from '../lib/db'
+import { deriveHoldings, getTransactions } from '../lib/db'
 import { fetchHistory } from '../lib/prices'
 
-export function AnalyticsPage({ t, lang, ccy, dataState, liveHoldings = [], prices = {}, fxRate = 36 }) {
+export function AnalyticsPage({ t, lang, ccy, dataState, liveHoldings = [], prices = {}, fxRate = 36, portfolio }) {
   const [tab, setTab] = useState("common")
+  const [transactions, setTransactions] = useState([])
+
+  // Fetch transactions once — used to derive the actual first-investment date
+  useEffect(() => {
+    if (dataState !== "live" || !portfolio?.id) return
+    let cancelled = false
+    getTransactions(portfolio.id)
+      .then(d => { if (!cancelled) setTransactions(d || []) })
+      .catch(() => {})
+    return () => { cancelled = true }
+  }, [dataState, portfolio?.id])
 
   const liveRows = useMemo(
     () => dataState === "live" ? deriveHoldings(liveHoldings, ccy, prices, fxRate) : [],
@@ -21,16 +32,24 @@ export function AnalyticsPage({ t, lang, ccy, dataState, liveHoldings = [], pric
   const totalPlPct = totalCost > 0 ? (totalPL / totalCost) * 100 : 0
   const hasLivePrices = rows.some(r => r.hasLivePrice)
 
-  // Earliest holding date — caps chart start so it doesn't show pre-investment history
+  // Earliest *real* investment date — prefer transactions.transacted_at (the
+  // date the user actually entered when logging a Buy), fall back to
+  // holdings.purchased_at, then created_at as a last resort.
   const earliestHoldingDate = useMemo(() => {
-    if (dataState !== "live" || !liveHoldings.length) return null
-    const dates = liveHoldings
-      .map(h => h.purchased_at || h.created_at)
-      .filter(Boolean)
-      .map(d => new Date(d))
-      .filter(d => !isNaN(d.getTime()))
-    return dates.length ? new Date(Math.min(...dates.map(d => d.getTime()))) : null
-  }, [liveHoldings, dataState])
+    if (dataState !== "live") return null
+    const candidates = []
+    // 1. Buy transactions — the most authoritative source
+    transactions
+      .filter(tx => (tx.type || 'Buy') === 'Buy')
+      .forEach(tx => { if (tx.transacted_at) candidates.push(new Date(tx.transacted_at)) })
+    // 2. Holding-level purchased_at / created_at as fallback
+    liveHoldings.forEach(h => {
+      if (h.purchased_at) candidates.push(new Date(h.purchased_at))
+      else if (h.created_at) candidates.push(new Date(h.created_at))
+    })
+    const valid = candidates.filter(d => !isNaN(d.getTime()))
+    return valid.length ? new Date(Math.min(...valid.map(d => d.getTime()))) : null
+  }, [transactions, liveHoldings, dataState])
 
   if (dataState === "empty") {
     return (

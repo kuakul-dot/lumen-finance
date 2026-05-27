@@ -198,7 +198,7 @@ export default function App() {
       />
     )
   } else if (route === "analytics") {
-    page = <AnalyticsPage t={i18n} lang={lang} ccy={ccy} dataState={dataState} liveHoldings={liveHoldings} prices={prices} fxRate={fxRate} />
+    page = <AnalyticsPage t={i18n} lang={lang} ccy={ccy} dataState={dataState} liveHoldings={liveHoldings} prices={prices} fxRate={fxRate} portfolio={portfolio} />
   } else if (route === "tools") {
     page = (
       <ToolsPage
