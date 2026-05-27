@@ -482,8 +482,8 @@ function LiveDashboardPage({ t, lang, ccy, setRoute, liveHoldings, prices = {}, 
   }, [daysSinceFirst])
   const [chartPeriod, setChartPeriod] = useState(defaultPeriod)
   useEffect(() => { setChartPeriod(defaultPeriod) }, [defaultPeriod])
-  const periodDaysMap = { "1Y": 365, "3Y": 365 * 3, "5Y": 365 * 5 }
-  const isPeriodEnabled = (k) => periodDaysMap[k] <= daysSinceFirst + 7
+  const periodDaysMap = { "1Y": 365, "3Y": 365 * 3, "5Y": 365 * 5, "All": daysSinceFirst }
+  const isPeriodEnabled = (k) => k === "All" || periodDaysMap[k] <= daysSinceFirst + 7
 
   // Fetch S&P 500 history — used only as a source of real market-day timestamps
   // for x-axis date labels (same technique as Analytics page).
@@ -772,7 +772,7 @@ function LiveDashboardPage({ t, lang, ccy, setRoute, liveHoldings, prices = {}, 
                 )}
               </div>
               <div className="segmented" style={{ gap: 0 }}>
-                {["1Y", "3Y", "5Y"].map(p => {
+                {["1Y", "3Y", "5Y", "All"].map(p => {
                   const enabled = isPeriodEnabled(p)
                   return (
                     <button key={p} className={chartPeriod === p ? "on" : ""}
