@@ -527,17 +527,20 @@ function LiveDashboardPage({ t, lang, ccy, setRoute, liveHoldings, prices = {}, 
     return list.slice(0, 5)
   }, [rows])
 
-  // Portfolio value chart — built from real transaction data
-  //  • Each Buy/Sell tx creates a real data point (cumulative cost invested in THB)
-  //  • Final point = today's live market value from prices API
+  // Portfolio value chart — estimated value trajectory from transaction data
+  //  • Each Buy tx = a lot; its value interpolates linearly from purchase cost
+  //    to current market value using the ticker's actual live gain/loss ratio
+  //  • For any time t: sum of all lots active at t, proportionally progressed
+  //  • Final point is always pinned to live totalValue (no rounding drift)
   //  • Adaptive date labels (day-month / month-year / year only)
   const histSeries = useMemo(() => {
     if (totalValue <= 0) return []
 
-    const now        = new Date()
-    const reqDays    = periodDaysMap[chartPeriod] || 365
-    const totalDays  = Math.max(7, Math.min(reqDays, daysSinceFirst))
-    const cutoffMs   = now.getTime() - totalDays * 86400000
+    const now    = new Date()
+    const nowMs  = now.getTime()
+    const reqDays   = periodDaysMap[chartPeriod] || 365
+    const totalDays = Math.max(7, Math.min(reqDays, daysSinceFirst))
+    const cutoffMs  = nowMs - totalDays * 86400000
 
     const locale  = th ? "th-TH" : "en-US"
     const mkLabel = d => {
@@ -546,12 +549,11 @@ function LiveDashboardPage({ t, lang, ccy, setRoute, liveHoldings, prices = {}, 
       return "'" + String(d.getFullYear()).slice(2)
     }
 
-    // Build cumulative-cost curve from Buy / Sell transactions
-    const tradeTx = [...allTx]
-      .filter(tx => tx.transacted_at && ((tx.type || 'Buy') === 'Buy' || tx.type === 'Sell'))
+    const buyTx = allTx
+      .filter(tx => tx.transacted_at && (tx.type || 'Buy') === 'Buy')
       .sort((a, b) => new Date(a.transacted_at) - new Date(b.transacted_at))
 
-    if (tradeTx.length === 0) {
+    if (buyTx.length === 0) {
       // No transactions yet — simple two-point fallback
       return [{
         name: th ? "มูลค่าพอร์ต" : "Portfolio value",
@@ -563,57 +565,51 @@ function LiveDashboardPage({ t, lang, ccy, setRoute, liveHoldings, prices = {}, 
       }]
     }
 
-    // Accumulate running cost (always THB)
-    let running = 0
-    const fullCurve = tradeTx.map(tx => {
+    // Per-ticker gain multiplier from live rows  (value / cost_basis per ticker)
+    const tickerMult = {}
+    rows.forEach(r => {
+      const cost = r.value - r.pl
+      if (cost > 0) tickerMult[r.ticker] = r.value / cost
+    })
+    const defaultMult = totalCostBasis > 0 ? totalValue / totalCostBasis : 1
+
+    // Convert each Buy tx to a lot: { buyMs, costTHB, currentVal }
+    const lots = buyTx.map(tx => {
       const raw = tx.amount != null
         ? parseFloat(tx.amount) || 0
         : (parseFloat(tx.shares) || 0) * (parseFloat(tx.price) || 0)
-      const thb = (tx.currency || 'THB') === 'USD' ? raw * fxRate : raw
-      running = (tx.type || 'Buy') === 'Buy'
-        ? running + thb
-        : Math.max(0, running - thb)
-      return { ms: new Date(tx.transacted_at).getTime(), value: running }
+      const costTHB = (tx.currency || 'THB') === 'USD' ? raw * fxRate : raw
+      const mult    = tickerMult[tx.ticker] ?? defaultMult
+      return { buyMs: new Date(tx.transacted_at).getTime(), costTHB, currentVal: costTHB * mult }
     })
 
-    // Cost accumulated before the display window starts
-    const before = fullCurve.filter(p => p.ms < cutoffMs)
-    const startValue = before.length > 0 ? before[before.length - 1].value : 0
+    // Sample N evenly-spaced time points across the display window
+    const N = Math.max(8, Math.min(60, Math.round(totalDays / 7)))
+    const data = Array.from({ length: N }, (_, i) => {
+      const isLast = i === N - 1
+      const t = isLast ? nowMs : cutoffMs + (i / (N - 1)) * (nowMs - cutoffMs)
 
-    // Transactions inside the display window
-    const inWindow = fullCurve.filter(p => p.ms >= cutoffMs)
+      // Estimated portfolio value at time t
+      let val = 0
+      lots.forEach(lot => {
+        if (lot.buyMs > t) return                           // not yet purchased
+        const age  = nowMs - lot.buyMs
+        const prog = age <= 0 ? 1 : (t - lot.buyMs) / age  // 0 at buyMs, 1 at nowMs
+        val += lot.costTHB + (lot.currentVal - lot.costTHB) * Math.min(1, Math.max(0, prog))
+      })
 
-    // Assemble points
-    const pts = []
-    // Window-start anchor (shows baseline even when no tx in window)
-    if (startValue > 0 || inWindow.length === 0) {
-      pts.push({ ms: cutoffMs, value: startValue > 0 ? startValue : totalCostBasis })
-    }
-    inWindow.forEach(p => pts.push(p))
-    // Today → live market value
-    pts.push({ ms: now.getTime(), value: totalValue })
+      if (isLast) val = totalValue   // pin last point to exact live value
+      return val > 0 ? { x: i, y: val, label: mkLabel(new Date(t)) } : null
+    }).filter(Boolean).map((p, i) => ({ ...p, x: i }))
 
-    // Deduplicate same calendar day, keep last point
-    const deduped = pts.reduce((acc, p) => {
-      const k = new Date(p.ms).toDateString()
-      if (acc.length > 0 && new Date(acc[acc.length - 1].ms).toDateString() === k) {
-        acc[acc.length - 1] = p
-      } else {
-        acc.push(p)
-      }
-      return acc
-    }, [])
+    if (data.length < 2) return []
 
     return [{
       name: th ? "มูลค่าพอร์ต" : "Portfolio value",
       color: "var(--ink)", fill: true,
-      data: deduped.map((p, i) => ({
-        x: i,
-        y: p.value,
-        label: mkLabel(new Date(p.ms))
-      }))
+      data
     }]
-  }, [allTx, totalValue, totalCostBasis, th, chartPeriod, daysSinceFirst, fxRate])
+  }, [allTx, rows, totalValue, totalCostBasis, th, chartPeriod, daysSinceFirst, fxRate])
 
   const chartLabel = chartPeriod
 
