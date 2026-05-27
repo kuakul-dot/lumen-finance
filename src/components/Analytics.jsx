@@ -115,7 +115,7 @@ export function AnalyticsPage({ t, lang, ccy, dataState, liveHoldings = [], pric
         ))}
       </div>
 
-      {tab === "common"          && <AnalyticsCommon t={t} lang={lang} ccy={ccy} rows={rows} totalValue={totalValue} totalPL={totalPL} totalPlPct={totalPlPct} totalCost={totalCost} hasLivePrices={hasLivePrices} demoData={demoData} dataState={dataState} earliestHoldingDate={earliestHoldingDate} />}
+      {tab === "common"          && <AnalyticsCommon t={t} lang={lang} ccy={ccy} rows={rows} totalValue={totalValue} totalPL={totalPL} totalPlPct={totalPlPct} totalCost={totalCost} hasLivePrices={hasLivePrices} demoData={demoData} dataState={dataState} earliestHoldingDate={earliestHoldingDate} liveHoldings={liveHoldings} transactions={transactions} fxRate={fxRate} />}
       {tab === "diversification" && <AnalyticsDiv t={t} lang={lang} ccy={ccy} rows={rows} totalValue={totalValue} demoData={demoData} dataState={dataState} />}
       {tab === "dividends"       && <AnalyticsDiv2 t={t} lang={lang} ccy={ccy} rows={rows} totalValue={totalValue} dataState={dataState} liveHoldings={liveHoldings} fxRate={fxRate} transactions={transactions} portfolio={portfolio} onTransactionAdded={handleTransactionAdded} onTransactionUpdated={handleTransactionUpdated} onTransactionDeleted={handleTransactionDeleted} />}
       {tab === "growth"          && <AnalyticsGrowth t={t} lang={lang} ccy={ccy} rows={rows} fxRate={fxRate} totalValue={totalValue} totalCost={totalCost} totalPL={totalPL} totalPlPct={totalPlPct} dataState={dataState} earliestHoldingDate={earliestHoldingDate} />}
@@ -150,7 +150,7 @@ function groupRowsByTicker(rows) {
 }
 
 /* ─── Common tab ─────────────────────────────────────────────────────────────── */
-function AnalyticsCommon({ t, lang, ccy, rows, totalValue, totalPL, totalPlPct, totalCost, hasLivePrices, demoData, dataState, earliestHoldingDate }) {
+function AnalyticsCommon({ t, lang, ccy, rows, totalValue, totalPL, totalPlPct, totalCost, hasLivePrices, demoData, dataState, earliestHoldingDate, liveHoldings = [], transactions = [], fxRate = 36 }) {
   const FMT = LUMEN_FMT
   const th = lang === "th"
 
@@ -192,6 +192,41 @@ function AnalyticsCommon({ t, lang, ccy, rows, totalValue, totalPL, totalPlPct, 
     fetchHistory("^GSPC", range).then(d => { if (!cancelled) setSpxData(d) }).catch(() => {})
     return () => { cancelled = true }
   }, [dataState, daysSinceFirst])
+
+  // ── Real holding price histories (same logic as Dashboard) ─────────────────
+  const [holdingHistories, setHoldingHistories] = useState({})
+  useEffect(() => {
+    if (dataState !== "live" || liveHoldings.length === 0) return
+    let cancelled = false
+    const range = daysSinceFirst > 365 * 2 ? '5y' : daysSinceFirst > 365 ? '2y' : '1y'
+    const symbols = [...new Set(liveHoldings.map(h => toYahooSymbol(h.ticker, h.region || 'TH', h.asset_class || 'Equity')))]
+    Promise.all(symbols.map(sym => fetchHistory(sym, range).then(d => [sym, d]).catch(() => [sym, { series: [] }])))
+      .then(results => {
+        if (!cancelled) {
+          const map = {}
+          results.forEach(([sym, d]) => { map[sym] = d })
+          setHoldingHistories(map)
+        }
+      })
+    return () => { cancelled = true }
+  }, [dataState, liveHoldings, daysSinceFirst])
+
+  // Earliest Buy timestamp per ticker (for pre-purchase filtering)
+  const purchaseSecByTicker = useMemo(() => {
+    const map = {}
+    transactions.filter(tx => tx.type === 'Buy' && tx.transacted_at && tx.ticker).forEach(tx => {
+      const sec = new Date(tx.transacted_at).getTime() / 1000
+      if (!(tx.ticker in map) || sec < map[tx.ticker]) map[tx.ticker] = sec
+    })
+    return map
+  }, [transactions])
+
+  const hasRealHistory = useMemo(() =>
+    liveHoldings.some(h => {
+      const sym = toYahooSymbol(h.ticker, h.region || 'TH', h.asset_class || 'Equity')
+      return (holdingHistories[sym]?.series?.length || 0) >= 5
+    })
+  , [liveHoldings, holdingHistories])
   const annualIncome = rows.reduce((a, r) => a + r.value * (r.divYield || 0) / 100, 0)
   const yieldOnPort  = totalValue > 0 ? (annualIncome / totalValue) * 100 : 0
 
@@ -220,35 +255,101 @@ function AnalyticsCommon({ t, lang, ccy, rows, totalValue, totalPL, totalPlPct, 
     const now = new Date()
     const requestedDays = periodDaysMap[chartPeriod] || 365
     const totalDays = Math.max(7, Math.min(requestedDays, daysSinceFirst))
+    const cutoffSec = (now.getTime() - totalDays * 86400000) / 1000
 
-    const range = totalValue - totalCost
-    const noiseScale = Math.max(Math.abs(range) * 0.1, totalCost * 0.015)
-    const easeAt = p => p < 0.5 ? 2 * p * p : -1 + (4 - 2 * p) * p
-    const noiseAt = (i, seed) => (
-      Math.sin(i * 0.61 + seed) * 0.55 +
-      Math.sin(i * 1.43 + seed * 1.7) * 0.30 +
-      Math.sin(i * 2.91 + seed * 2.3) * 0.18 +
-      Math.cos(i * 4.27 + seed * 3.1) * 0.10
-    )
-    // Adaptive date label — granularity scales with the visible window
-    //  <  60d: "May 5"
-    //  < 730d: "May '26"
-    //  ≥ 730d: "'26"  (year only when window spans multi-year)
     const locale = th ? "th-TH" : "en-US"
-    const mkLabel = (d) => {
-      if (totalDays < 60)  return d.toLocaleString(locale, { month: "short", day: "numeric" })
-      if (totalDays < 730) return d.toLocaleString(locale, { month: "short" }) + " '" + String(d.getFullYear()).slice(2)
-      return "'" + String(d.getFullYear()).slice(2)
+    // Always show month + year (e.g. "May '25") regardless of window size
+    const mkLabel = d => {
+      if (totalDays < 60) return d.toLocaleString(locale, { month: "short", day: "numeric" })
+      return d.toLocaleString(locale, { month: "short" }) + " '" + String(d.getFullYear()).slice(2)
     }
 
-    // Slice real S&P 500 series to the chosen window
+    // ── Forward-fill helper ───────────────────────────────────────────────────
+    const getPriceAt = (sorted, ts) => {
+      let price = null
+      for (const p of sorted) { if (p.t <= ts) price = p.c; else break }
+      return price
+    }
+
+    // ── Try to build real portfolio series ────────────────────────────────────
+    let realPortfolioPoints = null
+    if (liveHoldings.length > 0) {
+      const holdingData = liveHoldings.map(h => {
+        const sym = toYahooSymbol(h.ticker, h.region || 'TH', h.asset_class || 'Equity')
+        const series = (holdingHistories[sym]?.series || []).filter(p => p.t >= cutoffSec)
+        const purchaseSec = purchaseSecByTicker[h.ticker] || 0
+        const priceCcy = (h.region || 'TH') === 'TH' ? 'THB' : 'USD'
+        return { ...h, sym, series, purchaseSec, priceCcy }
+      })
+      if (holdingData.some(h => h.series.length >= 5)) {
+        const allTs = new Set()
+        holdingData.forEach(h => h.series.forEach(p => allTs.add(p.t)))
+        const sortedTs = [...allTs].sort((a, b) => a - b)
+        if (sortedTs.length >= 2) {
+          const targetPts = Math.max(8, Math.min(60, Math.round(totalDays / 7)))
+          const stride = Math.max(1, Math.floor(sortedTs.length / targetPts))
+          let sampled = sortedTs.filter((_, i) => i % stride === 0)
+          if (sampled[sampled.length - 1] !== sortedTs[sortedTs.length - 1]) {
+            sampled = [...sampled, sortedTs[sortedTs.length - 1]]
+          }
+          const lookups = holdingData.map(h => ({ ...h, sorted: [...h.series].sort((a, b) => a.t - b.t) }))
+          const pts = sampled.map((ts, idx) => {
+            let val = 0
+            lookups.forEach(h => {
+              if (h.purchaseSec > 0 && ts < h.purchaseSec - 86400) return
+              const price = getPriceAt(h.sorted, ts)
+              if (!price || price <= 0) return
+              const priceTHB = h.priceCcy === 'USD' ? price * fxRate : price
+              val += h.shares * priceTHB
+            })
+            return { x: idx, y: val, label: mkLabel(new Date(ts * 1000)), ts }
+          }).filter(p => p.y > 50)
+          if (pts.length >= 2) realPortfolioPoints = pts
+        }
+      }
+    }
+
+    // ── S&P 500 slice ──────────────────────────────────────────────────────────
     const spxAll = spxData?.series || []
-    const cutoffSec = (now.getTime() - totalDays * 86400000) / 1000
     const spxSlice = spxAll.filter(p => p.t >= cutoffSec)
     const hasSpx = spxSlice.length >= 2
+    const spxSorted = [...spxSlice].sort((a, b) => a.t - b.t)
+
+    // ── Build final series ────────────────────────────────────────────────────
+    if (realPortfolioPoints) {
+      // Real portfolio line
+      const portfolioSeries = {
+        name: th ? "พอร์ตของคุณ" : "Your portfolio",
+        color: "var(--ink)", fill: true,
+        data: realPortfolioPoints.map((p, i) => ({ x: i, y: p.y, label: p.label })),
+      }
+      if (!hasSpx) return [portfolioSeries]
+
+      // Align S&P to same timestamps as portfolio — rebase so both start at same value
+      const firstPortVal = realPortfolioPoints[0].y
+      const firstPortTs  = realPortfolioPoints[0].ts
+      const spxAtStart   = getPriceAt(spxSorted, firstPortTs) || spxSorted[0]?.c || 1
+      const sp500Series = {
+        name: "S&P 500",
+        color: "var(--accent)",
+        data: realPortfolioPoints.map((p, i) => {
+          const spxPrice = getPriceAt(spxSorted, p.ts)
+          return { x: i, y: spxPrice != null ? firstPortVal * (spxPrice / spxAtStart) : firstPortVal, label: p.label }
+        }),
+      }
+      return [portfolioSeries, sp500Series]
+    }
+
+    // ── Synthetic fallback (while history loads) ──────────────────────────────
+    const valRange = totalValue - totalCost
+    const noiseScale = Math.max(Math.abs(valRange) * 0.1, totalCost * 0.015)
+    const easeAt = p => p < 0.5 ? 2 * p * p : -1 + (4 - 2 * p) * p
+    const noiseAt = (i, seed) => (
+      Math.sin(i * 0.61 + seed) * 0.55 + Math.sin(i * 1.43 + seed * 1.7) * 0.30 +
+      Math.sin(i * 2.91 + seed * 2.3) * 0.18 + Math.cos(i * 4.27 + seed * 3.1) * 0.10
+    )
 
     if (!hasSpx) {
-      // S&P 500 not loaded yet → portfolio-only line with synthetic timeline
       const portPts = Math.max(8, Math.min(60, Math.round(totalDays / 7)))
       const portStepD = totalDays / (portPts - 1)
       return [{
@@ -256,49 +357,36 @@ function AnalyticsCommon({ t, lang, ccy, rows, totalValue, totalPL, totalPlPct, 
         color: "var(--ink)", fill: true,
         data: Array.from({ length: portPts }, (_, i) => {
           const p = i / (portPts - 1)
-          const fade = Math.sin(Math.PI * p)
-          const y = totalCost + range * easeAt(p) + noiseAt(i, 1.7) * noiseScale * fade
           const d = new Date(now); d.setDate(d.getDate() - (portPts - 1 - i) * portStepD)
-          return { x: i, y, label: mkLabel(d) }
+          return { x: i, y: totalCost + valRange * easeAt(p) + noiseAt(i, 1.7) * noiseScale * Math.sin(Math.PI * p), label: mkLabel(d) }
         })
       }]
     }
 
-    // Downsample S&P to ~weekly resolution; both series will share the same N
     const targetPts = Math.max(8, Math.min(60, Math.round(totalDays / 7)))
     const stride = Math.max(1, Math.floor(spxSlice.length / targetPts))
     let sampled = spxSlice.filter((_, i) => i % stride === 0)
-    // Always include the latest close so the chart ends today
     if (sampled.length === 0 || sampled[sampled.length - 1] !== spxSlice[spxSlice.length - 1]) {
       sampled = [...sampled, spxSlice[spxSlice.length - 1]]
     }
     const N = sampled.length
     const baseClose = sampled[0].c
-
-    // Portfolio matched to S&P's exact timestamps (same N points, same x = 0..N-1)
-    const portfolioSeries = {
-      name: th ? "พอร์ตของคุณ" : "Your portfolio",
-      color: "var(--ink)", fill: true,
-      data: sampled.map((p, i) => {
-        const prog = i / (N - 1)
-        const fade = Math.sin(Math.PI * prog)
-        const y = totalCost + range * easeAt(prog) + noiseAt(i, 1.7) * noiseScale * fade
-        return { x: i, y, label: mkLabel(new Date(p.t * 1000)) }
-      })
-    }
-
-    const sp500Series = {
-      name: "S&P 500",
-      color: "var(--accent)",
-      data: sampled.map((p, i) => ({
-        x: i,
-        y: totalCost * (p.c / baseClose),
-        label: mkLabel(new Date(p.t * 1000)),
-      }))
-    }
-
-    return [portfolioSeries, sp500Series]
-  }, [dataState, totalCost, totalValue, th, chartPeriod, periodDaysMap, daysSinceFirst, spxData])
+    return [
+      {
+        name: th ? "พอร์ตของคุณ" : "Your portfolio",
+        color: "var(--ink)", fill: true,
+        data: sampled.map((p, i) => {
+          const prog = i / (N - 1)
+          return { x: i, y: totalCost + valRange * easeAt(prog) + noiseAt(i, 1.7) * noiseScale * Math.sin(Math.PI * prog), label: mkLabel(new Date(p.t * 1000)) }
+        })
+      },
+      {
+        name: "S&P 500",
+        color: "var(--accent)",
+        data: sampled.map((p, i) => ({ x: i, y: totalCost * (p.c / baseClose), label: mkLabel(new Date(p.t * 1000)) }))
+      }
+    ]
+  }, [dataState, totalCost, totalValue, th, chartPeriod, periodDaysMap, daysSinceFirst, spxData, liveHoldings, holdingHistories, purchaseSecByTicker, fxRate])
 
   // Merge same-ticker lots before sorting (so QH with 2 lots appears once)
   const livePerformers = useMemo(() => {
@@ -356,8 +444,10 @@ function AnalyticsCommon({ t, lang, ccy, rows, totalValue, totalPL, totalPlPct, 
               <div className="muted" style={{ fontSize: 12, marginTop: 4 }}>
                 <span className="dot" style={{ background: "var(--ink)" }} /> {th ? "พอร์ตของคุณ" : "Your portfolio"}
                 {dataState === "live" && (
-                  <span style={{ fontSize: 11, color: "var(--ink-4)", marginLeft: 4 }}>
-                    {th ? "(จำลองช่วงที่ลงทุน)" : "(simulated within investment window)"}
+                  <span style={{ fontSize: 11, marginLeft: 4, color: hasRealHistory ? "var(--green)" : "var(--ink-4)" }}>
+                    {hasRealHistory
+                      ? (th ? "(ราคาจริงจาก Yahoo Finance)" : "(real prices · Yahoo Finance)")
+                      : (th ? "(กำลังโหลดข้อมูล…)" : "(loading real prices…)")}
                   </span>
                 )}
                 <span style={{ marginLeft: 12 }}><span className="dot" style={{ background: "var(--accent)" }} /> S&P 500</span>
