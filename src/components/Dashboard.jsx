@@ -527,45 +527,93 @@ function LiveDashboardPage({ t, lang, ccy, setRoute, liveHoldings, prices = {}, 
     return list.slice(0, 5)
   }, [rows])
 
-  // Portfolio value chart
-  //  - X-axis spans min(selected period, daysSinceFirst)
-  //  - Adaptive date labels (day-month / month-year / year only)
+  // Portfolio value chart — built from real transaction data
+  //  • Each Buy/Sell tx creates a real data point (cumulative cost invested in THB)
+  //  • Final point = today's live market value from prices API
+  //  • Adaptive date labels (day-month / month-year / year only)
   const histSeries = useMemo(() => {
-    if (totalCostBasis <= 0 || totalValue <= 0) return []
-    const now = new Date()
-    const requestedDays = periodDaysMap[chartPeriod] || 365
-    const totalDays = Math.max(7, Math.min(requestedDays, daysSinceFirst))
+    if (totalValue <= 0) return []
 
-    const range = totalValue - totalCostBasis
-    const noiseScale = Math.max(Math.abs(range) * 0.1, totalCostBasis * 0.015)
-    const easeAt = p => p < 0.5 ? 2 * p * p : -1 + (4 - 2 * p) * p
-    const noiseAt = (i, seed) => (
-      Math.sin(i * 0.61 + seed) * 0.55 +
-      Math.sin(i * 1.43 + seed * 1.7) * 0.30 +
-      Math.sin(i * 2.91 + seed * 2.3) * 0.18 +
-      Math.cos(i * 4.27 + seed * 3.1) * 0.10
-    )
-    const locale = th ? "th-TH" : "en-US"
-    const mkLabel = (d) => {
+    const now        = new Date()
+    const reqDays    = periodDaysMap[chartPeriod] || 365
+    const totalDays  = Math.max(7, Math.min(reqDays, daysSinceFirst))
+    const cutoffMs   = now.getTime() - totalDays * 86400000
+
+    const locale  = th ? "th-TH" : "en-US"
+    const mkLabel = d => {
       if (totalDays < 60)  return d.toLocaleString(locale, { month: "short", day: "numeric" })
       if (totalDays < 730) return d.toLocaleString(locale, { month: "short" }) + " '" + String(d.getFullYear()).slice(2)
       return "'" + String(d.getFullYear()).slice(2)
     }
 
-    const portPts = Math.max(8, Math.min(60, Math.round(totalDays / 7)))
-    const portStepD = totalDays / (portPts - 1)
+    // Build cumulative-cost curve from Buy / Sell transactions
+    const tradeTx = [...allTx]
+      .filter(tx => tx.transacted_at && ((tx.type || 'Buy') === 'Buy' || tx.type === 'Sell'))
+      .sort((a, b) => new Date(a.transacted_at) - new Date(b.transacted_at))
+
+    if (tradeTx.length === 0) {
+      // No transactions yet — simple two-point fallback
+      return [{
+        name: th ? "มูลค่าพอร์ต" : "Portfolio value",
+        color: "var(--ink)", fill: true,
+        data: [
+          { x: 0, y: totalCostBasis, label: mkLabel(new Date(cutoffMs)) },
+          { x: 1, y: totalValue,     label: mkLabel(now) },
+        ]
+      }]
+    }
+
+    // Accumulate running cost (always THB)
+    let running = 0
+    const fullCurve = tradeTx.map(tx => {
+      const raw = tx.amount != null
+        ? parseFloat(tx.amount) || 0
+        : (parseFloat(tx.shares) || 0) * (parseFloat(tx.price) || 0)
+      const thb = (tx.currency || 'THB') === 'USD' ? raw * fxRate : raw
+      running = (tx.type || 'Buy') === 'Buy'
+        ? running + thb
+        : Math.max(0, running - thb)
+      return { ms: new Date(tx.transacted_at).getTime(), value: running }
+    })
+
+    // Cost accumulated before the display window starts
+    const before = fullCurve.filter(p => p.ms < cutoffMs)
+    const startValue = before.length > 0 ? before[before.length - 1].value : 0
+
+    // Transactions inside the display window
+    const inWindow = fullCurve.filter(p => p.ms >= cutoffMs)
+
+    // Assemble points
+    const pts = []
+    // Window-start anchor (shows baseline even when no tx in window)
+    if (startValue > 0 || inWindow.length === 0) {
+      pts.push({ ms: cutoffMs, value: startValue > 0 ? startValue : totalCostBasis })
+    }
+    inWindow.forEach(p => pts.push(p))
+    // Today → live market value
+    pts.push({ ms: now.getTime(), value: totalValue })
+
+    // Deduplicate same calendar day, keep last point
+    const deduped = pts.reduce((acc, p) => {
+      const k = new Date(p.ms).toDateString()
+      if (acc.length > 0 && new Date(acc[acc.length - 1].ms).toDateString() === k) {
+        acc[acc.length - 1] = p
+      } else {
+        acc.push(p)
+      }
+      return acc
+    }, [])
+
     return [{
       name: th ? "มูลค่าพอร์ต" : "Portfolio value",
       color: "var(--ink)", fill: true,
-      data: Array.from({ length: portPts }, (_, i) => {
-        const p = i / (portPts - 1)
-        const fade = Math.sin(Math.PI * p)
-        const y = totalCostBasis + range * easeAt(p) + noiseAt(i, 1.7) * noiseScale * fade
-        const d = new Date(now); d.setDate(d.getDate() - (portPts - 1 - i) * portStepD)
-        return { x: i, y, label: mkLabel(d) }
-      })
+      data: deduped.map((p, i) => ({
+        x: i,
+        y: p.value,
+        label: mkLabel(new Date(p.ms))
+      }))
     }]
-  }, [totalCostBasis, totalValue, th, chartPeriod, daysSinceFirst])
+  }, [allTx, totalValue, totalCostBasis, th, chartPeriod, daysSinceFirst, fxRate])
 
   const chartLabel = chartPeriod
 
