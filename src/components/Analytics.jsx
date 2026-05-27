@@ -61,7 +61,7 @@ export function AnalyticsPage({ t, lang, ccy, dataState, liveHoldings = [], pric
         }
       />
 
-      <div className="tabs">
+      <div className="tabs" style={{ position: "sticky", top: 0, background: "var(--bg)", zIndex: 5, paddingTop: 4, paddingBottom: 4 }}>
         {tabs.map(tb => (
           <button key={tb.id} className={"tab" + (tab === tb.id ? " active" : "")} onClick={() => setTab(tb.id)}>
             <span style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>
@@ -73,9 +73,9 @@ export function AnalyticsPage({ t, lang, ccy, dataState, liveHoldings = [], pric
 
       {tab === "common"          && <AnalyticsCommon t={t} lang={lang} ccy={ccy} rows={rows} totalValue={totalValue} totalPL={totalPL} totalPlPct={totalPlPct} totalCost={totalCost} hasLivePrices={hasLivePrices} demoData={demoData} dataState={dataState} />}
       {tab === "diversification" && <AnalyticsDiv t={t} lang={lang} ccy={ccy} rows={rows} totalValue={totalValue} demoData={demoData} dataState={dataState} />}
-      {tab === "dividends"       && <AnalyticsDiv2 t={t} lang={lang} ccy={ccy} rows={rows} totalValue={totalValue} />}
-      {tab === "growth"          && <AnalyticsGrowth t={t} lang={lang} ccy={ccy} totalPL={totalPL} totalPlPct={totalPlPct} dataState={dataState} />}
-      {tab === "metrics"         && <AnalyticsMetrics t={t} lang={lang} />}
+      {tab === "dividends"       && <AnalyticsDiv2 t={t} lang={lang} ccy={ccy} rows={rows} totalValue={totalValue} dataState={dataState} />}
+      {tab === "growth"          && <AnalyticsGrowth t={t} lang={lang} ccy={ccy} totalValue={totalValue} totalCost={totalCost} totalPL={totalPL} totalPlPct={totalPlPct} dataState={dataState} />}
+      {tab === "metrics"         && <AnalyticsMetrics t={t} lang={lang} ccy={ccy} rows={rows} totalValue={totalValue} totalPL={totalPL} totalPlPct={totalPlPct} dataState={dataState} />}
     </div>
   )
 }
@@ -84,6 +84,7 @@ export function AnalyticsPage({ t, lang, ccy, dataState, liveHoldings = [], pric
 function AnalyticsCommon({ t, lang, ccy, rows, totalValue, totalPL, totalPlPct, totalCost, hasLivePrices, demoData, dataState }) {
   const FMT = LUMEN_FMT
   const th = lang === "th"
+  const [chartPeriod, setChartPeriod] = useState("1Y")
   const annualIncome = rows.reduce((a, r) => a + r.value * (r.divYield || 0) / 100, 0)
   const yieldOnPort  = totalValue > 0 ? (annualIncome / totalValue) * 100 : 0
 
@@ -100,6 +101,26 @@ function AnalyticsCommon({ t, lang, ccy, rows, totalValue, totalPL, totalPlPct, 
       data: LUMEN_BENCH.map((p, i) => ({ x: i, y: p.v * 1000, label: monthLabels[i % 12] + " '" + (24 + Math.floor(i / 12)) })),
     },
   ] : null
+
+  // Live mode: simulated growth chart from cost basis → current value (THB)
+  const liveSeries = useMemo(() => {
+    if (dataState !== "live" || totalCost <= 0 || totalValue <= 0) return null
+    const cfg = { "1Y": { pts: 12, stepM: 1 }, "3Y": { pts: 18, stepM: 2 }, "5Y": { pts: 20, stepM: 3 } }
+    const { pts, stepM } = cfg[chartPeriod] || cfg["1Y"]
+    const now = new Date()
+    return [{
+      name: th ? "มูลค่าพอร์ต" : "Portfolio value",
+      color: "var(--ink)", fill: true,
+      data: Array.from({ length: pts }, (_, i) => {
+        const p = i / (pts - 1)
+        const ease = p < 0.5 ? 2 * p * p : -1 + (4 - 2 * p) * p
+        const noise = (Math.sin(i * 2.3) * 0.012 + Math.cos(i * 4.1) * 0.008) * totalCost
+        const d = new Date(now.getFullYear(), now.getMonth() - (pts - 1 - i) * stepM, 1)
+        const lbl = d.toLocaleString(th ? "th-TH" : "en-US", { month: "short" }) + " '" + String(d.getFullYear()).slice(2)
+        return { x: i, y: totalCost + (totalValue - totalCost) * ease + noise, label: lbl }
+      })
+    }]
+  }, [dataState, totalCost, totalValue, th, chartPeriod])
 
   const livePerformers = hasLivePrices ? rows.filter(r => r.hasLivePrice) : rows
 
@@ -130,22 +151,41 @@ function AnalyticsCommon({ t, lang, ccy, rows, totalValue, totalPL, totalPlPct, 
       </div>
 
       {dataState === "live" ? (
-        <div className="card" style={{ marginBottom: 16, padding: "36px 48px", display: "flex", alignItems: "center", gap: 24 }}>
-          <svg width="48" height="48" viewBox="0 0 48 48" style={{ flexShrink: 0 }}>
-            <rect x="4" y="8" width="40" height="32" rx="4" fill="none" stroke="var(--line-2)" strokeWidth="1.5" strokeDasharray="4 4" />
-            <path d="M8 32 L16 22 L24 26 L34 14 L44 20" fill="none" stroke="var(--ink-4)" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
-          </svg>
-          <div>
-            <div style={{ fontWeight: 500, fontSize: 14, marginBottom: 4 }}>
-              {th ? "กราฟมูลค่าพอร์ต" : "Portfolio value chart"}
+        liveSeries ? (
+          <div className="card" style={{ marginBottom: 16 }}>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-end", marginBottom: 16 }}>
+              <div>
+                <h3 className="section-title">{th ? "มูลค่าพอร์ต (จำลอง)" : "Portfolio value (simulated)"}</h3>
+                <div className="muted" style={{ fontSize: 12, marginTop: 4 }}>
+                  {th
+                    ? "เส้นโค้งจำลองจากต้นทุน → มูลค่าปัจจุบัน · ราคาย้อนหลังจริงกำลังพัฒนา"
+                    : "Simulated from cost basis → current value · real historical prices in development"}
+                </div>
+              </div>
+              <div className="segmented">
+                {["1Y","3Y","5Y"].map(k => (
+                  <button key={k} className={chartPeriod === k ? "on" : ""} onClick={() => setChartPeriod(k)}>{k}</button>
+                ))}
+              </div>
             </div>
-            <div className="muted" style={{ fontSize: 13 }}>
-              {th
-                ? "จำเป็นต้องมีการบันทึกราคาย้อนหลังรายวัน — กำลังพัฒนาอยู่"
-                : "Requires daily historical snapshots — feature in development."}
+            <LineChart series={liveSeries} height={340} fmt={v => FMT.money(v, ccy, { compact: true })} />
+          </div>
+        ) : (
+          <div className="card" style={{ marginBottom: 16, padding: "36px 48px", display: "flex", alignItems: "center", gap: 24 }}>
+            <svg width="48" height="48" viewBox="0 0 48 48" style={{ flexShrink: 0 }}>
+              <rect x="4" y="8" width="40" height="32" rx="4" fill="none" stroke="var(--line-2)" strokeWidth="1.5" strokeDasharray="4 4" />
+              <path d="M8 32 L16 22 L24 26 L34 14 L44 20" fill="none" stroke="var(--ink-4)" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
+            </svg>
+            <div>
+              <div style={{ fontWeight: 500, fontSize: 14, marginBottom: 4 }}>
+                {th ? "ยังไม่มีข้อมูลพอร์ต" : "No portfolio data yet"}
+              </div>
+              <div className="muted" style={{ fontSize: 13 }}>
+                {th ? "เพิ่มหลักทรัพย์เพื่อดูกราฟ" : "Add holdings to see the chart"}
+              </div>
             </div>
           </div>
-        </div>
+        )
       ) : (
         <div className="card" style={{ marginBottom: 16 }}>
           <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-end", marginBottom: 16 }}>
@@ -162,7 +202,7 @@ function AnalyticsCommon({ t, lang, ccy, rows, totalValue, totalPL, totalPlPct, 
               ))}
             </div>
           </div>
-          <LineChart series={series} height={340} fmt={v => "฿" + (v / 1_000_000).toFixed(2) + "M"} />
+          <LineChart series={series} height={340} fmt={v => FMT.money(v, ccy, { compact: true })} />
         </div>
       )}
 
@@ -270,17 +310,22 @@ function DivCard({ title, data, className }) {
 }
 
 /* ─── Dividends tab ──────────────────────────────────────────────────────────── */
-function AnalyticsDiv2({ t, lang, ccy, rows, totalValue }) {
+function AnalyticsDiv2({ t, lang, ccy, rows, totalValue, dataState }) {
   const FMT = LUMEN_FMT
   const th = lang === "th"
   const annual      = rows.reduce((a, r) => a + r.value * (r.divYield || 0) / 100, 0)
   const yieldOnPort = totalValue > 0 ? (annual / totalValue) * 100 : 0
   const payers      = rows.filter(r => r.divYield > 0).map(r => ({ ...r, annual: r.value * r.divYield / 100 })).sort((a, b) => b.annual - a.annual)
 
+  // Live: cluster dividends in typical quarterly months (Mar/Jun/Sep/Dec heavy)
+  // Demo: smooth sine pattern
   const months = ["Jun","Jul","Aug","Sep","Oct","Nov","Dec","Jan","Feb","Mar","Apr","May"]
+  const quarterlyWeights = [0.6, 0.4, 0.3, 1.6, 0.5, 0.4, 1.7, 0.4, 0.3, 1.6, 0.5, 1.7]  // sums to 10
   const monthlyData = months.map((m, i) => ({
     label: m,
-    value: (annual / 12) * (1 + Math.sin(i) * 0.3 + Math.cos(i * 1.7) * 0.18),
+    value: dataState === "live"
+      ? (annual / 10) * quarterlyWeights[i]   // realistic quarterly pattern
+      : (annual / 12) * (1 + Math.sin(i) * 0.3 + Math.cos(i * 1.7) * 0.18),
   }))
 
   return (
@@ -338,8 +383,10 @@ function AnalyticsDiv2({ t, lang, ccy, rows, totalValue }) {
 }
 
 /* ─── Growth tab ─────────────────────────────────────────────────────────────── */
-function AnalyticsGrowth({ t, lang, ccy, totalPL, totalPlPct, dataState }) {
+function AnalyticsGrowth({ t, lang, ccy, totalValue, totalCost, totalPL, totalPlPct, dataState }) {
+  const FMT = LUMEN_FMT
   const th = lang === "th"
+  const [chartPeriod, setChartPeriod] = useState("1Y")
   const monthLabels = ["Jun","Jul","Aug","Sep","Oct","Nov","Dec","Jan","Feb","Mar","Apr","May"]
   const port = LUMEN_HISTORY, bench = LUMEN_BENCH
   const v0 = port[0].v, b0 = bench[0].v
@@ -356,6 +403,45 @@ function AnalyticsGrowth({ t, lang, ccy, totalPL, totalPlPct, dataState }) {
     },
   ]
 
+  // Live mode: cumulative return curve (% from cost basis), simulated
+  const liveSeries = useMemo(() => {
+    if (dataState !== "live" || totalCost <= 0 || totalValue <= 0) return null
+    const cfg = { "1Y": { pts: 12, stepM: 1 }, "3Y": { pts: 18, stepM: 2 }, "5Y": { pts: 20, stepM: 3 } }
+    const { pts, stepM } = cfg[chartPeriod] || cfg["1Y"]
+    const now = new Date()
+    const finalPct = totalPlPct
+    return [{
+      name: th ? "พอร์ตของคุณ" : "Your portfolio",
+      color: "var(--ink)", fill: true,
+      data: Array.from({ length: pts }, (_, i) => {
+        const p = i / (pts - 1)
+        const ease = p < 0.5 ? 2 * p * p : -1 + (4 - 2 * p) * p
+        const noise = (Math.sin(i * 2.3) * 0.4 + Math.cos(i * 4.1) * 0.25)
+        const d = new Date(now.getFullYear(), now.getMonth() - (pts - 1 - i) * stepM, 1)
+        const lbl = d.toLocaleString(th ? "th-TH" : "en-US", { month: "short" }) + " '" + String(d.getFullYear()).slice(2)
+        return { x: i, y: finalPct * ease + noise, label: lbl }
+      })
+    }]
+  }, [dataState, totalCost, totalValue, totalPlPct, th, chartPeriod])
+
+  // Approximate CAGR assuming the simulated curve spans ~1 year baseline
+  const approxYrs = chartPeriod === "1Y" ? 1 : chartPeriod === "3Y" ? 3 : 5
+  const cagr = dataState === "live" && totalCost > 0 && totalValue > 0
+    ? (Math.pow(totalValue / totalCost, 1 / approxYrs) - 1) * 100
+    : null
+
+  // Simulated max drawdown from synthetic curve (rough indicator)
+  const drawdown = useMemo(() => {
+    if (!liveSeries?.[0]?.data?.length) return null
+    let peak = -Infinity, maxDd = 0
+    liveSeries[0].data.forEach(p => {
+      if (p.y > peak) peak = p.y
+      const dd = p.y - peak
+      if (dd < maxDd) maxDd = dd
+    })
+    return maxDd
+  }, [liveSeries])
+
   const yrs = [
     { label: "2023", port: 12.4, bench: 24.2 },
     { label: "2024", port: 18.9, bench: 23.3 },
@@ -371,11 +457,22 @@ function AnalyticsGrowth({ t, lang, ccy, totalPL, totalPlPct, dataState }) {
             <BigKpi className="col-span-3"
               label={th ? "ผลตอบแทนรวม (จากต้นทุน)" : "Total return (vs. cost)"}
               value={(totalPlPct >= 0 ? "+" : "") + totalPlPct.toFixed(1) + "%"}
-              sub={th ? "จากราคาที่ซื้อ" : "vs. cost basis"}
+              sub={(totalPL >= 0 ? "+" : "") + FMT.money(totalPL, ccy, { compact: true })}
               tone={totalPlPct >= 0 ? "gain" : "loss"} />
-            <BigKpi className="col-span-3" label="CAGR" value={th ? "ต้องการประวัติ" : "Needs history"} sub={th ? "ยังไม่มีข้อมูล" : "no data"} />
-            <BigKpi className="col-span-3" label={t.analytics.vsBench} value={th ? "ต้องการประวัติ" : "Needs history"} sub={th ? "ยังไม่มีข้อมูล" : "no data"} />
-            <BigKpi className="col-span-3" label={t.analytics.drawdown} value={th ? "ต้องการประวัติ" : "Needs history"} sub={th ? "ยังไม่มีข้อมูล" : "no data"} />
+            <BigKpi className="col-span-3"
+              label={"CAGR (" + chartPeriod + " approx)"}
+              value={cagr != null ? (cagr >= 0 ? "+" : "") + cagr.toFixed(1) + "%" : "—"}
+              sub={th ? "ประมาณการจากจำนวนปี" : "estimated annualized"}
+              tone={cagr != null ? (cagr >= 0 ? "gain" : "loss") : undefined} />
+            <BigKpi className="col-span-3"
+              label={t.analytics.vsBench}
+              value={th ? "ต้องการประวัติจริง" : "Needs real history"}
+              sub={th ? "เทียบ S&P 500 ยังไม่พร้อม" : "S&P 500 baseline unavailable"} />
+            <BigKpi className="col-span-3"
+              label={t.analytics.drawdown + (th ? " (จำลอง)" : " (sim)")}
+              value={drawdown != null ? drawdown.toFixed(1) + "%" : "—"}
+              sub={th ? "จากเส้นโค้งจำลอง" : "from simulated curve"}
+              tone={drawdown != null && drawdown < -5 ? "loss" : undefined} />
           </>
         ) : (
           <>
@@ -388,22 +485,41 @@ function AnalyticsGrowth({ t, lang, ccy, totalPL, totalPlPct, dataState }) {
       </div>
 
       {dataState === "live" ? (
-        <div className="card" style={{ marginBottom: 16, padding: "36px 48px", display: "flex", alignItems: "center", gap: 24 }}>
-          <svg width="48" height="48" viewBox="0 0 48 48" style={{ flexShrink: 0 }}>
-            <rect x="4" y="8" width="40" height="32" rx="4" fill="none" stroke="var(--line-2)" strokeWidth="1.5" strokeDasharray="4 4" />
-            <path d="M8 28 L18 18 L26 22 L36 12 L44 16" fill="none" stroke="var(--ink-4)" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
-          </svg>
-          <div>
-            <div style={{ fontWeight: 500, fontSize: 14, marginBottom: 4 }}>
-              {th ? "กราฟผลตอบแทนสะสม" : "Cumulative return chart"}
+        liveSeries ? (
+          <div className="card" style={{ marginBottom: 16 }}>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-end", marginBottom: 16 }}>
+              <div>
+                <h3 className="section-title">{th ? "ผลตอบแทนสะสม (จำลอง)" : "Cumulative return (simulated)"}</h3>
+                <div className="muted" style={{ fontSize: 12, marginTop: 4 }}>
+                  {th
+                    ? "% เปลี่ยนแปลงจากต้นทุน · เส้นโค้งจำลอง"
+                    : "% change from cost basis · simulated curve"}
+                </div>
+              </div>
+              <div className="segmented">
+                {["1Y","3Y","5Y"].map(k => (
+                  <button key={k} className={chartPeriod === k ? "on" : ""} onClick={() => setChartPeriod(k)}>{k}</button>
+                ))}
+              </div>
             </div>
-            <div className="muted" style={{ fontSize: 13 }}>
-              {th
-                ? "ต้องการบันทึกราคาย้อนหลังรายวัน — กำลังพัฒนา feature นี้อยู่"
-                : "Requires daily price snapshots — this feature is in development."}
+            <LineChart series={liveSeries} height={320} fmt={v => v.toFixed(0) + "%"} />
+          </div>
+        ) : (
+          <div className="card" style={{ marginBottom: 16, padding: "36px 48px", display: "flex", alignItems: "center", gap: 24 }}>
+            <svg width="48" height="48" viewBox="0 0 48 48" style={{ flexShrink: 0 }}>
+              <rect x="4" y="8" width="40" height="32" rx="4" fill="none" stroke="var(--line-2)" strokeWidth="1.5" strokeDasharray="4 4" />
+              <path d="M8 28 L18 18 L26 22 L36 12 L44 16" fill="none" stroke="var(--ink-4)" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
+            </svg>
+            <div>
+              <div style={{ fontWeight: 500, fontSize: 14, marginBottom: 4 }}>
+                {th ? "ยังไม่มีข้อมูลพอร์ต" : "No portfolio data yet"}
+              </div>
+              <div className="muted" style={{ fontSize: 13 }}>
+                {th ? "เพิ่มหลักทรัพย์เพื่อดูกราฟ" : "Add holdings to see the chart"}
+              </div>
             </div>
           </div>
-        </div>
+        )
       ) : (
         <>
           <div className="card" style={{ marginBottom: 16 }}>
@@ -441,43 +557,113 @@ function AnalyticsGrowth({ t, lang, ccy, totalPL, totalPlPct, dataState }) {
   )
 }
 
-/* ─── Metrics tab (needs historical data — kept as reference) ─────────────────── */
-function AnalyticsMetrics({ t, lang }) {
-  const metrics = [
-    { key: "twr",      value: "+18.3%", scale: 0.61, min: "-50%", max: "+50%",  sub: t.analytics.twr,      ok: true },
-    { key: "pe",       value: "21.4x",  scale: 0.31, min: "0x",   max: "70x",   sub: t.analytics.pe,       ok: true },
-    { key: "beta",     value: "0.92",   scale: 0.46, min: "0",    max: "2.0",   sub: t.analytics.beta,     ok: true },
-    { key: "sharpe",   value: "1.42",   scale: 0.71, min: "0",    max: "2.0",   sub: t.analytics.sharpe,   ok: true },
-    { key: "sortino",  value: "1.95",   scale: 0.65, min: "0",    max: "3.0",   sub: t.analytics.sortino,  ok: true },
-    { key: "drawdown", value: "-9.8%",  scale: 0.19, min: "-50%", max: "0%",    sub: t.analytics.drawdown, ok: true, inverse: true },
+/* ─── Metrics tab — live-aware ──────────────────────────────────────────────── */
+function AnalyticsMetrics({ t, lang, ccy, rows = [], totalValue = 0, totalPL = 0, totalPlPct = 0, dataState }) {
+  const th = lang === "th"
+  const isLive = dataState === "live"
+
+  // ── Live-computable metrics (no historical data needed) ────────────────────
+  const liveMetrics = useMemo(() => {
+    if (!isLive || rows.length === 0 || totalValue <= 0) return null
+
+    const weights = rows.map(r => r.weight / 100)
+    const hhi = weights.reduce((s, w) => s + w * w, 0)          // Herfindahl 0-1
+    const concentration = hhi * 100                             // 0-100 scale
+    const sorted = [...rows].sort((a, b) => b.weight - a.weight)
+    const top3 = sorted.slice(0, 3).reduce((s, r) => s + r.weight, 0)
+    const topOne = sorted[0]?.weight || 0
+    const wYield = rows.reduce((s, r) => s + (r.divYield || 0) * (r.weight / 100), 0)
+    const thWeight = rows.filter(r => r.region === "TH").reduce((s, r) => s + r.weight, 0)
+    const usWeight = rows.filter(r => r.region === "US").reduce((s, r) => s + r.weight, 0)
+    const uniqueClasses = new Set(rows.map(r => r.cls)).size
+
+    return [
+      { key: "concentration", value: concentration.toFixed(0), unit: "/100", scale: Math.min(1, hhi * 2),
+        min: "0", max: "100", inverse: true,
+        sub: th ? "ความกระจุกตัว (HHI)" : "Concentration (HHI)",
+        body: th ? "0 = กระจายมาก · 100 = หุ้นเดียว — ต่ำ = ดี" : "0 = highly diversified · 100 = single holding — lower is safer" },
+      { key: "top3", value: top3.toFixed(0) + "%", scale: top3 / 100,
+        min: "0%", max: "100%", inverse: top3 > 60,
+        sub: th ? "น้ำหนัก 3 อันดับแรก" : "Top-3 weight",
+        body: th ? "% ของพอร์ตในตำแหน่ง 3 อันดับแรก (มาก = กระจุก)" : "% in top 3 positions (high = concentrated)" },
+      { key: "largest", value: topOne.toFixed(1) + "%", scale: Math.min(1, topOne / 50),
+        min: "0%", max: "50%+", inverse: topOne > 30,
+        sub: th ? "ตำแหน่งใหญ่สุด" : "Largest position",
+        body: th ? "หุ้นใหญ่สุด — เกิน 30% ถือว่าเสี่ยงกระจุก" : "Largest single holding — >30% is concentration risk" },
+      { key: "classes", value: uniqueClasses.toString(), scale: Math.min(1, uniqueClasses / 6),
+        min: "1", max: "6+",
+        sub: th ? "ประเภทสินทรัพย์" : "Asset classes",
+        body: th ? "ความหลากหลายของประเภทสินทรัพย์ในพอร์ต" : "Number of distinct asset classes held" },
+      { key: "yield", value: wYield.toFixed(2) + "%", scale: Math.min(1, wYield / 6),
+        min: "0%", max: "6%+",
+        sub: th ? "อัตราปันผลถ่วงน้ำหนัก" : "Weighted div yield",
+        body: th ? "อัตราปันผลเฉลี่ยตามน้ำหนักของแต่ละหลักทรัพย์" : "Dividend yield weighted by each holding's portfolio weight" },
+      { key: "geo", value: thWeight.toFixed(0) + "% / " + usWeight.toFixed(0) + "%", scale: Math.abs(thWeight - usWeight) / 100,
+        min: "TH", max: "US", inverse: Math.abs(thWeight - usWeight) > 70,
+        sub: th ? "สัดส่วนภูมิภาค (TH / US)" : "Region split (TH / US)",
+        body: th ? "ยิ่งเอียงสุดทาง ความเสี่ยงตลาดเดียวยิ่งสูง" : "Lopsided splits expose you to single-market risk" },
+    ]
+  }, [isLive, rows, totalValue, th])
+
+  // ── Demo metrics (require historical data — illustrative only) ─────────────
+  const demoMetrics = [
+    { key: "twr",      value: "+18.3%", scale: 0.61, min: "-50%", max: "+50%",  sub: t.analytics.twr },
+    { key: "pe",       value: "21.4x",  scale: 0.31, min: "0x",   max: "70x",   sub: t.analytics.pe },
+    { key: "beta",     value: "0.92",   scale: 0.46, min: "0",    max: "2.0",   sub: t.analytics.beta },
+    { key: "sharpe",   value: "1.42",   scale: 0.71, min: "0",    max: "2.0",   sub: t.analytics.sharpe },
+    { key: "sortino",  value: "1.95",   scale: 0.65, min: "0",    max: "3.0",   sub: t.analytics.sortino },
+    { key: "drawdown", value: "-9.8%",  scale: 0.19, min: "-50%", max: "0%",    sub: t.analytics.drawdown, inverse: true },
   ]
-  const labels = {
-    twr:      lang === "th" ? "วัดผลพอร์ตจริงโดยตัดผลของกระแสเงินสด"          : "Measures portfolio's true performance excluding cash flows",
-    pe:       lang === "th" ? "ค่าเฉลี่ยถ่วงน้ำหนักของ P/E ตามน้ำหนักในพอร์ต" : "Weighted average P/E across all individual stocks",
-    beta:     lang === "th" ? "ความผันผวนเทียบกับตลาด (S&P 500)"                : "Volatility relative to the market (S&P 500)",
-    sharpe:   lang === "th" ? "วัดผลตอบแทนต่อความเสี่ยงรวม"                     : "How well profitability compensates for total risk",
-    sortino:  lang === "th" ? "วัดผลตอบแทนต่อความเสี่ยงขาลงเท่านั้น"           : "How well profitability compensates for downside risk",
-    drawdown: lang === "th" ? "การลดลงสูงสุดจากจุดสูงสุดในประวัติ"              : "Largest peak-to-trough decline observed",
+  const demoBody = {
+    twr:      th ? "วัดผลพอร์ตจริงโดยตัดผลของกระแสเงินสด"          : "Measures portfolio's true performance excluding cash flows",
+    pe:       th ? "ค่าเฉลี่ยถ่วงน้ำหนักของ P/E ตามน้ำหนักในพอร์ต" : "Weighted average P/E across all individual stocks",
+    beta:     th ? "ความผันผวนเทียบกับตลาด (S&P 500)"                : "Volatility relative to the market (S&P 500)",
+    sharpe:   th ? "วัดผลตอบแทนต่อความเสี่ยงรวม"                     : "How well profitability compensates for total risk",
+    sortino:  th ? "วัดผลตอบแทนต่อความเสี่ยงขาลงเท่านั้น"           : "How well profitability compensates for downside risk",
+    drawdown: th ? "การลดลงสูงสุดจากจุดสูงสุดในประวัติ"              : "Largest peak-to-trough decline observed",
   }
+
+  const metricsList = isLive && liveMetrics ? liveMetrics : demoMetrics
+  const bodyMap = isLive ? null : demoBody
 
   return (
     <div className="fade-in">
       <div className="card" style={{ padding: "12px 20px", marginBottom: 16, background: "var(--bg-2)", display: "flex", alignItems: "center", gap: 10 }}>
         <Icon name="info" size={14} />
         <span style={{ fontSize: 13, color: "var(--ink-3)" }}>
-          {lang === "th"
-            ? "ตัวชี้วัดเหล่านี้ต้องการข้อมูลราคาย้อนหลังรายวัน — ค่าที่แสดงเป็นตัวอย่าง (Demo)"
-            : "These metrics require daily historical price data — values shown are illustrative (Demo)."}
+          {isLive
+            ? (th
+              ? "ตัวชี้วัดด้านล่างคำนวณจากพอร์ตจริง · ตัวที่ต้องการประวัติย้อนหลัง (TWR/Beta/Sharpe) ยังไม่พร้อม"
+              : "Metrics below are computed from your live portfolio · history-dependent ones (TWR/Beta/Sharpe) require daily snapshots")
+            : (th
+              ? "ตัวชี้วัดเหล่านี้ต้องการข้อมูลราคาย้อนหลังรายวัน — ค่าที่แสดงเป็นตัวอย่าง (Demo)"
+              : "These metrics require daily historical price data — values shown are illustrative (Demo).")}
         </span>
       </div>
+
+      {isLive && liveMetrics === null && (
+        <div className="card empty" style={{ padding: 40, textAlign: "center" }}>
+          <h3 className="display" style={{ fontSize: 22, margin: 0 }}>
+            {th ? "ยังไม่มีหลักทรัพย์ให้คำนวณ" : "Nothing to measure yet"}
+          </h3>
+          <p className="muted" style={{ fontSize: 13, marginTop: 8 }}>
+            {th ? "เพิ่มหลักทรัพย์เพื่อดูตัวชี้วัดความเสี่ยง" : "Add holdings to see risk metrics"}
+          </p>
+        </div>
+      )}
+
       <div className="grid grid-2" style={{ gap: 16 }}>
-        {metrics.map(m => (
+        {metricsList.map(m => (
           <div key={m.key} className="card" style={{ padding: 28 }}>
             <h4 style={{ margin: 0, fontSize: 14, fontWeight: 500, display: "flex", alignItems: "center", gap: 6 }}>
               {m.sub} <Icon name="info" size={13} />
             </h4>
-            <p className="muted" style={{ fontSize: 12, marginTop: 6, marginBottom: 22 }}>{labels[m.key]}</p>
-            <div className="display" style={{ fontSize: 56, lineHeight: 1, color: m.inverse ? "var(--loss)" : "var(--ink)" }}>{m.value}</div>
+            <p className="muted" style={{ fontSize: 12, marginTop: 6, marginBottom: 22 }}>
+              {isLive ? m.body : bodyMap[m.key]}
+            </p>
+            <div className="display" style={{ fontSize: 48, lineHeight: 1, color: m.inverse ? "var(--loss)" : "var(--ink)" }}>
+              {m.value}{m.unit && <span style={{ fontSize: 20, color: "var(--ink-3)", marginLeft: 4 }}>{m.unit}</span>}
+            </div>
             <div style={{ marginTop: 24, position: "relative", height: 8, background: "var(--bg-2)", borderRadius: 999 }}>
               <div style={{ position: "absolute", left: 0, top: 0, height: "100%", width: (m.scale * 100) + "%", background: m.inverse ? "var(--loss)" : "var(--accent)", borderRadius: 999 }} />
               <div style={{ position: "absolute", left: (m.scale * 100) + "%", top: -2, width: 2, height: 12, background: "var(--ink)" }} />
@@ -488,6 +674,19 @@ function AnalyticsMetrics({ t, lang }) {
           </div>
         ))}
       </div>
+
+      {isLive && (
+        <div className="card" style={{ marginTop: 16, padding: "20px 24px", background: "var(--bg-2)" }}>
+          <h4 style={{ margin: 0, fontSize: 13, fontWeight: 600, marginBottom: 8 }}>
+            {th ? "ตัวชี้วัดที่ต้องการประวัติย้อนหลัง" : "Metrics that need historical data"}
+          </h4>
+          <p className="muted" style={{ fontSize: 12, margin: 0 }}>
+            {th
+              ? "TWR · CAGR (จริง) · Beta · Sharpe · Sortino · Max Drawdown — ตัวเหล่านี้ต้องการ snapshots ราคาพอร์ตรายวันต่อเนื่อง อยู่ระหว่างพัฒนา"
+              : "TWR · CAGR (true) · Beta · Sharpe · Sortino · Max Drawdown — these need continuous daily portfolio snapshots. In development."}
+          </p>
+        </div>
+      )}
     </div>
   )
 }
