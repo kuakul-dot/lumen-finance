@@ -20,8 +20,8 @@ pdfjs.GlobalWorkerOptions.workerSrc = workerSrc
 
 // ─── Text extraction ──────────────────────────────────────────────────────────
 
-const Y_SNAP = 3   // group text items within ±3 px vertically
-const X_TOL  = 80  // max px off-centre to match a data cell to a header column
+const Y_SNAP = 3    // group text items within ±3 px vertically
+const X_TOL  = 150  // max px off-centre to match a data cell to a header column
 
 // Returns { rows, numPages }
 // rows: Array<Array<{ x: number, text: string }>>  — sorted top→bottom, left→right
@@ -146,6 +146,8 @@ const HEADER_PATS = {
 
 // Returns { headerRow, colMap } where colMap maps field → X coordinate
 // of the header cell (not array index — avoids misalignment with data rows).
+// Also absorbs the immediately following row if it contributes new fields
+// and contains no date (handles Thai + English bilingual two-row headers).
 function findHeader(rows) {
   let best = null, bestScore = 0
   for (let ri = 0; ri < Math.min(rows.length, 80); ri++) {
@@ -154,13 +156,32 @@ function findHeader(rows) {
     for (const { x, text } of row) {
       for (const [field, pats] of Object.entries(HEADER_PATS)) {
         if (colMap[field] === undefined && pats.some(p => p.test(text))) {
-          colMap[field] = x   // store X position, not array index
+          colMap[field] = x
           score++; break
         }
       }
     }
-    if (score >= 3 && score > bestScore) {
-      best = { headerRow: ri, colMap }; bestScore = score
+    if (score < 3) continue
+
+    // Absorb the next row if it looks like a continuation header line
+    // (has pattern matches, no date — avoids eating the first data row)
+    let lastHeaderRow = ri
+    if (ri + 1 < rows.length) {
+      const nextLine = rows[ri + 1].map(c => c.text).join(' ')
+      if (!DATE_RE.test(nextLine)) {
+        for (const { x, text } of rows[ri + 1]) {
+          for (const [field, pats] of Object.entries(HEADER_PATS)) {
+            if (colMap[field] === undefined && pats.some(p => p.test(text))) {
+              colMap[field] = x; score++; break
+            }
+          }
+        }
+        lastHeaderRow = ri + 1
+      }
+    }
+
+    if (score > bestScore) {
+      best = { headerRow: lastHeaderRow, colMap }; bestScore = score
     }
   }
   return best
@@ -223,6 +244,22 @@ function pickTicker(texts) {
 
 export function detectTransactions(rows) {
   const header = findHeader(rows)
+
+  // ── DEBUG — open DevTools → Console to see this ───────────────────────────
+  if (!header) {
+    console.log('[pdfParser] ⚠️  No header found → heuristic mode')
+    console.log('[pdfParser] First 10 rows:')
+    rows.slice(0, 10).forEach((r, i) =>
+      console.log(`  [${i}]`, r.map(c => `"${c.text}"@${Math.round(c.x)}`).join(' | ')))
+  } else {
+    console.log('[pdfParser] ✅ Header at row', header.headerRow,
+      '| colMap:', JSON.stringify(Object.fromEntries(
+        Object.entries(header.colMap).map(([k, v]) => [k, Math.round(v)]))))
+    console.log('[pdfParser] Data rows after header:')
+    rows.slice(header.headerRow + 1, header.headerRow + 5).forEach((r, i) =>
+      console.log(`  [${header.headerRow + 1 + i}]`, r.map(c => `"${c.text}"@${Math.round(c.x)}`).join(' | ')))
+  }
+  // ─────────────────────────────────────────────────────────────────────────
 
   // ── Mode A: header-guided, X-position based ───────────────────────────────
   if (header) {
