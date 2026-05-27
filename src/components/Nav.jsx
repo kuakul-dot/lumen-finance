@@ -250,6 +250,8 @@ export function Icon({ name, size = 18 }) {
     case "currency": return (<svg {...props}><circle cx="12" cy="12" r="9"/><path d="M9 9h.01M15 9h.01M9 15c1 1 5 1 6 0"/><path d="M12 6v2m0 8v2"/></svg>)
     case "lang":     return (<svg {...props}><path d="M3 7V5h10"/><path d="M8 5v14"/><path d="M13 19h9M16 13h6"/><path d="M17.5 19c-.5-3 .5-5 2-6"/></svg>)
     case "user":     return (<svg {...props}><circle cx="12" cy="8" r="4"/><path d="M4 20c0-4 3.6-7 8-7s8 3 8 7"/></svg>)
+    case "eye":      return (<svg {...props}><path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7S2 12 2 12Z"/><circle cx="12" cy="12" r="3"/></svg>)
+    case "eye-off":  return (<svg {...props}><path d="M3 3l18 18"/><path d="M10.6 6.1A10.9 10.9 0 0 1 12 6c6.5 0 10 7 10 7a14 14 0 0 1-3.4 4.1"/><path d="M6.1 7.1A14 14 0 0 0 2 12s3.5 7 10 7a10.9 10.9 0 0 0 4.5-1"/><path d="M9 9a4 4 0 0 0 6 6"/></svg>)
     default: return null
   }
 }
