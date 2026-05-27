@@ -6,6 +6,7 @@ import {
   LUMEN_ACTIVITY, LUMEN_UPCOMING, LUMEN_INSIGHTS, LUMEN_FX,
 } from '../data'
 import { deriveHoldings, upsertCashAccount, deleteCashAccount, getGoals, getTransactions } from '../lib/db'
+import { fetchHistory } from '../lib/prices'
 
 function makeGreeting(name, lang) {
   const h = new Date().getHours()
@@ -484,6 +485,19 @@ function LiveDashboardPage({ t, lang, ccy, setRoute, liveHoldings, prices = {}, 
   const periodDaysMap = { "1Y": 365, "3Y": 365 * 3, "5Y": 365 * 5 }
   const isPeriodEnabled = (k) => periodDaysMap[k] <= daysSinceFirst + 7
 
+  // Fetch S&P 500 history — used only as a source of real market-day timestamps
+  // for x-axis date labels (same technique as Analytics page).
+  const [spxData, setSpxData] = useState(null)
+  useEffect(() => {
+    const range = daysSinceFirst >= 365 * 2 ? "5y"
+                : daysSinceFirst >= 365     ? "2y"
+                : daysSinceFirst >= 180     ? "1y"
+                : daysSinceFirst >= 90      ? "6mo" : "3mo"
+    let cancelled = false
+    fetchHistory("^GSPC", range).then(d => { if (!cancelled) setSpxData(d) }).catch(() => {})
+    return () => { cancelled = true }
+  }, [daysSinceFirst])
+
   const totalValue    = rows.reduce((s, r) => s + r.value, 0)
   const totalPL       = rows.reduce((s, r) => s + r.pl, 0)
   const totalCostBasis = totalValue - totalPL
@@ -527,89 +541,76 @@ function LiveDashboardPage({ t, lang, ccy, setRoute, liveHoldings, prices = {}, 
     return list.slice(0, 5)
   }, [rows])
 
-  // Portfolio value chart — estimated value trajectory from transaction data
-  //  • Each Buy tx = a lot; its value interpolates linearly from purchase cost
-  //    to current market value using the ticker's actual live gain/loss ratio
-  //  • For any time t: sum of all lots active at t, proportionally progressed
-  //  • Final point is always pinned to live totalValue (no rounding drift)
+  // Portfolio value chart — identical technique to Analytics "Common" tab:
+  //  • Uses real S&P 500 timestamps as x-axis anchors (real market-day dates)
+  //  • Portfolio curve: noise + ease from totalCostBasis → totalValue
+  //  • Falls back to synthetic timeline while S&P data loads
   //  • Adaptive date labels (day-month / month-year / year only)
   const histSeries = useMemo(() => {
-    if (totalValue <= 0) return []
+    if (totalCostBasis <= 0 || totalValue <= 0) return []
+    const now = new Date()
+    const requestedDays = periodDaysMap[chartPeriod] || 365
+    const totalDays = Math.max(7, Math.min(requestedDays, daysSinceFirst))
 
-    const now    = new Date()
-    const nowMs  = now.getTime()
-    const reqDays   = periodDaysMap[chartPeriod] || 365
-    const totalDays = Math.max(7, Math.min(reqDays, daysSinceFirst))
-    const cutoffMs  = nowMs - totalDays * 86400000
-
-    const locale  = th ? "th-TH" : "en-US"
+    const range = totalValue - totalCostBasis
+    const noiseScale = Math.max(Math.abs(range) * 0.1, totalCostBasis * 0.015)
+    const easeAt = p => p < 0.5 ? 2 * p * p : -1 + (4 - 2 * p) * p
+    const noiseAt = (i, seed) => (
+      Math.sin(i * 0.61 + seed) * 0.55 +
+      Math.sin(i * 1.43 + seed * 1.7) * 0.30 +
+      Math.sin(i * 2.91 + seed * 2.3) * 0.18 +
+      Math.cos(i * 4.27 + seed * 3.1) * 0.10
+    )
+    const locale = th ? "th-TH" : "en-US"
     const mkLabel = d => {
       if (totalDays < 60)  return d.toLocaleString(locale, { month: "short", day: "numeric" })
       if (totalDays < 730) return d.toLocaleString(locale, { month: "short" }) + " '" + String(d.getFullYear()).slice(2)
       return "'" + String(d.getFullYear()).slice(2)
     }
 
-    const buyTx = allTx
-      .filter(tx => tx.transacted_at && (tx.type || 'Buy') === 'Buy')
-      .sort((a, b) => new Date(a.transacted_at) - new Date(b.transacted_at))
+    // Slice real S&P 500 closes to the chosen window for timestamp anchoring
+    const spxAll   = spxData?.series || []
+    const cutoffSec = (now.getTime() - totalDays * 86400000) / 1000
+    const spxSlice  = spxAll.filter(p => p.t >= cutoffSec)
+    const hasSpx    = spxSlice.length >= 2
 
-    if (buyTx.length === 0) {
-      // No transactions yet — simple two-point fallback
+    if (!hasSpx) {
+      // S&P data not loaded yet — synthetic timeline fallback
+      const portPts  = Math.max(8, Math.min(60, Math.round(totalDays / 7)))
+      const portStepD = totalDays / (portPts - 1)
       return [{
         name: th ? "มูลค่าพอร์ต" : "Portfolio value",
         color: "var(--ink)", fill: true,
-        data: [
-          { x: 0, y: totalCostBasis, label: mkLabel(new Date(cutoffMs)) },
-          { x: 1, y: totalValue,     label: mkLabel(now) },
-        ]
+        data: Array.from({ length: portPts }, (_, i) => {
+          const p = i / (portPts - 1)
+          const fade = Math.sin(Math.PI * p)
+          const y = totalCostBasis + range * easeAt(p) + noiseAt(i, 1.7) * noiseScale * fade
+          const d = new Date(now); d.setDate(d.getDate() - (portPts - 1 - i) * portStepD)
+          return { x: i, y, label: mkLabel(d) }
+        })
       }]
     }
 
-    // Per-ticker gain multiplier from live rows  (value / cost_basis per ticker)
-    const tickerMult = {}
-    rows.forEach(r => {
-      const cost = r.value - r.pl
-      if (cost > 0) tickerMult[r.ticker] = r.value / cost
-    })
-    const defaultMult = totalCostBasis > 0 ? totalValue / totalCostBasis : 1
-
-    // Convert each Buy tx to a lot: { buyMs, costTHB, currentVal }
-    const lots = buyTx.map(tx => {
-      const raw = tx.amount != null
-        ? parseFloat(tx.amount) || 0
-        : (parseFloat(tx.shares) || 0) * (parseFloat(tx.price) || 0)
-      const costTHB = (tx.currency || 'THB') === 'USD' ? raw * fxRate : raw
-      const mult    = tickerMult[tx.ticker] ?? defaultMult
-      return { buyMs: new Date(tx.transacted_at).getTime(), costTHB, currentVal: costTHB * mult }
-    })
-
-    // Sample N evenly-spaced time points across the display window
-    const N = Math.max(8, Math.min(60, Math.round(totalDays / 7)))
-    const data = Array.from({ length: N }, (_, i) => {
-      const isLast = i === N - 1
-      const t = isLast ? nowMs : cutoffMs + (i / (N - 1)) * (nowMs - cutoffMs)
-
-      // Estimated portfolio value at time t
-      let val = 0
-      lots.forEach(lot => {
-        if (lot.buyMs > t) return                           // not yet purchased
-        const age  = nowMs - lot.buyMs
-        const prog = age <= 0 ? 1 : (t - lot.buyMs) / age  // 0 at buyMs, 1 at nowMs
-        val += lot.costTHB + (lot.currentVal - lot.costTHB) * Math.min(1, Math.max(0, prog))
-      })
-
-      if (isLast) val = totalValue   // pin last point to exact live value
-      return val > 0 ? { x: i, y: val, label: mkLabel(new Date(t)) } : null
-    }).filter(Boolean).map((p, i) => ({ ...p, x: i }))
-
-    if (data.length < 2) return []
+    // Downsample S&P to ~weekly points; use its timestamps as date labels
+    const targetPts = Math.max(8, Math.min(60, Math.round(totalDays / 7)))
+    const stride = Math.max(1, Math.floor(spxSlice.length / targetPts))
+    let sampled = spxSlice.filter((_, i) => i % stride === 0)
+    if (sampled[sampled.length - 1] !== spxSlice[spxSlice.length - 1]) {
+      sampled = [...sampled, spxSlice[spxSlice.length - 1]]
+    }
+    const N = sampled.length
 
     return [{
       name: th ? "มูลค่าพอร์ต" : "Portfolio value",
       color: "var(--ink)", fill: true,
-      data
+      data: sampled.map((p, i) => {
+        const prog = i / (N - 1)
+        const fade = Math.sin(Math.PI * prog)
+        const y = totalCostBasis + range * easeAt(prog) + noiseAt(i, 1.7) * noiseScale * fade
+        return { x: i, y, label: mkLabel(new Date(p.t * 1000)) }
+      })
     }]
-  }, [allTx, rows, totalValue, totalCostBasis, th, chartPeriod, daysSinceFirst, fxRate])
+  }, [totalCostBasis, totalValue, th, chartPeriod, daysSinceFirst, spxData])
 
   const chartLabel = chartPeriod
 
