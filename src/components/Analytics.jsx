@@ -181,21 +181,14 @@ function AnalyticsCommon({ t, lang, ccy, rows, totalValue, totalPL, totalPlPct, 
   //  - Portfolio: synthetic (we lack daily portfolio snapshots) — multi-octave noise + ease curve
   //  - S&P 500:  REAL historical close prices from Yahoo (^GSPC), rebased so the
   //              first visible day equals totalCost (so both lines start at the same anchor)
+  //  - Both series share the SAME x-axis positions (0…N-1) and length so hover tooltips
+  //    don't read out-of-bounds indices on the shorter series.
   const liveSeries = useMemo(() => {
     if (dataState !== "live" || totalCost <= 0 || totalValue <= 0) return null
     const now = new Date()
     const requestedDays = periodDaysMap[chartPeriod] || 365
     const totalDays = Math.max(7, Math.min(requestedDays, daysSinceFirst))
 
-    // Slice real S&P 500 series to the chosen window
-    const spxAll = spxData?.series || []
-    const cutoffSec = (now.getTime() - totalDays * 86400000) / 1000
-    const spxSlice = spxAll.filter(p => p.t >= cutoffSec)
-    const hasSpx = spxSlice.length >= 2
-
-    // Portfolio: synthetic — same shape as before, weekly resolution
-    const portPts = Math.max(8, Math.min(60, Math.round(totalDays / 7)))
-    const portStepD = totalDays / (portPts - 1)
     const range = totalValue - totalCost
     const noiseScale = Math.max(Math.abs(range) * 0.1, totalCost * 0.015)
     const easeAt = p => p < 0.5 ? 2 * p * p : -1 + (4 - 2 * p) * p
@@ -207,33 +200,60 @@ function AnalyticsCommon({ t, lang, ccy, rows, totalValue, totalPL, totalPlPct, 
     )
     const mkLabel = d => d.toLocaleString(th ? "th-TH" : "en-US", { month: "short" }) + " '" + String(d.getFullYear()).slice(2)
 
+    // Slice real S&P 500 series to the chosen window
+    const spxAll = spxData?.series || []
+    const cutoffSec = (now.getTime() - totalDays * 86400000) / 1000
+    const spxSlice = spxAll.filter(p => p.t >= cutoffSec)
+    const hasSpx = spxSlice.length >= 2
+
+    if (!hasSpx) {
+      // S&P 500 not loaded yet → portfolio-only line with synthetic timeline
+      const portPts = Math.max(8, Math.min(60, Math.round(totalDays / 7)))
+      const portStepD = totalDays / (portPts - 1)
+      return [{
+        name: th ? "พอร์ตของคุณ" : "Your portfolio",
+        color: "var(--ink)", fill: true,
+        data: Array.from({ length: portPts }, (_, i) => {
+          const p = i / (portPts - 1)
+          const fade = Math.sin(Math.PI * p)
+          const y = totalCost + range * easeAt(p) + noiseAt(i, 1.7) * noiseScale * fade
+          const d = new Date(now); d.setDate(d.getDate() - (portPts - 1 - i) * portStepD)
+          return { x: i, y, label: mkLabel(d) }
+        })
+      }]
+    }
+
+    // Downsample S&P to ~weekly resolution; both series will share the same N
+    const targetPts = Math.max(8, Math.min(60, Math.round(totalDays / 7)))
+    const stride = Math.max(1, Math.floor(spxSlice.length / targetPts))
+    let sampled = spxSlice.filter((_, i) => i % stride === 0)
+    // Always include the latest close so the chart ends today
+    if (sampled.length === 0 || sampled[sampled.length - 1] !== spxSlice[spxSlice.length - 1]) {
+      sampled = [...sampled, spxSlice[spxSlice.length - 1]]
+    }
+    const N = sampled.length
+    const baseClose = sampled[0].c
+
+    // Portfolio matched to S&P's exact timestamps (same N points, same x = 0..N-1)
     const portfolioSeries = {
       name: th ? "พอร์ตของคุณ" : "Your portfolio",
       color: "var(--ink)", fill: true,
-      data: Array.from({ length: portPts }, (_, i) => {
-        const p = i / (portPts - 1)
-        const fade = Math.sin(Math.PI * p)
-        const y = totalCost + range * easeAt(p) + noiseAt(i, 1.7) * noiseScale * fade
-        const d = new Date(now); d.setDate(d.getDate() - (portPts - 1 - i) * portStepD)
-        return { x: i, y, label: mkLabel(d) }
+      data: sampled.map((p, i) => {
+        const prog = i / (N - 1)
+        const fade = Math.sin(Math.PI * prog)
+        const y = totalCost + range * easeAt(prog) + noiseAt(i, 1.7) * noiseScale * fade
+        return { x: i, y, label: mkLabel(new Date(p.t * 1000)) }
       })
     }
 
-    if (!hasSpx) return [portfolioSeries]   // S&P 500 not loaded yet → show portfolio only
-
-    // Rebase S&P 500 onto totalCost — first visible close = totalCost; later closes scaled proportionally
-    const baseClose = spxSlice[0].c
-    // Downsample S&P points to ~portPts so both lines have similar density
-    const targetPts = portPts
-    const stride = Math.max(1, Math.floor(spxSlice.length / targetPts))
-    const spxDownsampled = spxSlice.filter((_, i) => i % stride === 0 || i === spxSlice.length - 1)
     const sp500Series = {
       name: "S&P 500",
       color: "var(--accent)",
-      data: spxDownsampled.map((p, i) => {
-        const d = new Date(p.t * 1000)
-        return { x: i, y: totalCost * (p.c / baseClose), label: mkLabel(d) }
-      })
+      data: sampled.map((p, i) => ({
+        x: i,
+        y: totalCost * (p.c / baseClose),
+        label: mkLabel(new Date(p.t * 1000)),
+      }))
     }
 
     return [portfolioSeries, sp500Series]
