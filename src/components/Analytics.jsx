@@ -3,7 +3,7 @@ import { PageHead, Delta, Icon } from './Nav'
 import { LineChart, Donut, BarChart } from './Charts'
 import { LUMEN_FMT, LUMEN_DERIVE, LUMEN_HISTORY, LUMEN_BENCH } from '../data'
 import { deriveHoldings, getTransactions } from '../lib/db'
-import { fetchHistory } from '../lib/prices'
+import { fetchHistory, toYahooSymbol } from '../lib/prices'
 
 export function AnalyticsPage({ t, lang, ccy, dataState, liveHoldings = [], prices = {}, fxRate = 36, portfolio }) {
   const [tab, setTab] = useState("common")
@@ -104,7 +104,7 @@ export function AnalyticsPage({ t, lang, ccy, dataState, liveHoldings = [], pric
 
       {tab === "common"          && <AnalyticsCommon t={t} lang={lang} ccy={ccy} rows={rows} totalValue={totalValue} totalPL={totalPL} totalPlPct={totalPlPct} totalCost={totalCost} hasLivePrices={hasLivePrices} demoData={demoData} dataState={dataState} earliestHoldingDate={earliestHoldingDate} />}
       {tab === "diversification" && <AnalyticsDiv t={t} lang={lang} ccy={ccy} rows={rows} totalValue={totalValue} demoData={demoData} dataState={dataState} />}
-      {tab === "dividends"       && <AnalyticsDiv2 t={t} lang={lang} ccy={ccy} rows={rows} totalValue={totalValue} dataState={dataState} />}
+      {tab === "dividends"       && <AnalyticsDiv2 t={t} lang={lang} ccy={ccy} rows={rows} totalValue={totalValue} dataState={dataState} liveHoldings={liveHoldings} fxRate={fxRate} />}
       {tab === "growth"          && <AnalyticsGrowth t={t} lang={lang} ccy={ccy} totalValue={totalValue} totalCost={totalCost} totalPL={totalPL} totalPlPct={totalPlPct} dataState={dataState} earliestHoldingDate={earliestHoldingDate} />}
       {tab === "metrics"         && <AnalyticsMetrics t={t} lang={lang} ccy={ccy} rows={rows} totalValue={totalValue} totalPL={totalPL} totalPlPct={totalPlPct} dataState={dataState} />}
     </div>
@@ -507,51 +507,145 @@ function DivCard({ title, data, className }) {
 }
 
 /* ─── Dividends tab ──────────────────────────────────────────────────────────── */
-function AnalyticsDiv2({ t, lang, ccy, rows, totalValue, dataState }) {
+function AnalyticsDiv2({ t, lang, ccy, rows, totalValue, dataState, liveHoldings = [], fxRate = 36 }) {
   const FMT = LUMEN_FMT
   const th = lang === "th"
+
+  // ── Fetch 5-year dividend event history for all live holdings ──────────────
+  const [divHistory, setDivHistory] = useState(null)  // { "QH.BK": [{date, amount}], ... }
+  const [divLoading, setDivLoading] = useState(false)
+
+  useEffect(() => {
+    if (dataState !== "live" || liveHoldings.length === 0) return
+    let cancelled = false
+    setDivLoading(true)
+    const symbols = liveHoldings
+      .map(h => toYahooSymbol(h.ticker, h.region || 'TH', h.asset_class || 'Equity'))
+      .filter((v, i, a) => a.indexOf(v) === i)  // deduplicate
+      .join(',')
+    fetch(`/api/dividends?symbols=${encodeURIComponent(symbols)}`)
+      .then(r => r.json())
+      .then(d => { if (!cancelled) { setDivHistory(d); setDivLoading(false) } })
+      .catch(() => { if (!cancelled) setDivLoading(false) })
+    return () => { cancelled = true }
+  }, [dataState, liveHoldings])
+
+  // ── Calculate actual dividends received per holding since purchase date ─────
+  const receivedData = useMemo(() => {
+    if (dataState !== "live" || !divHistory) return null
+    const byYear = {}    // "2023" → totalTHB
+    const byTicker = {}  // "QH"   → totalTHB
+    let totalReceived = 0
+
+    liveHoldings.forEach(h => {
+      const sym = toYahooSymbol(h.ticker, h.region || 'TH', h.asset_class || 'Equity')
+      const events = divHistory[sym] || []
+      const purchaseSec = (h.purchased_at || h.created_at)
+        ? new Date(h.purchased_at || h.created_at).getTime() / 1000
+        : 0
+      const isTHB = (h.region || 'TH') === 'TH'
+
+      events
+        .filter(e => e.date >= purchaseSec)
+        .forEach(e => {
+          const amountTHB = isTHB ? e.amount * h.shares : e.amount * h.shares * fxRate
+          totalReceived += amountTHB
+          const year = String(new Date(e.date * 1000).getFullYear())
+          byYear[year]       = (byYear[year]       || 0) + amountTHB
+          byTicker[h.ticker] = (byTicker[h.ticker] || 0) + amountTHB
+        })
+    })
+
+    return { totalReceived, byYear, byTicker }
+  }, [dataState, divHistory, liveHoldings, fxRate])
+
+  // Historical received bar chart (years sorted asc)
+  const histBarData = useMemo(() => {
+    if (!receivedData?.byYear) return []
+    return Object.entries(receivedData.byYear)
+      .sort(([a], [b]) => Number(a) - Number(b))
+      .map(([year, value]) => ({ label: year, value }))
+  }, [receivedData])
+
+  // ── Forward-looking (projected) metrics ───────────────────────────────────
   const annual      = rows.reduce((a, r) => a + r.value * (r.divYield || 0) / 100, 0)
   const yieldOnPort = totalValue > 0 ? (annual / totalValue) * 100 : 0
-  const payers      = rows.filter(r => r.divYield > 0).map(r => ({ ...r, annual: r.value * r.divYield / 100 })).sort((a, b) => b.annual - a.annual)
+  const payers      = rows
+    .filter(r => r.divYield > 0)
+    .map(r => ({ ...r, annual: r.value * r.divYield / 100 }))
+    .sort((a, b) => b.annual - a.annual)
 
-  // Live: cluster dividends in typical quarterly months (Mar/Jun/Sep/Dec heavy)
-  // Demo: smooth sine pattern
+  // Estimated monthly payouts (next 12 months) — quarterly-weighted
   const months = ["Jun","Jul","Aug","Sep","Oct","Nov","Dec","Jan","Feb","Mar","Apr","May"]
-  const quarterlyWeights = [0.6, 0.4, 0.3, 1.6, 0.5, 0.4, 1.7, 0.4, 0.3, 1.6, 0.5, 1.7]  // sums to 10
+  const quarterlyWeights = [0.6, 0.4, 0.3, 1.6, 0.5, 0.4, 1.7, 0.4, 0.3, 1.6, 0.5, 1.7]
   const monthlyData = months.map((m, i) => ({
     label: m,
     value: dataState === "live"
-      ? (annual / 10) * quarterlyWeights[i]   // realistic quarterly pattern
+      ? (annual / 10) * quarterlyWeights[i]
       : (annual / 12) * (1 + Math.sin(i) * 0.3 + Math.cos(i * 1.7) * 0.18),
   }))
 
+  const hasReceivedData = dataState === "live" && receivedData && receivedData.totalReceived > 0
+
   return (
     <div className="fade-in grid grid-12">
+      {/* ── KPI row ── */}
       <BigKpi className="col-span-3" label={t.analytics.yield}
         value={FMT.pct(yieldOnPort, 2)} sub={th ? "บนมูลค่าตลาด" : "on market value"} />
       <BigKpi className="col-span-3" label={t.analytics.payout}
         value={annual > 0 ? FMT.money(annual, ccy, { compact: true }) : "—"}
-        sub={annual > 0 ? FMT.money(annual / 12, ccy, { compact: true }) + " " + (th ? "ต่อเดือน" : "/mo") : (th ? "ยังไม่มีปันผล" : "no payers yet")}
+        sub={annual > 0
+          ? FMT.money(annual / 12, ccy, { compact: true }) + " " + (th ? "ต่อเดือน" : "/mo")
+          : (th ? "ยังไม่มีปันผล" : "no payers yet")}
         tone={annual > 0 ? "gain" : undefined} />
-      <BigKpi className="col-span-3" label={th ? "เติบโต 5 ปี" : "5y div growth"}
-        value={th ? "ต้องการประวัติ" : "Needs history"} sub={th ? "ยังไม่มีข้อมูล" : "no data"} />
+      {dataState === "live" ? (
+        <BigKpi className="col-span-3"
+          label={th ? "รับจริงทั้งหมด" : "Total received"}
+          value={divLoading && !receivedData
+            ? (th ? "กำลังโหลด…" : "Loading…")
+            : (receivedData?.totalReceived > 0
+              ? FMT.money(receivedData.totalReceived, ccy, { compact: true })
+              : "฿0")}
+          sub={th ? "ปันผลจริงตั้งแต่ซื้อ" : "actual divs since purchase"}
+          tone={receivedData?.totalReceived > 0 ? "gain" : undefined} />
+      ) : (
+        <BigKpi className="col-span-3" label={th ? "เติบโต 5 ปี" : "5y div growth"}
+          value={th ? "ต้องการประวัติ" : "Needs history"} sub={th ? "ยังไม่มีข้อมูล" : "no data"} />
+      )}
       <BigKpi className="col-span-3" label={th ? "หลักทรัพย์จ่ายปันผล" : "Payers"}
-        value={payers.length + "/" + rows.length} sub={th ? "หลักทรัพย์จ่ายปันผล" : "income-producing"} />
+        value={payers.length + "/" + rows.length}
+        sub={th ? "หลักทรัพย์จ่ายปันผล" : "income-producing"} />
 
-      <div className="card col-span-7">
+      {/* ── Historical received by year (only when real data exists) ── */}
+      {hasReceivedData && (
+        <div className="card col-span-6">
+          <h3 className="section-title" style={{ marginBottom: 16 }}>
+            {th ? "ปันผลที่ได้รับจริง รายปี" : "Dividends received by year"}
+          </h3>
+          <BarChart data={histBarData} height={200} color="var(--gain)"
+            fmt={v => FMT.money(v, ccy, { compact: true })} />
+        </div>
+      )}
+
+      {/* ── Estimated monthly payouts ── */}
+      <div className={"card " + (hasReceivedData ? "col-span-6" : "col-span-7")}>
         <h3 className="section-title" style={{ marginBottom: 16 }}>
           {th ? "ปันผลรายเดือน (ประมาณ 12 เดือนถัดไป)" : "Estimated monthly payouts (next 12 months)"}
         </h3>
         {annual > 0 ? (
-          <BarChart data={monthlyData} height={220} color="var(--accent-ink)" fmt={v => FMT.money(v, ccy, { compact: true })} />
+          <BarChart data={monthlyData} height={220} color="var(--accent-ink)"
+            fmt={v => FMT.money(v, ccy, { compact: true })} />
         ) : (
           <div style={{ padding: "48px 0", textAlign: "center", color: "var(--ink-3)", fontSize: 13 }}>
-            {th ? "ยังไม่มีหลักทรัพย์ที่จ่ายปันผล เพิ่ม div yield % ตอนเพิ่มหลักทรัพย์" : "No dividend-paying holdings yet. Add a div yield % when adding a holding."}
+            {th
+              ? "ยังไม่มีหลักทรัพย์ที่จ่ายปันผล เพิ่ม div yield % ตอนเพิ่มหลักทรัพย์"
+              : "No dividend-paying holdings yet. Add a div yield % when adding a holding."}
           </div>
         )}
       </div>
 
-      <div className="card col-span-5">
+      {/* ── Top payers ── */}
+      <div className={"card " + (hasReceivedData ? "col-span-12" : "col-span-5")}>
         <h3 className="section-title" style={{ marginBottom: 16 }}>
           {th ? "ผู้จ่ายปันผลสูงสุด" : "Top dividend payers"}
         </h3>
@@ -560,18 +654,36 @@ function AnalyticsDiv2({ t, lang, ccy, rows, totalValue, dataState }) {
             {th ? "ยังไม่มีข้อมูลปันผล" : "No dividend data yet"}
           </div>
         ) : (
-          <div style={{ display: "grid", gap: 6 }}>
-            {payers.slice(0, 6).map(p => (
-              <div key={p.ticker} style={{ display: "grid", gridTemplateColumns: "auto 1fr auto auto", gap: 10, alignItems: "center", padding: "8px 0", borderTop: "1px solid var(--line)" }}>
-                <div className="ticker-mark">{p.ticker.slice(0, 2)}</div>
-                <div>
-                  <div style={{ fontWeight: 500, fontSize: 13 }}>{p.ticker}</div>
-                  <div className="muted" style={{ fontSize: 11 }}>{FMT.pct(p.divYield, 1)} yield</div>
+          <div style={{
+            display: "grid",
+            gridTemplateColumns: hasReceivedData ? "repeat(auto-fill, minmax(260px, 1fr))" : "1fr",
+            gap: 6,
+          }}>
+            {payers.slice(0, 6).map(p => {
+              const received = receivedData?.byTicker?.[p.ticker] || 0
+              return (
+                <div key={p.ticker} style={{ display: "grid", gridTemplateColumns: "auto 1fr auto auto", gap: 10, alignItems: "center", padding: "8px 0", borderTop: "1px solid var(--line)" }}>
+                  <div className="ticker-mark">{p.ticker.slice(0, 2)}</div>
+                  <div>
+                    <div style={{ fontWeight: 500, fontSize: 13 }}>{p.ticker}</div>
+                    <div className="muted" style={{ fontSize: 11 }}>
+                      {FMT.pct(p.divYield, 1)} yield
+                      {received > 0 && (
+                        <span style={{ color: "var(--gain)", marginLeft: 6 }}>
+                          · {th ? "รับ " : "rcvd "}{FMT.money(received, ccy, { compact: true })}
+                        </span>
+                      )}
+                    </div>
+                  </div>
+                  <div className="mono" style={{ fontSize: 12, color: "var(--ink-3)" }}>
+                    {FMT.money(p.value, ccy, { compact: true })}
+                  </div>
+                  <div className="mono" style={{ fontSize: 13, color: "var(--accent-ink)" }}>
+                    +{FMT.money(p.annual, ccy, { compact: true })}/y
+                  </div>
                 </div>
-                <div className="mono" style={{ fontSize: 12, color: "var(--ink-3)" }}>{FMT.money(p.value, ccy, { compact: true })}</div>
-                <div className="mono" style={{ fontSize: 13, color: "var(--accent-ink)" }}>+{FMT.money(p.annual, ccy, { compact: true })}/y</div>
-              </div>
-            ))}
+              )
+            })}
           </div>
         )}
       </div>
