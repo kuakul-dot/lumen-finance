@@ -1312,6 +1312,11 @@ function ImportPDFModal({ lang, portfolioId, onClose, onImported }) {
   const [importResult, setImportResult] = useState(null)
   const [dragOver, setDragOver] = useState(false)
   const [pdfInfo, setPdfInfo] = useState(null)
+  // Password protection
+  const [pendingFile, setPendingFile] = useState(null)
+  const [needPassword, setNeedPassword] = useState(false)
+  const [wrongPassword, setWrongPassword] = useState(false)
+  const [password, setPassword] = useState('')
 
   const TX_TYPES = ['Buy', 'Sell', 'Dividend', 'Deposit', 'Withdraw']
   const typeLabel = {
@@ -1321,38 +1326,57 @@ function ImportPDFModal({ lang, portfolioId, onClose, onImported }) {
   const typeColor = { Buy: "var(--gain)", Sell: "var(--loss)", Dividend: "var(--accent-ink)", Deposit: "var(--ink-2)", Withdraw: "var(--ink-2)" }
   const typeBg    = { Buy: "var(--gain-soft)", Sell: "var(--loss-soft)", Dividend: "var(--accent-soft)", Deposit: "var(--bg-2)", Withdraw: "var(--bg-2)" }
 
-  const handleFile = async (file) => {
-    if (!file) return
-    if (!file.name.toLowerCase().endsWith('.pdf')) {
-      setExtractError(th ? 'กรุณาเลือกไฟล์ .pdf' : 'Please select a .pdf file')
-      return
-    }
+  const doExtract = async (file, pw = '') => {
     setExtracting(true)
     setExtractError(null)
+    setWrongPassword(false)
     try {
       const { extractPDFRows, detectTransactions } = await import('../lib/pdfParser.js')
-      const { rows: textRows, numPages } = await extractPDFRows(file)
+      const { rows: textRows, numPages } = await extractPDFRows(file, pw)
       const detected = detectTransactions(textRows)
 
       if (detected.length === 0) {
         setExtractError(
           th
             ? 'ไม่พบรายการธุรกรรมในไฟล์ PDF นี้\n\nอาจเกิดจาก:\n• PDF เป็นภาพสแกน (ไม่ใช่ข้อความ)\n• รูปแบบตารางไม่มีคอลัมน์วันที่ที่ชัดเจน'
-            : 'No transactions detected in this PDF.\n\nPossible reasons:\n• PDF is a scanned image (not text)\n• Table has no recognisable date column'
+            : 'No transactions detected.\n\nPossible reasons:\n• PDF is a scanned image (not text)\n• Table has no recognisable date column'
         )
-        setExtracting(false)
         return
       }
 
       setRows(detected)
       setSelected(new Set(detected.map((_, i) => i)))
       setPdfInfo({ numPages, total: detected.length })
+      setNeedPassword(false)
+      setPassword('')
       setStep(2)
     } catch (err) {
-      setExtractError(String(err))
+      // pdfjs-dist throws PasswordException for locked PDFs
+      if (err?.name === 'PasswordException' || /password/i.test(String(err))) {
+        if (pw) {
+          setWrongPassword(true)  // had a password but it was wrong
+        } else {
+          setNeedPassword(true)   // no password supplied yet
+        }
+      } else {
+        setExtractError(String(err))
+      }
     } finally {
       setExtracting(false)
     }
+  }
+
+  const handleFile = (file) => {
+    if (!file) return
+    if (!file.name.toLowerCase().endsWith('.pdf')) {
+      setExtractError(th ? 'กรุณาเลือกไฟล์ .pdf' : 'Please select a .pdf file')
+      return
+    }
+    setPendingFile(file)
+    setNeedPassword(false)
+    setWrongPassword(false)
+    setPassword('')
+    doExtract(file, '')
   }
 
   const handleDrop = (e) => {
@@ -1447,6 +1471,14 @@ function ImportPDFModal({ lang, portfolioId, onClose, onImported }) {
                     {th ? "กรุณารอสักครู่" : "Please wait"}
                   </div>
                 </div>
+              ) : needPassword ? (
+                <div>
+                  <div style={{ fontSize: 36, marginBottom: 12 }}>📄</div>
+                  <div style={{ fontWeight: 600, marginBottom: 4, fontSize: 15 }}>{pendingFile?.name}</div>
+                  <div style={{ fontSize: 12, color: "var(--ink-3)" }}>
+                    {th ? "คลิกเพื่อเลือกไฟล์อื่น" : "Click to choose a different file"}
+                  </div>
+                </div>
               ) : (
                 <div>
                   <div style={{ fontSize: 36, marginBottom: 12 }}>📄</div>
@@ -1460,23 +1492,66 @@ function ImportPDFModal({ lang, portfolioId, onClose, onImported }) {
             <input ref={fileRef} type="file" accept=".pdf,application/pdf" style={{ display: "none" }}
               onChange={e => { const f = e.target.files[0]; if (f) handleFile(f); e.target.value = '' }} />
 
+            {/* ── Password required ── */}
+            {needPassword && (
+              <div style={{ marginTop: 16, padding: "18px 20px", borderRadius: 14, border: "1.5px solid var(--line)", background: "var(--bg-2)" }}>
+                <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 12 }}>
+                  <span style={{ fontSize: 22 }}>🔒</span>
+                  <div>
+                    <div style={{ fontWeight: 600, fontSize: 14 }}>
+                      {th ? "PDF นี้ถูกล็อกด้วยรหัสผ่าน" : "This PDF is password protected"}
+                    </div>
+                    <div style={{ fontSize: 12, color: "var(--ink-3)", marginTop: 2 }}>
+                      {th ? "โดยทั่วไปคือเลขบัตรประชาชน หรือวันเกิด (DDMMYYYY)" : "Usually your ID card number or date of birth (DDMMYYYY)"}
+                    </div>
+                  </div>
+                </div>
+                <div style={{ display: "flex", gap: 8 }}>
+                  <input
+                    type="password"
+                    value={password}
+                    onChange={e => setPassword(e.target.value)}
+                    onKeyDown={e => e.key === 'Enter' && password && doExtract(pendingFile, password)}
+                    placeholder={th ? "ใส่รหัสผ่าน…" : "Enter password…"}
+                    autoFocus
+                    style={{ ...inputStyle, flex: 1 }}
+                  />
+                  <button
+                    className="btn"
+                    onClick={() => doExtract(pendingFile, password)}
+                    disabled={!password || extracting}
+                    style={{ flexShrink: 0 }}
+                  >
+                    {extracting ? (th ? "กำลังอ่าน…" : "Reading…") : (th ? "ยืนยัน" : "Unlock")}
+                  </button>
+                </div>
+                {wrongPassword && (
+                  <div style={{ marginTop: 8, fontSize: 12, color: "var(--loss)", fontWeight: 600 }}>
+                    {th ? "❌ รหัสผ่านไม่ถูกต้อง — ลองใหม่อีกครั้ง" : "❌ Incorrect password — please try again"}
+                  </div>
+                )}
+              </div>
+            )}
+
             {extractError && (
               <div style={{ marginTop: 14, padding: "12px 16px", borderRadius: 10, background: "oklch(0.96 0.05 25)", color: "oklch(0.40 0.12 25)", fontSize: 13, whiteSpace: "pre-line" }}>
                 {extractError}
               </div>
             )}
 
-            <div style={{ marginTop: 20, padding: "14px 16px", background: "var(--bg-2)", borderRadius: 12, fontSize: 12, color: "var(--ink-3)" }}>
-              <div style={{ fontWeight: 600, marginBottom: 4, color: "var(--ink-2)" }}>
-                {th ? "วิธีการทำงาน:" : "How it works:"}
+            {!needPassword && (
+              <div style={{ marginTop: 20, padding: "14px 16px", background: "var(--bg-2)", borderRadius: 12, fontSize: 12, color: "var(--ink-3)" }}>
+                <div style={{ fontWeight: 600, marginBottom: 4, color: "var(--ink-2)" }}>
+                  {th ? "วิธีการทำงาน:" : "How it works:"}
+                </div>
+                <ul style={{ margin: 0, paddingLeft: 18, lineHeight: 2 }}>
+                  <li>{th ? "อ่านข้อความจากทุกหน้าของ PDF" : "Extracts text from every page"}</li>
+                  <li>{th ? "รองรับ PDF ที่ล็อกด้วยรหัสผ่าน (เลขบัตร/วันเกิด)" : "Supports password-protected PDFs (ID / date of birth)"}</li>
+                  <li>{th ? "รองรับวันที่พุทธศักราชและคริสต์ศักราช" : "Supports Buddhist Era and CE dates"}</li>
+                  <li>{th ? "ตรวจสอบและแก้ไขได้ก่อนนำเข้า" : "Review and fix values before importing"}</li>
+                </ul>
               </div>
-              <ul style={{ margin: 0, paddingLeft: 18, lineHeight: 2 }}>
-                <li>{th ? "อ่านข้อความจากทุกหน้าของ PDF" : "Extracts text from every page"}</li>
-                <li>{th ? "ตรวจหาแถวที่มีวันที่ + ตัวเลข (จำนวน ราคา มูลค่า)" : "Finds rows containing a date + numbers (qty, price, amount)"}</li>
-                <li>{th ? "รองรับวันที่พุทธศักราชและคริสต์ศักราช" : "Supports Buddhist Era and CE dates"}</li>
-                <li>{th ? "ตรวจสอบและแก้ไขได้ก่อนนำเข้า" : "Review and fix values before importing"}</li>
-              </ul>
-            </div>
+            )}
 
             <div style={{ display: "flex", gap: 10, marginTop: 20 }}>
               <button type="button" className="btn btn-outline" style={{ flex: 1 }} onClick={onClose}>

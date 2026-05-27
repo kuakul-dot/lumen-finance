@@ -10,9 +10,10 @@ pdfjs.GlobalWorkerOptions.workerSrc = workerSrc
 
 const Y_SNAP = 3  // group text items within 3px vertically (same row)
 
-export async function extractPDFRows(file) {
+export async function extractPDFRows(file, password = '') {
   const buf  = await file.arrayBuffer()
-  const doc  = await pdfjs.getDocument({ data: buf }).promise
+  const loadingTask = pdfjs.getDocument({ data: buf, ...(password ? { password } : {}) })
+  const doc  = await loadingTask.promise
   const numPages = doc.numPages
 
   const allRows = []
