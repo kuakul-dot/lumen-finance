@@ -563,9 +563,8 @@ function LiveDashboardPage({ t, lang, ccy, setRoute, liveHoldings, prices = {}, 
     )
     const locale = th ? "th-TH" : "en-US"
     const mkLabel = d => {
-      if (totalDays < 60)  return d.toLocaleString(locale, { month: "short", day: "numeric" })
-      if (totalDays < 730) return d.toLocaleString(locale, { month: "short" }) + " '" + String(d.getFullYear()).slice(2)
-      return "'" + String(d.getFullYear()).slice(2)
+      if (totalDays < 60) return d.toLocaleString(locale, { month: "short", day: "numeric" })
+      return d.toLocaleString(locale, { month: "short" }) + " '" + String(d.getFullYear()).slice(2)
     }
 
     // Slice real S&P 500 closes to the chosen window for timestamp anchoring
