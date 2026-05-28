@@ -840,6 +840,23 @@ function yahooAssetClass(type) {
   return 'Equity'
 }
 
+// Look up a ticker's full company/fund name via the search proxy.
+// Returns null on any miss/error (best-effort enrichment).
+async function fetchTickerName(ticker) {
+  if (!ticker) return null
+  try {
+    const res  = await fetch(`/api/search?q=${encodeURIComponent(ticker)}`)
+    const data = await res.json()
+    const up   = ticker.toUpperCase()
+    const hit  = data.find(d => d.symbol?.toUpperCase() === up)
+              || data.find(d => d.symbol?.toUpperCase().replace(/\.BK$/, '') === up)
+              || data[0]
+    return hit?.name || null
+  } catch {
+    return null
+  }
+}
+
 function TickerSearch({ lang, value, onType, onSelect }) {
   const th = lang === 'th'
   const [results, setResults] = useState([])
@@ -1207,7 +1224,8 @@ function EditTransactionModal({ tx, holding, lang, onClose, onSaved }) {
       fee:           form.fee  !== '' ? parseFloat(form.fee)  : 0,
       tax:           form.tax  !== '' ? parseFloat(form.tax)  : 0,
       currency:      form.currency,
-      note:          form.note || null,
+      // Name drives the ledger's asset sub-label; fall back to the free note
+      note:          (form.name && form.name !== form.ticker ? form.name : form.note) || null,
       transacted_at: form.transacted_at,
     })
     setSaving(false)
@@ -1474,11 +1492,22 @@ function ImportPDFModal({ lang, portfolioId, onClose, onImported }) {
   const handleImport = async () => {
     const toImport = rows.filter((_, i) => selected.has(i))
     setImporting(true)
+
+    // Best-effort: look up each ticker's full name so it shows in the ledger
+    const nameCache = {}
+    for (const tx of toImport) {
+      const tk = (tx.ticker || '').toUpperCase()
+      if (!tk || nameCache[tk] !== undefined) continue
+      nameCache[tk] = await fetchTickerName(tk)
+    }
+
     let ok = 0; const errors = []; const imported = []
     for (const tx of toImport) {
-      const { error } = await addTransaction(portfolioId, tx)
+      const tk = (tx.ticker || '').toUpperCase()
+      const enriched = { ...tx, note: tx.note || nameCache[tk] || null }
+      const { error } = await addTransaction(portfolioId, enriched)
       if (error) errors.push(`${tx.ticker || '?'} ${tx.transacted_at}: ${error.message}`)
-      else { ok++; imported.push(tx) }
+      else { ok++; imported.push(enriched) }
     }
     // Roll the imported buys/sells into the Holdings table
     if (imported.length) {

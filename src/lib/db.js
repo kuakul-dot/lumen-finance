@@ -124,7 +124,7 @@ export async function syncHoldingsFromTransactions(portfolioId, txs) {
         const isUSD = (tx.currency || 'THB') === 'USD'
         byTicker.set(key, {
           _new: true, _dirty: true,
-          ticker: key, name: key, shares, cost_price: price,
+          ticker: key, name: tx.note || key, shares, cost_price: price,
           currency: tx.currency || 'THB',
           region: isUSD ? 'US' : 'TH',   // drives Yahoo symbol (.BK) + price currency
           asset_class: 'Equity',
@@ -197,8 +197,9 @@ export async function rebuildHolding(portfolioId, ticker) {
     return updateHolding(h.id, { shares, cost_price })
   }
   const isUSD = (currency || 'THB') === 'USD'
+  const name  = (txs || []).find(t => t.note)?.note || key
   return addHolding(portfolioId, {
-    ticker: key, name: key, shares, cost_price,
+    ticker: key, name, shares, cost_price,
     currency: currency || 'THB',
     region: isUSD ? 'US' : 'TH',
     asset_class: 'Equity',
