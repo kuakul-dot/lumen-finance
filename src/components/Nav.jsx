@@ -3,13 +3,23 @@ import { useState, useEffect, useRef } from 'react'
 export function Brand() {
   return (
     <div className="brand">
-      <svg width="30" height="30" viewBox="0 0 30 30" aria-hidden="true">
-        <circle cx="15" cy="15" r="13" fill="var(--ink)" />
-        <path d="M15 5 A10 10 0 0 1 15 25 L15 15 Z" fill="var(--bg)" />
-        <circle cx="15" cy="15" r="2.2" fill="var(--ink)" />
-      </svg>
+      <LumenMark />
       <span>Lumen</span>
     </div>
+  )
+}
+
+// Lumen logo — a rising chart line ending in a glowing "lumen" spark.
+// Uses theme variables so it adapts to light/dark + the chosen accent.
+export function LumenMark({ size = 30 }) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 30 30" aria-hidden="true">
+      <rect x="2" y="2" width="26" height="26" rx="8" fill="var(--ink)" />
+      <polyline points="7,21 12,16 16,18 22,9" fill="none" stroke="var(--bg)"
+                strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" />
+      <circle cx="22" cy="9" r="4.6" fill="none" stroke="var(--accent)" strokeWidth="1.4" opacity="0.5" />
+      <circle cx="22" cy="9" r="2.4" fill="var(--accent)" />
+    </svg>
   )
 }
 

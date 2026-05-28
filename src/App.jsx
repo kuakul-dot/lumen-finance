@@ -349,14 +349,7 @@ function OnboardingNav({ lang, setLang, ccy, setCcy }) {
   return (
     <header className="topnav">
       <div className="topnav-inner">
-        <div className="brand">
-          <svg width="30" height="30" viewBox="0 0 30 30" aria-hidden="true">
-            <circle cx="15" cy="15" r="13" fill="var(--ink)" />
-            <path d="M15 5 A10 10 0 0 1 15 25 L15 15 Z" fill="var(--bg)" />
-            <circle cx="15" cy="15" r="2.2" fill="var(--ink)" />
-          </svg>
-          <span>Lumen</span>
-        </div>
+        <Brand />
         <div className="nav-spacer" />
         <div className="nav-tools">
           <div className="pill-toggle">
