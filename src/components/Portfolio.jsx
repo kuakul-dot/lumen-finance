@@ -1249,7 +1249,6 @@ function TransactionsTab({ transactions, holdings = [], loading, lang, ccy, fxRa
 
   // Filter chips (only show types that actually exist) + ticker/name search
   const typesPresent = [...new Set(transactions.map(tx => tx.type || "Buy"))]
-  const typeChips = ["all", ...["Buy", "Sell", "Dividend", "Deposit", "Withdraw"].filter(t => typesPresent.includes(t))]
   const q = fQuery.trim().toLowerCase()
   const filtered = transactions.filter(tx => {
     if (fType !== "all" && (tx.type || "Buy") !== fType) return false
@@ -1329,52 +1328,38 @@ function TransactionsTab({ transactions, holdings = [], loading, lang, ccy, fxRa
 
   return (
     <>
-      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 12, marginBottom: 12, flexWrap: "wrap" }}>
-        <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
-          <div className="segmented" style={{ flexWrap: "wrap" }}>
-            {typeChips.map(k => (
-              <button key={k} className={fType === k ? "on" : ""} onClick={() => setFType(k)} style={{ fontSize: 12 }}>
-                {k === "all" ? (th ? "ทั้งหมด" : "All") : (typeLabel[lang] || typeLabel.en)[k]}
-              </button>
+      {/* One clean toolbar: year pills (left) · search · type · import (right) */}
+      <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 14, flexWrap: "wrap" }}>
+        {years.length > 0 && (
+          <div style={{ display: "flex", gap: 6, overflowX: "auto", flex: "1 1 200px", paddingBottom: 2 }}>
+            {years.map(y => (
+              <button key={y} onClick={() => setSelYear(y)} style={{
+                flexShrink: 0, padding: "6px 14px", borderRadius: 999, cursor: "pointer", fontSize: 13,
+                fontFamily: "var(--font-mono)", fontWeight: y === activeYear ? 700 : 500,
+                border: "1px solid " + (y === activeYear ? "var(--ink)" : "var(--line)"),
+                background: y === activeYear ? "var(--ink)" : "transparent",
+                color: y === activeYear ? "var(--bg)" : "var(--ink-2)",
+              }}>{y}</button>
             ))}
           </div>
-          <input
-            value={fQuery}
-            onChange={e => setFQuery(e.target.value)}
-            placeholder={th ? "ค้นหา Ticker / ชื่อ" : "Search ticker / name"}
-            style={{ ...inputStyle, width: 200, padding: "8px 12px", fontSize: 13 }}
-          />
-          {(fType !== "all" || q) && (
-            <span className="muted" style={{ fontSize: 12 }}>
-              {filtered.length}/{transactions.length}
-            </span>
-          )}
-        </div>
+        )}
+        <input
+          value={fQuery}
+          onChange={e => setFQuery(e.target.value)}
+          placeholder={th ? "ค้นหา" : "Search"}
+          style={{ ...inputStyle, width: 150, padding: "7px 12px", fontSize: 13 }}
+        />
+        <select value={fType} onChange={e => setFType(e.target.value)}
+          style={{ ...inputStyle, width: "auto", padding: "7px 28px 7px 12px", fontSize: 13 }}>
+          <option value="all">{th ? "ทุกประเภท" : "All types"}</option>
+          {["Buy", "Sell", "Dividend", "Deposit", "Withdraw"].filter(t => typesPresent.includes(t)).map(t => (
+            <option key={t} value={t}>{(typeLabel[lang] || typeLabel.en)[t]}</option>
+          ))}
+        </select>
         <button className="btn btn-outline btn-sm" onClick={() => setShowImport(true)}>
-          <Icon name="upload" size={13} /> {th ? "นำเข้า PDF" : "Import PDF"}
+          <Icon name="upload" size={13} /> {th ? "นำเข้า" : "Import"}
         </button>
       </div>
-
-      {/* Year selector — horizontally scrollable */}
-      {years.length > 0 && (
-        <div style={{ display: "flex", gap: 6, overflowX: "auto", paddingBottom: 8, marginBottom: 4, scrollbarWidth: "thin" }}>
-          {years.map(y => (
-            <button key={y} onClick={() => setSelYear(y)}
-              style={{
-                flexShrink: 0, padding: "6px 16px", borderRadius: 999, cursor: "pointer", fontSize: 13,
-                fontWeight: y === activeYear ? 700 : 500, fontFamily: "var(--font-mono)",
-                border: "1px solid " + (y === activeYear ? "var(--ink)" : "var(--line)"),
-                background: y === activeYear ? "var(--ink)" : "var(--bg)",
-                color: y === activeYear ? "var(--bg)" : "var(--ink-2)",
-              }}>
-              {y}
-              <span style={{ marginLeft: 6, opacity: 0.6, fontSize: 11 }}>
-                {filtered.filter(tx => yearOf(tx) === y).length}
-              </span>
-            </button>
-          ))}
-        </div>
-      )}
 
       <section className="card" style={{ padding: 0, overflow: "hidden" }}>
         <table className="table">
