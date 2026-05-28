@@ -1846,22 +1846,52 @@ function AnalyticsMetrics({ t, lang, ccy, rows = [], totalValue = 0, totalPL = 0
                 : `Collecting data — need at least 2 days to compute (currently ${histMetrics.days})`}
             </div>
           ) : (
-            <div className="grid" style={{ gridTemplateColumns: "repeat(auto-fit, minmax(120px, 1fr))", gap: 16 }}>
+            <div className="grid" style={{ gridTemplateColumns: "repeat(auto-fit, minmax(150px, 1fr))", gap: 16 }}>
               {[
-                { label: th ? "ผลตอบแทน (TWR)" : "Return (TWR)", val: (histMetrics.twr * 100).toFixed(2) + "%", neg: histMetrics.twr < 0 },
-                { label: th ? "ความผันผวน (ปีละ)" : "Volatility (ann.)", val: (histMetrics.vol * 100).toFixed(1) + "%" },
-                { label: "Sharpe", val: histMetrics.sharpe.toFixed(2), neg: histMetrics.sharpe < 0 },
-                { label: "Sortino", val: histMetrics.sortino.toFixed(2), neg: histMetrics.sortino < 0 },
-                { label: th ? "ขาดทุนสูงสุด" : "Max Drawdown", val: (histMetrics.mdd * 100).toFixed(1) + "%", neg: true },
-                { label: beta ? `Beta · ${beta.name}` : "Beta",
+                { key: "twr", label: th ? "ผลตอบแทน (TWR)" : "Return (TWR)", val: (histMetrics.twr * 100).toFixed(2) + "%", neg: histMetrics.twr < 0,
+                  desc: th ? "ผลตอบแทนรวมตั้งแต่เริ่มถือ ตัดผลการฝาก/ถอน" : "Total return since inception, excluding deposits/withdrawals",
+                  formula: th ? "ดัชนีล่าสุด ÷ ดัชนีแรก − 1\n(ดัชนี = มูลค่า ÷ ต้นทุน)" : "last index ÷ first index − 1\n(index = value ÷ cost)" },
+                { key: "vol", label: th ? "ความผันผวน (ปีละ)" : "Volatility (ann.)", val: (histMetrics.vol * 100).toFixed(1) + "%",
+                  desc: th ? "ความแกว่งของผลตอบแทน — สูง = เสี่ยง/เหวี่ยงแรง" : "Swing of returns — higher = riskier",
+                  formula: "SD(ผลตอบแทนรายช่วง) × √252" },
+                { key: "sharpe", label: "Sharpe", val: histMetrics.sharpe.toFixed(2), neg: histMetrics.sharpe < 0,
+                  desc: th ? "ผลตอบแทนต่อความเสี่ยงรวม — สูง = คุ้มกว่า" : "Return per unit of total risk — higher is better",
+                  formula: th ? "ผลตอบแทนเฉลี่ยต่อปี ÷ ความผันผวน" : "annualized mean return ÷ volatility" },
+                { key: "sortino", label: "Sortino", val: histMetrics.sortino.toFixed(2), neg: histMetrics.sortino < 0,
+                  desc: th ? "ผลตอบแทนต่อความเสี่ยงเฉพาะขาลง — สูง = ดี" : "Return per unit of downside risk — higher is better",
+                  formula: th ? "ผลตอบแทนเฉลี่ยต่อปี ÷ (SD เฉพาะช่วงติดลบ × √252)" : "annualized mean ÷ (downside SD × √252)" },
+                { key: "mdd", label: th ? "ขาดทุนสูงสุด" : "Max Drawdown", val: (histMetrics.mdd * 100).toFixed(1) + "%", neg: true,
+                  desc: th ? "การร่วงหนักสุดจากจุดสูงสุดถึงจุดต่ำสุด" : "Largest peak-to-trough drop",
+                  formula: "min((ดัชนีₜ − พีคₜ) ÷ พีคₜ)" },
+                { key: "beta", label: beta ? `Beta · ${beta.name}` : "Beta",
                   val: beta ? beta.value.toFixed(2) : "—",
-                  neg: beta ? beta.value > 1 : false },
-              ].map(s => (
-                <div key={s.label}>
-                  <div style={{ fontSize: 11, color: "var(--ink-3)", marginBottom: 4 }}>{s.label}</div>
+                  neg: beta ? beta.value > 1 : false,
+                  desc: th ? "แกว่งเทียบตลาด — 1 = เท่าตลาด, <1 = นิ่งกว่า" : "Swing vs market — 1 = same, <1 = calmer",
+                  formula: beta ? "Cov(พอร์ต, ตลาด) ÷ Var(ตลาด)" : null },
+              ].map(s => {
+                const hk = "h_" + s.key
+                const hopen = openKey === hk
+                return (
+                <div key={s.key}>
+                  <button
+                    onClick={() => s.formula && setOpenKey(hopen ? null : hk)}
+                    title={th ? "ดูสูตร" : "Show formula"}
+                    style={{ background: "none", border: "none", padding: 0, margin: "0 0 4px", textAlign: "left",
+                             cursor: s.formula ? "pointer" : "default", display: "flex", alignItems: "center", gap: 4,
+                             fontSize: 11, color: "var(--ink-3)", fontFamily: "inherit" }}
+                  >
+                    {s.label} {s.formula && <Icon name="info" size={11} />}
+                  </button>
                   <div className="display" style={{ fontSize: 26, lineHeight: 1, color: s.neg ? "var(--loss)" : "var(--ink)" }}>{s.val}</div>
+                  <div className="muted" style={{ fontSize: 11, marginTop: 6, lineHeight: 1.4 }}>{s.desc}</div>
+                  {hopen && s.formula && (
+                    <pre style={{ margin: "8px 0 0", padding: "8px 10px", borderRadius: 8, background: "var(--bg-2)",
+                                  border: "1px solid var(--line)", fontSize: 11, lineHeight: 1.5, color: "var(--ink-2)",
+                                  fontFamily: "var(--font-mono)", whiteSpace: "pre-wrap" }}>{s.formula}</pre>
+                  )}
                 </div>
-              ))}
+                )
+              })}
             </div>
           )}
 
