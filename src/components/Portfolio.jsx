@@ -335,9 +335,7 @@ function LivePortfolioPage({ t, lang, ccy, portfolio, liveHoldings, prices = {},
                     <tr key={r.ticker} style={{ opacity: deleting && r._ids.includes(deleting) ? 0.4 : 1 }}>
                       <td>
                         <div className="ticker">
-                          <div className="ticker-mark" style={{ background: classBg(r.cls), color: classFg(r.cls) }}>
-                            {r.ticker.slice(0, 2)}
-                          </div>
+                          <TickerLogo ticker={r.ticker} logoUrl={r.logo_url} cls={r.cls} />
                           <div>
                             <div style={{ fontWeight: 500 }}>{r.ticker}</div>
                             <div className="muted" style={{ fontSize: 11 }}>
@@ -745,6 +743,7 @@ function EditHoldingModal({ lang, holding, onClose, onSaved }) {
     currency:      holding.currency || 'THB',
     div_yield:     String(holding.div_yield || ''),
     div_frequency: String(holding.div_frequency || (holding.region === 'TH' ? 2 : 4)),
+    logo_url:      holding.logo_url || '',
   })
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState(null)
@@ -765,6 +764,7 @@ function EditHoldingModal({ lang, holding, onClose, onSaved }) {
       currency:    form.currency,
       div_yield:     form.div_yield ? parseFloat(form.div_yield) : 0,
       div_frequency: form.div_frequency ? parseInt(form.div_frequency) : 4,
+      logo_url:      form.logo_url?.trim() || null,
     })
     setSaving(false)
     if (updateErr) { setError(updateErr.message); return }
@@ -871,6 +871,15 @@ function EditHoldingModal({ lang, holding, onClose, onSaved }) {
               </select>
             </Field>
           </div>
+
+          {/* Logo URL (optional) — overrides the auto logo / initials */}
+          <Field label={th ? "URL โลโก้ (ไม่บังคับ)" : "Logo URL (optional)"}>
+            <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+              <TickerLogo ticker={form.ticker} logoUrl={form.logo_url?.trim() || null} cls={form.asset_class} size={36} />
+              <input value={form.logo_url} onChange={e => set('logo_url', e.target.value)}
+                     placeholder="https://…/logo.png" style={inputStyle} />
+            </div>
+          </Field>
 
           <div style={{ display: "flex", gap: 10, marginTop: 8, position: "sticky", bottom: 0, background: "var(--bg)", paddingTop: 14, paddingBottom: 2 }}>
             <button type="button" className="btn btn-outline" style={{ flex: 1 }} onClick={onClose}>
@@ -2262,4 +2271,25 @@ function classBg(cls) {
 }
 function classFg(cls) {
   return { Equity: "var(--ink-2)", ETF: "var(--c1)", Bond: "var(--c4)", Crypto: "var(--c2)", Commodity: "var(--c7)" }[cls] || "var(--ink-2)"
+}
+
+// Stock logo with graceful fallback: custom logoUrl → ticker logo API → initials.
+// US tickers resolve well; Thai/others usually fall back to the coloured initials.
+function TickerLogo({ ticker = "", logoUrl, cls, size = 34 }) {
+  const [failed, setFailed] = useState(false)
+  const base = ticker.replace(/\.BK$/i, "").toUpperCase()
+  const apiSrc = base ? `https://assets.parqet.com/logos/symbol/${encodeURIComponent(base)}?format=png&size=64` : null
+  const src = logoUrl || apiSrc
+  const initials = (base || "?").slice(0, 2)
+  if (!src || failed) {
+    return (
+      <div className="ticker-mark" style={{ width: size, height: size, background: classBg(cls), color: classFg(cls) }}>
+        {initials}
+      </div>
+    )
+  }
+  return (
+    <img src={src} alt={base} width={size} height={size} loading="lazy" onError={() => setFailed(true)}
+         style={{ width: size, height: size, borderRadius: 8, objectFit: "contain", background: "#fff", border: "1px solid var(--line)" }} />
+  )
 }

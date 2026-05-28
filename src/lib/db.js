@@ -572,6 +572,7 @@ export function deriveHoldings(holdings, currency = 'THB', prices = {}, fxRate =
       divYield: priceData?.divYield ?? h.div_yield ?? 0,
       divFrequency: h.div_frequency || (h.region === 'TH' ? 2 : 4),
       currency: holdingCcy,
+      logo_url: h.logo_url || null,
       hasLivePrice,
       changePct,
       spark: [],
