@@ -144,43 +144,54 @@ const HEADER_PATS = {
   ],
 }
 
+// A "pure" header row has no inline numeric values or dates (those are data).
+// Rejects info/summary rows like "ราคา 679.27 USD ค่าธรรมเนียม 0.13" which
+// mix labels with values and would otherwise hijack header detection.
+function isPureHeaderRow(row) {
+  for (const { text } of row) {
+    const t = text.trim()
+    if (/^[\d,]+(?:\.\d+)?$/.test(t)) return false   // pure number
+    if (DATE_RE.test(t)) return false                // date
+  }
+  return true
+}
+
 // Returns { headerRow, colMap } where colMap maps field → X coordinate
-// of the header cell (not array index — avoids misalignment with data rows).
-// Also absorbs the immediately following row if it contributes new fields
-// and contains no date (handles Thai + English bilingual two-row headers).
+// of the header cell.  Walks consecutive non-date rows to combine
+// multi-line bilingual headers (e.g., Dime! prints Thai + English over 4 lines).
 function findHeader(rows) {
   let best = null, bestScore = 0
+
   for (let ri = 0; ri < Math.min(rows.length, 80); ri++) {
-    const row    = rows[ri]
+    const row = rows[ri]
+    if (!isPureHeaderRow(row)) continue   // skip info/summary/data rows
+
     const colMap = {}; let score = 0
     for (const { x, text } of row) {
       for (const [field, pats] of Object.entries(HEADER_PATS)) {
         if (colMap[field] === undefined && pats.some(p => p.test(text))) {
-          colMap[field] = x
-          score++; break
+          colMap[field] = x; score++; break
         }
       }
     }
-    if (score < 3) continue
+    if (score < 1) continue   // need at least one match to seed a header cluster
 
-    // Absorb the next row if it looks like a continuation header line
-    // (has pattern matches, no date — avoids eating the first data row)
+    // Walk forward up to 8 rows, absorbing pure-header rows.  Stops as soon as
+    // we hit a row with values (date or number) — that is the first data row.
     let lastHeaderRow = ri
-    if (ri + 1 < rows.length) {
-      const nextLine = rows[ri + 1].map(c => c.text).join(' ')
-      if (!DATE_RE.test(nextLine)) {
-        for (const { x, text } of rows[ri + 1]) {
-          for (const [field, pats] of Object.entries(HEADER_PATS)) {
-            if (colMap[field] === undefined && pats.some(p => p.test(text))) {
-              colMap[field] = x; score++; break
-            }
+    for (let wi = ri + 1; wi <= Math.min(ri + 8, rows.length - 1); wi++) {
+      if (!isPureHeaderRow(rows[wi])) break
+      for (const { x, text } of rows[wi]) {
+        for (const [field, pats] of Object.entries(HEADER_PATS)) {
+          if (colMap[field] === undefined && pats.some(p => p.test(text))) {
+            colMap[field] = x; score++; break
           }
         }
-        lastHeaderRow = ri + 1
       }
+      lastHeaderRow = wi
     }
 
-    if (score > bestScore) {
+    if (score >= 3 && score > bestScore) {
       best = { headerRow: lastHeaderRow, colMap }; bestScore = score
     }
   }
@@ -252,12 +263,16 @@ export function detectTransactions(rows) {
     rows.slice(0, 10).forEach((r, i) =>
       console.log(`  [${i}]`, r.map(c => `"${c.text}"@${Math.round(c.x)}`).join(' | ')))
   } else {
-    console.log('[pdfParser] ✅ Header at row', header.headerRow,
+    console.log('[pdfParser] ✅ Header ends at row', header.headerRow,
       '| colMap:', JSON.stringify(Object.fromEntries(
         Object.entries(header.colMap).map(([k, v]) => [k, Math.round(v)]))))
-    console.log('[pdfParser] Data rows after header:')
-    rows.slice(header.headerRow + 1, header.headerRow + 5).forEach((r, i) =>
-      console.log(`  [${header.headerRow + 1 + i}]`, r.map(c => `"${c.text}"@${Math.round(c.x)}`).join(' | ')))
+    console.log('[pdfParser] Date-matching data rows (the ones parsed):')
+    let shown = 0
+    for (let i = header.headerRow + 1; i < rows.length && shown < 5; i++) {
+      if (!DATE_RE.test(rows[i].map(c => c.text).join(' '))) continue
+      console.log(`  [${i}]`, rows[i].map(c => `"${c.text}"@${Math.round(c.x)}`).join(' | '))
+      shown++
+    }
   }
   // ─────────────────────────────────────────────────────────────────────────
 
