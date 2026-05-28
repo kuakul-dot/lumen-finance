@@ -107,6 +107,14 @@ export function ToolsPage({ t, lang, ccy, dataState, liveHoldings = [], prices =
   }, [currentByClass, newTotal, total, targets])
 
   // ── Suggested trades ─────────────────────────────────────────────────────────
+  // Share sizing: US holdings (e.g. Dime) support fractional shares → keep 4
+  // decimals; Thai/other markets trade whole shares → floor to an integer.
+  const sizeShares = (cash, priceTHB, region) => {
+    if (priceTHB <= 0) return 0
+    const raw = cash / priceTHB
+    return region === "US" ? Math.floor(raw * 1e4) / 1e4 : Math.floor(raw)
+  }
+
   const trades = useMemo(() => {
     if (!showResult) return []
     const out = []
@@ -127,7 +135,7 @@ export function ToolsPage({ t, lang, ccy, dataState, liveHoldings = [], prices =
         sorted.slice(0, split).forEach(c => {
           const amt = s.delta / split
           const priceInDisplay = c.price  // always in THB (deriveHoldings returns THB values)
-          const sharesNeeded = priceInDisplay > 0 ? Math.floor(amt / priceInDisplay) : 0
+          const sharesNeeded = sizeShares(amt, priceInDisplay, c.region)
           if (sharesNeeded > 0) {
             out.push({ action: "Buy", ticker: c.ticker, name: c.name, shares: sharesNeeded, priceNative: c.priceNative, nativeCcy: c.nativeCcy, amount: sharesNeeded * priceInDisplay, cls: s.name })
           }
@@ -137,7 +145,7 @@ export function ToolsPage({ t, lang, ccy, dataState, liveHoldings = [], prices =
         const c = sorted[0]
         if (c) {
           const priceInDisplay = c.price
-          const sharesNeeded = priceInDisplay > 0 ? Math.floor(Math.abs(s.delta) / priceInDisplay) : 0
+          const sharesNeeded = sizeShares(Math.abs(s.delta), priceInDisplay, c.region)
           if (sharesNeeded > 0) {
             out.push({ action: "Sell", ticker: c.ticker, name: c.name, shares: sharesNeeded, priceNative: c.priceNative, nativeCcy: c.nativeCcy, amount: sharesNeeded * priceInDisplay, cls: s.name })
           }
@@ -437,7 +445,7 @@ export function ToolsPage({ t, lang, ccy, dataState, liveHoldings = [], prices =
                           </div>
                         </div>
                       </td>
-                      <td className="num">{tr.shares}</td>
+                      <td className="num">{Number(tr.shares).toLocaleString(undefined, { maximumFractionDigits: 4 })}</td>
                       <td className="num">{FMT.moneyNative(tr.priceNative, tr.nativeCcy)}</td>
                       <td className="num" style={{ fontWeight: 500 }}>{FMT.money(tr.amount, ccy, { compact: true })}</td>
                     </tr>
