@@ -5,7 +5,7 @@ import {
   LUMEN_FMT, LUMEN_DERIVE, LUMEN_HISTORY, LUMEN_GOALS,
   LUMEN_ACTIVITY, LUMEN_UPCOMING, LUMEN_INSIGHTS, LUMEN_FX,
 } from '../data'
-import { deriveHoldings, upsertCashAccount, deleteCashAccount, getGoals, getTransactions } from '../lib/db'
+import { deriveHoldings, upsertCashAccount, deleteCashAccount, getGoals, getAllTransactions } from '../lib/db'
 import { fetchHistory, toYahooSymbol } from '../lib/prices'
 
 function makeGreeting(name, lang) {
@@ -450,7 +450,7 @@ function LiveDashboardPage({ t, lang, ccy, setRoute, liveHoldings, prices = {}, 
     if (portfolio.user_id) {
       getGoals(portfolio.user_id).then(setGoals).catch(() => {})
     }
-    getTransactions(portfolio.id).then(d => setAllTx(d || [])).catch(() => {})
+    getAllTransactions(portfolio.id).then(d => setAllTx(d || [])).catch(() => {})
   }, [portfolio?.id, portfolio?.user_id])
 
   const rows          = useMemo(() => deriveHoldings(liveHoldings, ccy, prices, fxRate), [liveHoldings, ccy, prices, fxRate])
