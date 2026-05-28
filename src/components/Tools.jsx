@@ -1,5 +1,5 @@
 import { useState, useMemo, useEffect } from 'react'
-import { PageHead, Icon } from './Nav'
+import { PageHead, Icon, TickerLogo } from './Nav'
 import { LUMEN_FMT, LUMEN_DERIVE, LUMEN_TARGETS, LUMEN_FX } from '../data'
 import { deriveHoldings } from '../lib/db'
 
@@ -438,7 +438,7 @@ export function ToolsPage({ t, lang, ccy, dataState, liveHoldings = [], prices =
                       </td>
                       <td>
                         <div className="ticker">
-                          <div className="ticker-mark">{tr.ticker.slice(0, 2)}</div>
+                          <TickerLogo ticker={tr.ticker} region={tr.nativeCcy === "USD" ? "US" : "TH"} size={30} />
                           <div>
                             <div style={{ fontWeight: 500, fontSize: 13 }}>{tr.ticker}</div>
                             <div className="muted" style={{ fontSize: 11 }}>{tr.cls}</div>

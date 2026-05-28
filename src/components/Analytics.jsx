@@ -1,5 +1,5 @@
 import { useState, useMemo, useEffect, useCallback } from 'react'
-import { PageHead, Delta, Icon } from './Nav'
+import { PageHead, Delta, Icon, TickerLogo } from './Nav'
 import { LineChart, Donut, BarChart } from './Charts'
 import { LUMEN_FMT, LUMEN_DERIVE, LUMEN_HISTORY, LUMEN_BENCH } from '../data'
 import { deriveHoldings, getTransactions, getSnapshots, getAllTransactions, upsertSnapshots, buildSnapshotSeries, addTransaction, updateTransaction, deleteTransaction } from '../lib/db'
@@ -633,7 +633,7 @@ function PerfRow({ r, ccy }) {
   const FMT = LUMEN_FMT
   return (
     <div style={{ display: "grid", gridTemplateColumns: "auto 1fr auto auto", gap: 12, alignItems: "center", padding: "8px 0", borderTop: "1px solid var(--line)" }}>
-      <div className="ticker-mark">{r.ticker.slice(0, 2)}</div>
+      <TickerLogo ticker={r.ticker} logoUrl={r.logo_url} region={r.region} cls={r.cls} size={30} />
       <div>
         <div style={{ fontWeight: 500, fontSize: 13 }}>{r.ticker}</div>
         <div className="muted" style={{ fontSize: 11 }}>{r.name}</div>
@@ -1538,7 +1538,7 @@ function AnalyticsGrowth({ t, lang, ccy, rows = [], fxRate = 36, totalValue, tot
           </div>
           {holdingPerf.map(h => (
             <div key={h.ticker} style={{ display: "grid", gridTemplateColumns: "36px 1fr 110px 110px 110px 70px", gap: 8, alignItems: "center", padding: "10px 0", borderBottom: "1px solid var(--line)" }}>
-              <div className="ticker-mark" style={{ fontSize: 11 }}>{h.ticker.slice(0, 2)}</div>
+              <TickerLogo ticker={h.ticker} logoUrl={h.logo_url} region={h.region} cls={h.cls} size={32} />
               <div>
                 <div style={{ fontWeight: 500, fontSize: 13 }}>{h.ticker}</div>
                 <div className="muted" style={{ fontSize: 11 }}>{h.name}</div>

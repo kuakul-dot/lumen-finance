@@ -9,6 +9,26 @@ export function Brand() {
   )
 }
 
+// Shared stock logo: custom logoUrl → ticker logo API (non-Thai only, to avoid
+// SET/US ticker collisions) → coloured initials. Used across all pages.
+export function TickerLogo({ ticker = "", logoUrl, region, cls, size = 34 }) {
+  const [failed, setFailed] = useState(false)
+  const base = String(ticker).replace(/\.BK$/i, "").toUpperCase()
+  const isThai = region === "TH"
+  const apiSrc = (!isThai && base) ? `https://assets.parqet.com/logos/symbol/${encodeURIComponent(base)}?format=png&size=64` : null
+  const src = logoUrl || apiSrc
+  const initials = (base || "?").slice(0, 2)
+  const bg = { Equity: "var(--bg-2)", ETF: "oklch(0.94 0.04 200)", Bond: "oklch(0.94 0.04 280)", Crypto: "oklch(0.94 0.05 65)", Commodity: "oklch(0.94 0.04 90)" }[cls] || "var(--bg-2)"
+  const fg = { Equity: "var(--ink-2)", ETF: "var(--c1)", Bond: "var(--c4)", Crypto: "var(--c2)", Commodity: "var(--c7)" }[cls] || "var(--ink-2)"
+  if (!src || failed) {
+    return <div className="ticker-mark" style={{ width: size, height: size, background: bg, color: fg }}>{initials}</div>
+  }
+  return (
+    <img src={src} alt={base} width={size} height={size} loading="lazy" onError={() => setFailed(true)}
+         style={{ width: size, height: size, borderRadius: 8, objectFit: "contain", background: "#fff", border: "1px solid var(--line)" }} />
+  )
+}
+
 // Lumen logo — a rising chart line ending in a glowing "lumen" spark.
 // Uses theme variables so it adapts to light/dark + the chosen accent.
 export function LumenMark({ size = 30 }) {

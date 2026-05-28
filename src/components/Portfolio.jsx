@@ -1,5 +1,5 @@
 ﻿import { useState, useMemo, useEffect, useCallback, useRef, Fragment } from 'react'
-import { PageHead, Delta, Icon } from './Nav'
+import { PageHead, Delta, Icon, TickerLogo } from './Nav'
 import { Sparkline } from './Charts'
 import { LUMEN_FMT, LUMEN_DERIVE } from '../data'
 import { addHolding, updateHolding, deleteHolding, deriveHoldings, addTransaction, syncHoldingsFromTransactions, rebuildHolding, rebuildAllHoldings, updateHoldingMeta, getTransactions, getAllTransactions, computeRealized, updateTransaction, deleteTransaction, deleteTransactionsByTicker } from '../lib/db'
@@ -2279,27 +2279,3 @@ function classFg(cls) {
   return { Equity: "var(--ink-2)", ETF: "var(--c1)", Bond: "var(--c4)", Crypto: "var(--c2)", Commodity: "var(--c7)" }[cls] || "var(--ink-2)"
 }
 
-// Stock logo with graceful fallback: custom logoUrl → ticker logo API → initials.
-// The auto API is keyed by bare ticker, so a Thai symbol can collide with an
-// unrelated US one (e.g. a SET ticker matching a US ticker) and show the wrong
-// logo.  So only auto-fetch for non-Thai holdings; Thai stocks use a custom
-// logoUrl if provided, else the coloured initials.
-function TickerLogo({ ticker = "", logoUrl, cls, region, size = 34 }) {
-  const [failed, setFailed] = useState(false)
-  const base = ticker.replace(/\.BK$/i, "").toUpperCase()
-  const isThai = region === "TH"
-  const apiSrc = (!isThai && base) ? `https://assets.parqet.com/logos/symbol/${encodeURIComponent(base)}?format=png&size=64` : null
-  const src = logoUrl || apiSrc
-  const initials = (base || "?").slice(0, 2)
-  if (!src || failed) {
-    return (
-      <div className="ticker-mark" style={{ width: size, height: size, background: classBg(cls), color: classFg(cls) }}>
-        {initials}
-      </div>
-    )
-  }
-  return (
-    <img src={src} alt={base} width={size} height={size} loading="lazy" onError={() => setFailed(true)}
-         style={{ width: size, height: size, borderRadius: 8, objectFit: "contain", background: "#fff", border: "1px solid var(--line)" }} />
-  )
-}

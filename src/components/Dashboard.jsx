@@ -1,5 +1,5 @@
 import { useState, useMemo, useEffect } from 'react'
-import { PageHead, Delta, Icon } from './Nav'
+import { PageHead, Delta, Icon, TickerLogo } from './Nav'
 import { Sparkline, LineChart, Donut } from './Charts'
 import {
   LUMEN_FMT, LUMEN_DERIVE, LUMEN_HISTORY, LUMEN_GOALS,
@@ -211,7 +211,7 @@ function DemoDashboardPage({ t, lang, ccy, setRoute }) {
                   <tr key={m.ticker}>
                     <td>
                       <div className="ticker">
-                        <div className="ticker-mark">{m.ticker.slice(0, 2)}</div>
+                        <TickerLogo ticker={m.ticker} logoUrl={m.logo_url} region={m.region} cls={m.cls} size={30} />
                         <div>
                           <div style={{ fontWeight: 500 }}>{m.ticker}</div>
                           <div className="muted" style={{ fontSize: 11 }}>{m.name}</div>
@@ -907,7 +907,7 @@ function LiveDashboardPage({ t, lang, ccy, setRoute, liveHoldings, prices = {}, 
                   <tr key={r.ticker}>
                     <td>
                       <div className="ticker">
-                        <div className="ticker-mark">{r.ticker.slice(0, 2)}</div>
+                        <TickerLogo ticker={r.ticker} logoUrl={r.logo_url} region={r.region} cls={r.cls} size={30} />
                         <div>
                           <div style={{ fontWeight: 500 }}>{r.ticker}</div>
                           <div className="muted" style={{ fontSize: 11 }}>{r.name}</div>
