@@ -94,8 +94,8 @@ function LivePortfolioPage({ t, lang, ccy, portfolio, liveHoldings, prices = {},
     if (!portfolio?.id) return
     setTxLoading(true)
     try {
-      const data = await getTransactions(portfolio.id)
-      setTransactions(data)
+      const data = await getAllTransactions(portfolio.id)   // full history
+      setTransactions([...data].reverse())                  // newest first
     } catch (err) {
       console.error('[Lumen] loadTransactions:', err)
     } finally {
