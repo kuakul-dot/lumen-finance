@@ -2,7 +2,7 @@ import { useState, useMemo, useEffect, useCallback } from 'react'
 import { PageHead, Delta, Icon } from './Nav'
 import { LineChart, Donut, BarChart } from './Charts'
 import { LUMEN_FMT, LUMEN_DERIVE, LUMEN_HISTORY, LUMEN_BENCH } from '../data'
-import { deriveHoldings, getTransactions, addTransaction, updateTransaction, deleteTransaction } from '../lib/db'
+import { deriveHoldings, getTransactions, getSnapshots, addTransaction, updateTransaction, deleteTransaction } from '../lib/db'
 import { fetchHistory, toYahooSymbol } from '../lib/prices'
 
 export function AnalyticsPage({ t, lang, ccy, dataState, liveHoldings = [], prices = {}, fxRate = 36, portfolio }) {
@@ -119,7 +119,7 @@ export function AnalyticsPage({ t, lang, ccy, dataState, liveHoldings = [], pric
       {tab === "diversification" && <AnalyticsDiv t={t} lang={lang} ccy={ccy} rows={rows} totalValue={totalValue} demoData={demoData} dataState={dataState} />}
       {tab === "dividends"       && <AnalyticsDiv2 t={t} lang={lang} ccy={ccy} rows={rows} totalValue={totalValue} dataState={dataState} liveHoldings={liveHoldings} fxRate={fxRate} transactions={transactions} portfolio={portfolio} onTransactionAdded={handleTransactionAdded} onTransactionUpdated={handleTransactionUpdated} onTransactionDeleted={handleTransactionDeleted} />}
       {tab === "growth"          && <AnalyticsGrowth t={t} lang={lang} ccy={ccy} rows={rows} fxRate={fxRate} totalValue={totalValue} totalCost={totalCost} totalPL={totalPL} totalPlPct={totalPlPct} dataState={dataState} earliestHoldingDate={earliestHoldingDate} />}
-      {tab === "metrics"         && <AnalyticsMetrics t={t} lang={lang} ccy={ccy} rows={rows} totalValue={totalValue} totalPL={totalPL} totalPlPct={totalPlPct} dataState={dataState} />}
+      {tab === "metrics"         && <AnalyticsMetrics t={t} lang={lang} ccy={ccy} rows={rows} totalValue={totalValue} totalPL={totalPL} totalPlPct={totalPlPct} dataState={dataState} portfolio={portfolio} />}
     </div>
   )
 }
@@ -1501,10 +1501,47 @@ function AnalyticsGrowth({ t, lang, ccy, rows = [], fxRate = 36, totalValue, tot
 }
 
 /* ─── Metrics tab — live-aware ──────────────────────────────────────────────── */
-function AnalyticsMetrics({ t, lang, ccy, rows = [], totalValue = 0, totalPL = 0, totalPlPct = 0, dataState }) {
+function AnalyticsMetrics({ t, lang, ccy, rows = [], totalValue = 0, totalPL = 0, totalPlPct = 0, dataState, portfolio }) {
   const th = lang === "th"
   const isLive = dataState === "live"
   const [openKey, setOpenKey] = useState(null)   // which metric's formula is expanded
+  const [snaps, setSnaps] = useState([])
+
+  // Load the daily value series (recorded by App once per day)
+  useEffect(() => {
+    if (!isLive || !portfolio?.id) { setSnaps([]); return }
+    let cancelled = false
+    getSnapshots(portfolio.id).then(d => { if (!cancelled) setSnaps(d) }).catch(() => {})
+    return () => { cancelled = true }
+  }, [isLive, portfolio?.id])
+
+  // History-based metrics from the flow-neutral money-multiple (value / cost):
+  // a pure cash buy raises value and cost equally, so the ratio isolates
+  // performance from contributions — a sound basis for TWR / Sharpe / drawdown.
+  const histMetrics = useMemo(() => {
+    const idx = snaps.map(s => Number(s.total_cost) > 0 ? Number(s.total_value) / Number(s.total_cost) : null)
+                     .filter(v => v != null && isFinite(v))
+    if (idx.length < 2) return { days: snaps.length, ready: false }
+
+    const rets = []
+    for (let i = 1; i < idx.length; i++) rets.push(idx[i] / idx[i - 1] - 1)
+    const n = rets.length
+    const mean = rets.reduce((a, b) => a + b, 0) / n
+    const variance = rets.reduce((a, b) => a + (b - mean) ** 2, 0) / n
+    const sd = Math.sqrt(variance)
+    const negs = rets.filter(r => r < 0)
+    const downside = negs.length ? Math.sqrt(negs.reduce((a, b) => a + b * b, 0) / n) : 0
+    const ANN = 252
+
+    const twr = idx[idx.length - 1] / idx[0] - 1
+    const vol = sd * Math.sqrt(ANN)
+    const sharpe  = sd > 0       ? (mean * ANN) / vol : 0
+    const sortino = downside > 0 ? (mean * ANN) / (downside * Math.sqrt(ANN)) : 0
+    let peak = idx[0], mdd = 0
+    for (const v of idx) { peak = Math.max(peak, v); mdd = Math.min(mdd, v / peak - 1) }
+
+    return { ready: true, days: snaps.length, twr, vol, sharpe, sortino, mdd }
+  }, [snaps])
 
   // ── Live-computable metrics (no historical data needed) ────────────────────
   const liveMetrics = useMemo(() => {
@@ -1661,14 +1698,44 @@ function AnalyticsMetrics({ t, lang, ccy, rows = [], totalValue = 0, totalPL = 0
       </div>
 
       {isLive && (
-        <div className="card" style={{ marginTop: 16, padding: "20px 24px", background: "var(--bg-2)" }}>
-          <h4 style={{ margin: 0, fontSize: 13, fontWeight: 600, marginBottom: 8 }}>
-            {th ? "ตัวชี้วัดที่ต้องการประวัติย้อนหลัง" : "Metrics that need historical data"}
+        <div className="card" style={{ marginTop: 16, padding: "20px 24px" }}>
+          <h4 style={{ margin: 0, fontSize: 13, fontWeight: 600, marginBottom: 4 }}>
+            {th ? "ตัวชี้วัดจากประวัติพอร์ต (รายวัน)" : "History-based metrics (daily series)"}
           </h4>
-          <p className="muted" style={{ fontSize: 12, margin: 0 }}>
+          <p className="muted" style={{ fontSize: 12, margin: "0 0 16px" }}>
             {th
-              ? "TWR · CAGR (จริง) · Beta · Sharpe · Sortino · Max Drawdown — ตัวเหล่านี้ต้องการ snapshots ราคาพอร์ตรายวันต่อเนื่อง อยู่ระหว่างพัฒนา"
-              : "TWR · CAGR (true) · Beta · Sharpe · Sortino · Max Drawdown — these need continuous daily portfolio snapshots. In development."}
+              ? `บันทึกแล้ว ${histMetrics.days} วัน · คำนวณจากดัชนีมูลค่า/ต้นทุน (ตัดผลการฝากถอน) · ยิ่งเก็บนานยิ่งแม่น`
+              : `${histMetrics.days} day(s) recorded · computed from the value/cost index (contribution-neutral) · accuracy improves over time`}
+          </p>
+
+          {!histMetrics.ready ? (
+            <div style={{ padding: "16px 0", color: "var(--ink-3)", fontSize: 13, display: "flex", alignItems: "center", gap: 8 }}>
+              <Icon name="info" size={14} />
+              {th
+                ? `กำลังเก็บข้อมูล — ต้องมีอย่างน้อย 2 วันจึงเริ่มคำนวณได้ (ตอนนี้ ${histMetrics.days} วัน)`
+                : `Collecting data — need at least 2 days to compute (currently ${histMetrics.days})`}
+            </div>
+          ) : (
+            <div className="grid" style={{ gridTemplateColumns: "repeat(auto-fit, minmax(120px, 1fr))", gap: 16 }}>
+              {[
+                { label: th ? "ผลตอบแทน (TWR)" : "Return (TWR)", val: (histMetrics.twr * 100).toFixed(2) + "%", neg: histMetrics.twr < 0 },
+                { label: th ? "ความผันผวน (ปีละ)" : "Volatility (ann.)", val: (histMetrics.vol * 100).toFixed(1) + "%" },
+                { label: "Sharpe", val: histMetrics.sharpe.toFixed(2), neg: histMetrics.sharpe < 0 },
+                { label: "Sortino", val: histMetrics.sortino.toFixed(2), neg: histMetrics.sortino < 0 },
+                { label: th ? "ขาดทุนสูงสุด" : "Max Drawdown", val: (histMetrics.mdd * 100).toFixed(1) + "%", neg: true },
+              ].map(s => (
+                <div key={s.label}>
+                  <div style={{ fontSize: 11, color: "var(--ink-3)", marginBottom: 4 }}>{s.label}</div>
+                  <div className="display" style={{ fontSize: 26, lineHeight: 1, color: s.neg ? "var(--loss)" : "var(--ink)" }}>{s.val}</div>
+                </div>
+              ))}
+            </div>
+          )}
+
+          <p className="muted" style={{ fontSize: 11, margin: "16px 0 0", lineHeight: 1.5 }}>
+            {th
+              ? "หมายเหตุ: บันทึกเมื่อเปิดแอปแต่ละวัน (ไม่ใช่ทุกวันต่อเนื่อง) ค่า annualize จึงเป็นค่าประมาณ · Beta ต้องเทียบ benchmark — ยังไม่รวม"
+              : "Note: recorded when you open the app each day (not strictly continuous), so annualized figures are approximate · Beta needs a benchmark — not included yet"}
           </p>
         </div>
       )}

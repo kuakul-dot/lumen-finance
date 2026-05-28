@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from 'react'
+import { useState, useEffect, useCallback, useRef } from 'react'
 import { TopNav, BottomNav, Brand, Icon } from './components/Nav'
 import { TweaksPanel, useTweaks, TweakSection, TweakRadio, TweakColor } from './components/TweaksPanel'
 import { OnboardingPage } from './components/Onboarding'
@@ -9,7 +9,7 @@ import { ToolsPage } from './components/Tools'
 import { PlanningPage } from './components/Planning'
 import { LUMEN_I18N, setLiveFxRate } from './data'
 import { supabase } from './lib/supabase'
-import { getOrCreatePortfolio, getHoldingsSafe, getCashAccounts } from './lib/db'
+import { getOrCreatePortfolio, getHoldingsSafe, getCashAccounts, deriveHoldings, recordSnapshot } from './lib/db'
 import { fetchPrices, fetchFxRate } from './lib/prices'
 
 const TWEAK_DEFAULTS = {
@@ -113,6 +113,26 @@ export default function App() {
       setCashAccounts(ca)
     } catch {}
   }, [portfolio])
+
+  // Record one portfolio-value snapshot per day (powers TWR / Sharpe / drawdown).
+  // Idempotent per (portfolio, day); guarded so it writes once per session/day.
+  const snapshotKeyRef = useRef('')
+  useEffect(() => {
+    if (!session || !portfolio?.id) return
+    if (liveHoldings.length === 0 || Object.keys(prices).length === 0) return
+    const today = new Date().toISOString().split('T')[0]
+    const key = `${portfolio.id}:${today}`
+    if (snapshotKeyRef.current === key) return
+
+    const derived = deriveHoldings(liveHoldings, 'THB', prices, fxRate)
+    const total_value = derived.reduce((s, r) => s + r.value, 0)
+    const total_pl    = derived.reduce((s, r) => s + r.pl, 0)
+    const total_cost  = total_value - total_pl
+    if (total_value > 0) {
+      snapshotKeyRef.current = key
+      recordSnapshot(portfolio.id, { total_value, total_cost })
+    }
+  }, [session, portfolio?.id, liveHoldings, prices, fxRate])
 
   useEffect(() => {
     supabase.auth.getSession().then(({ data: { session } }) => setSession(session))

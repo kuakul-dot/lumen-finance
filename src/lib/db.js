@@ -256,6 +256,32 @@ export async function deleteTransactionsByTicker(portfolioId, ticker) {
   return { error }
 }
 
+// ── Portfolio snapshots (daily value series for TWR / Sharpe / drawdown) ──────
+// Upserts one row per (portfolio, day); calling again the same day overwrites
+// with the latest value.  Requires the portfolio_snapshots table (schema.sql).
+export async function recordSnapshot(portfolioId, { total_value, total_cost }) {
+  if (!portfolioId) return { error: null }
+  const date = new Date().toISOString().split('T')[0]
+  const { error } = await supabase
+    .from('portfolio_snapshots')
+    .upsert({ portfolio_id: portfolioId, date, total_value, total_cost },
+            { onConflict: 'portfolio_id,date' })
+  if (error) console.warn('[Lumen] recordSnapshot:', error.message)
+  return { error }
+}
+
+export async function getSnapshots(portfolioId, days = 400) {
+  if (!portfolioId) return []
+  const { data, error } = await supabase
+    .from('portfolio_snapshots')
+    .select('date,total_value,total_cost')
+    .eq('portfolio_id', portfolioId)
+    .order('date', { ascending: true })
+    .limit(days)
+  if (error) { console.warn('[Lumen] getSnapshots:', error.message); return [] }
+  return data || []
+}
+
 export async function getGoals(userId) {
   const { data } = await supabase
     .from('goals')

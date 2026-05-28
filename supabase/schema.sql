@@ -109,8 +109,25 @@ drop policy if exists "Price cache is publicly readable" on price_cache;
 create policy "Price cache is publicly readable"
   on price_cache for select using (true);
 
+-- ── Portfolio value snapshots (one row per day → TWR / Sharpe / drawdown) ─────
+create table if not exists portfolio_snapshots (
+  id           uuid primary key default gen_random_uuid(),
+  portfolio_id uuid not null references portfolios(id) on delete cascade,
+  date         date not null default current_date,
+  total_value  numeric not null default 0,
+  total_cost   numeric not null default 0,
+  created_at   timestamptz not null default now(),
+  unique (portfolio_id, date)
+);
+alter table portfolio_snapshots enable row level security;
+drop policy if exists "Users can manage own snapshots" on portfolio_snapshots;
+create policy "Users can manage own snapshots"
+  on portfolio_snapshots for all
+  using (portfolio_id in (select id from portfolios where user_id = auth.uid()));
+
 -- ── Indexes ──────────────────────────────────────────────────────────────────
 create index if not exists holdings_portfolio_idx on holdings(portfolio_id);
 create index if not exists transactions_portfolio_idx on transactions(portfolio_id);
 create index if not exists transactions_date_idx on transactions(transacted_at desc);
 create index if not exists goals_user_idx on goals(user_id);
+create index if not exists snapshots_portfolio_idx on portfolio_snapshots(portfolio_id, date);
