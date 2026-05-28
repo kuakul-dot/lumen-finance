@@ -1526,6 +1526,12 @@ function AnalyticsMetrics({ t, lang, ccy, rows = [], totalValue = 0, totalPL = 0
       const txs = await getAllTransactions(portfolio.id)
       if (!txs.length) { setBackfillMsg(th ? "ไม่พบธุรกรรมให้สร้างประวัติ" : "No transactions to rebuild from"); return }
 
+      // Diagnostics — surface the earliest transaction(s) so an old/mis-dated
+      // entry that stretches the history is easy to spot.
+      const earliest = txs[0]?.transacted_at?.split('T')[0]
+      console.log(`[backfill] ${txs.length} transactions · earliest ${earliest}`)
+      console.table(txs.slice(0, 6).map(t => ({ date: t.transacted_at?.split('T')[0], type: t.type, ticker: t.ticker, shares: t.shares, price: t.price })))
+
       const ccyByTicker = {}
       for (const tx of txs) {
         const tk = (tx.ticker || "").toUpperCase()
@@ -1552,7 +1558,9 @@ function AnalyticsMetrics({ t, lang, ccy, rows = [], totalValue = 0, totalPL = 0
 
       const fresh = await getSnapshots(portfolio.id)
       setSnaps(fresh)
-      setBackfillMsg(th ? `สร้างประวัติ ${series.length} วันสำเร็จ` : `Rebuilt ${series.length} days`)
+      setBackfillMsg(th
+        ? `สร้างประวัติ ${series.length} วัน · ${txs.length} ธุรกรรม · เริ่มจาก ${earliest}`
+        : `Rebuilt ${series.length} days · ${txs.length} transactions · since ${earliest}`)
     } catch (err) {
       setBackfillMsg((th ? "ผิดพลาด: " : "Error: ") + (err?.message || String(err)))
     } finally {
