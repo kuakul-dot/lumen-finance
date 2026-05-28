@@ -1543,6 +1543,54 @@ function AnalyticsMetrics({ t, lang, ccy, rows = [], totalValue = 0, totalPL = 0
     return { ready: true, days: snaps.length, twr, vol, sharpe, sortino, mdd }
   }, [snaps])
 
+  // ── Beta vs a market benchmark (region-chosen) ─────────────────────────────
+  // Fetch the benchmark's daily closes covering the snapshot span, then compare
+  // portfolio interval returns to the benchmark over the same intervals.
+  const [bench, setBench] = useState(null)
+  useEffect(() => {
+    if (!isLive || snaps.length < 3) { setBench(null); return }
+    const usW = rows.filter(r => r.region === "US").reduce((s, r) => s + r.weight, 0)
+    const thW = rows.filter(r => r.region === "TH").reduce((s, r) => s + r.weight, 0)
+    const sym  = usW >= thW ? "^GSPC" : "^SET.BK"
+    const name = usW >= thW ? "S&P 500" : "SET Index"
+    const spanDays = (new Date(snaps[snaps.length - 1].date) - new Date(snaps[0].date)) / 86400000
+    const range = spanDays > 365 * 2 ? "5y" : spanDays > 365 ? "2y" : "1y"
+    let cancelled = false
+    fetchHistory(sym, range)
+      .then(d => { if (!cancelled) setBench({ name, series: d?.series || [] }) })
+      .catch(() => { if (!cancelled) setBench(null) })
+    return () => { cancelled = true }
+  }, [isLive, snaps, rows])
+
+  const beta = useMemo(() => {
+    if (!bench?.series?.length || snaps.length < 3) return null
+    const closes = bench.series
+      .map(p => ({ d: new Date(p.t * 1000).toISOString().split("T")[0], c: p.c }))
+      .sort((a, b) => a.d.localeCompare(b.d))
+    const closeOnOrBefore = (date) => {
+      let best = null
+      for (const x of closes) { if (x.d <= date) best = x.c; else break }
+      return best
+    }
+    const idx = snaps.map(s => Number(s.total_cost) > 0 ? Number(s.total_value) / Number(s.total_cost) : null)
+    const pr = [], mr = []
+    for (let i = 1; i < snaps.length; i++) {
+      if (idx[i] == null || idx[i - 1] == null) continue
+      const c1 = closeOnOrBefore(snaps[i - 1].date), c2 = closeOnOrBefore(snaps[i].date)
+      if (!c1 || !c2) continue
+      pr.push(idx[i] / idx[i - 1] - 1)
+      mr.push(c2 / c1 - 1)
+    }
+    const n = pr.length
+    if (n < 3) return null
+    const mMean = mr.reduce((a, b) => a + b, 0) / n
+    const pMean = pr.reduce((a, b) => a + b, 0) / n
+    let cov = 0, varM = 0
+    for (let i = 0; i < n; i++) { cov += (pr[i] - pMean) * (mr[i] - mMean); varM += (mr[i] - mMean) ** 2 }
+    if (varM === 0) return null
+    return { value: cov / varM, n, name: bench.name }
+  }, [bench, snaps])
+
   // ── Live-computable metrics (no historical data needed) ────────────────────
   const liveMetrics = useMemo(() => {
     if (!isLive || rows.length === 0 || totalValue <= 0) return null
@@ -1736,6 +1784,9 @@ function AnalyticsMetrics({ t, lang, ccy, rows = [], totalValue = 0, totalPL = 0
                 { label: "Sharpe", val: histMetrics.sharpe.toFixed(2), neg: histMetrics.sharpe < 0 },
                 { label: "Sortino", val: histMetrics.sortino.toFixed(2), neg: histMetrics.sortino < 0 },
                 { label: th ? "ขาดทุนสูงสุด" : "Max Drawdown", val: (histMetrics.mdd * 100).toFixed(1) + "%", neg: true },
+                { label: beta ? `Beta · ${beta.name}` : "Beta",
+                  val: beta ? beta.value.toFixed(2) : "—",
+                  neg: beta ? beta.value > 1 : false },
               ].map(s => (
                 <div key={s.label}>
                   <div style={{ fontSize: 11, color: "var(--ink-3)", marginBottom: 4 }}>{s.label}</div>
@@ -1747,8 +1798,8 @@ function AnalyticsMetrics({ t, lang, ccy, rows = [], totalValue = 0, totalPL = 0
 
           <p className="muted" style={{ fontSize: 11, margin: "16px 0 0", lineHeight: 1.5 }}>
             {th
-              ? "หมายเหตุ: บันทึกเมื่อเปิดแอปแต่ละวัน (ไม่ใช่ทุกวันต่อเนื่อง) ค่า annualize จึงเป็นค่าประมาณ · Beta ต้องเทียบ benchmark — ยังไม่รวม"
-              : "Note: recorded when you open the app each day (not strictly continuous), so annualized figures are approximate · Beta needs a benchmark — not included yet"}
+              ? `หมายเหตุ: บันทึกเมื่อเปิดแอปแต่ละวัน (ไม่ใช่ทุกวันต่อเนื่อง) ค่า annualize จึงเป็นค่าประมาณ · Beta เทียบกับ ${beta ? beta.name : "S&P 500 / SET ตามภูมิภาคหลัก"} (ต้องการข้อมูลพอสมควรจึงจะแสดง)`
+              : `Note: recorded when you open the app each day (not strictly continuous), so annualized figures are approximate · Beta is vs ${beta ? beta.name : "S&P 500 / SET by dominant region"} (shows once enough data exists)`}
           </p>
         </div>
       )}
