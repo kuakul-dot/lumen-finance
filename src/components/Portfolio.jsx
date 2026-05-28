@@ -2,7 +2,7 @@
 import { PageHead, Delta, Icon } from './Nav'
 import { Sparkline } from './Charts'
 import { LUMEN_FMT, LUMEN_DERIVE } from '../data'
-import { addHolding, updateHolding, deleteHolding, deriveHoldings, addTransaction, syncHoldingsFromTransactions, getTransactions, updateTransaction, deleteTransaction, deleteTransactionsByTicker } from '../lib/db'
+import { addHolding, updateHolding, deleteHolding, deriveHoldings, addTransaction, syncHoldingsFromTransactions, rebuildHolding, getTransactions, updateTransaction, deleteTransaction, deleteTransactionsByTicker } from '../lib/db'
 
 export function PortfolioPage({ t, lang, ccy, setRoute, dataState, portfolio, liveHoldings = [], prices = {}, refreshHoldings, loadingData, dataError, retryLoad, fxRate = 36 }) {
   const [showAdd, setShowAdd] = useState(false)
@@ -997,6 +997,8 @@ function TransactionsTab({ transactions, loading, lang, ccy, fxRate = 36, onRelo
     if (!window.confirm(th ? `ลบรายการ ${tx.ticker || ''} ${tx.type} นี้?` : `Delete this ${tx.type} transaction for ${tx.ticker || ''}?`)) return
     setDeleting(tx.id)
     await deleteTransaction(tx.id)
+    // Re-sync the affected holding from its remaining transactions
+    if (tx.ticker && portfolioId) await rebuildHolding(portfolioId, tx.ticker)
     setDeleting(null)
     onReload?.()
   }
@@ -1132,7 +1134,14 @@ function TransactionsTab({ transactions, loading, lang, ccy, fxRate = 36, onRelo
           tx={editTx}
           lang={lang}
           onClose={() => setEditTx(null)}
-          onSaved={() => { setEditTx(null); onReload?.() }}
+          onSaved={async (updated) => {
+            // Re-sync holdings for the affected ticker(s) — handles renames too
+            if (portfolioId) {
+              const tickers = new Set([editTx.ticker, updated?.ticker].filter(Boolean))
+              for (const tk of tickers) await rebuildHolding(portfolioId, tk)
+            }
+            setEditTx(null); onReload?.()
+          }}
         />
       )}
       {showImport && portfolioId && (
@@ -1188,7 +1197,7 @@ function EditTransactionModal({ tx, lang, onClose, onSaved }) {
     })
     setSaving(false)
     if (err) { setError(err.message); return }
-    onSaved()
+    onSaved({ ticker: form.ticker.toUpperCase() || null })
   }
 
   const TX_TYPES = ['Buy', 'Sell', 'Dividend', 'Deposit', 'Withdraw']

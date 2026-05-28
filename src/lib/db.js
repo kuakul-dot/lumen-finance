@@ -156,6 +156,56 @@ export async function syncHoldingsFromTransactions(portfolioId, txs) {
   return { errors }
 }
 
+// Recompute a single ticker's holding from ALL its remaining transactions.
+// Call after deleting/editing a transaction so the position stays in sync.
+// Buys add shares + cost; sells remove shares + proportional cost.  If the
+// net position is zero, the holding row is removed.
+export async function rebuildHolding(portfolioId, ticker) {
+  if (!portfolioId || !ticker) return { error: null }
+  const key = ticker.toUpperCase()
+
+  const { data: txs } = await supabase
+    .from('transactions')
+    .select('*')
+    .eq('portfolio_id', portfolioId)
+    .ilike('ticker', key)
+
+  let shares = 0, costTotal = 0, currency = null
+  for (const tx of (txs || [])) {
+    const s = Number(tx.shares) || 0
+    const p = Number(tx.price)  || 0
+    if (!currency && tx.currency) currency = tx.currency
+    if (tx.type === 'Buy') {
+      shares += s; costTotal += s * p
+    } else if (tx.type === 'Sell') {
+      const avg = shares > 0 ? costTotal / shares : 0
+      shares    = Math.max(0, shares - s)
+      costTotal = Math.max(0, costTotal - s * avg)
+    }
+  }
+
+  const existing = await getHoldings(portfolioId)
+  const h = existing.find(x => x.ticker?.toUpperCase() === key)
+
+  if (shares <= 0) {
+    if (h) await deleteHolding(h.id)
+    return { error: null }
+  }
+
+  const cost_price = costTotal / shares
+  if (h) {
+    return updateHolding(h.id, { shares, cost_price })
+  }
+  const isUSD = (currency || 'THB') === 'USD'
+  return addHolding(portfolioId, {
+    ticker: key, name: key, shares, cost_price,
+    currency: currency || 'THB',
+    region: isUSD ? 'US' : 'TH',
+    asset_class: 'Equity',
+    div_frequency: isUSD ? 4 : 2,
+  })
+}
+
 export async function updateTransaction(id, updates) {
   const { data, error } = await supabase
     .from('transactions')
