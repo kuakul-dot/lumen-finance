@@ -270,6 +270,85 @@ export async function recordSnapshot(portfolioId, { total_value, total_cost }) {
   return { error }
 }
 
+// Insert/update many snapshots at once (used by the history backfill).
+export async function upsertSnapshots(portfolioId, rows) {
+  if (!portfolioId || !rows?.length) return { error: null, count: 0 }
+  const payload = rows.map(r => ({ portfolio_id: portfolioId, ...r }))
+  const { error } = await supabase
+    .from('portfolio_snapshots')
+    .upsert(payload, { onConflict: 'portfolio_id,date' })
+  if (error) console.warn('[Lumen] upsertSnapshots:', error.message)
+  return { error, count: error ? 0 : rows.length }
+}
+
+// Reconstruct a daily {date,total_value,total_cost} series from transactions +
+// historical price series.  Lets TWR / Sharpe / drawdown work without waiting
+// days for live snapshots to accumulate.
+//   transactions:   all txs, ascending by transacted_at
+//   seriesByTicker: { TICKER: [{ d:'YYYY-MM-DD', c:close(native ccy) }] } asc
+//   ccyByTicker:    { TICKER: 'USD' | 'THB' }
+//   fxRate:         USD→THB (constant approximation across the window)
+export function buildSnapshotSeries(transactions, seriesByTicker, ccyByTicker, fxRate = 36) {
+  if (!transactions?.length) return []
+  const dayOf = (v) => String(v).split('T')[0]
+  const firstDate = dayOf(transactions[0].transacted_at)
+  const today = new Date().toISOString().split('T')[0]
+
+  const dateSet = new Set()
+  for (const tk in seriesByTicker)
+    for (const p of seriesByTicker[tk])
+      if (p.d >= firstDate && p.d <= today) dateSet.add(p.d)
+  for (const t of transactions) dateSet.add(dayOf(t.transacted_at))
+  const dates = [...dateSet].sort()
+
+  const priceOnOrBefore = (tk, date) => {
+    const s = seriesByTicker[tk]; if (!s) return null
+    let best = null
+    for (const p of s) { if (p.d <= date) best = p.c; else break }
+    return best
+  }
+
+  const rows = []
+  for (const date of dates) {
+    const pos = {}   // ticker → { shares, cost (native ccy) }
+    for (const t of transactions) {
+      if (dayOf(t.transacted_at) > date) break   // sorted asc
+      const tk = (t.ticker || '').toUpperCase(); if (!tk) continue
+      const s = Number(t.shares) || 0, pr = Number(t.price) || 0
+      if (!pos[tk]) pos[tk] = { shares: 0, cost: 0 }
+      if (t.type === 'Buy') {
+        pos[tk].shares += s
+        pos[tk].cost   += s * pr + (Number(t.fee) || 0) + (Number(t.tax) || 0)
+      } else if (t.type === 'Sell') {
+        const avg = pos[tk].shares > 0 ? pos[tk].cost / pos[tk].shares : 0
+        pos[tk].shares = Math.max(0, pos[tk].shares - s)
+        pos[tk].cost   = Math.max(0, pos[tk].cost - s * avg)
+      }
+    }
+    let total_value = 0, total_cost = 0
+    for (const tk in pos) {
+      if (pos[tk].shares <= 0) continue
+      const fx = (ccyByTicker[tk] === 'USD') ? fxRate : 1
+      const px = priceOnOrBefore(tk, date)
+      if (px != null) total_value += pos[tk].shares * px * fx
+      total_cost += pos[tk].cost * fx
+    }
+    if (total_cost > 0 && total_value > 0)
+      rows.push({ date, total_value: +total_value.toFixed(2), total_cost: +total_cost.toFixed(2) })
+  }
+  return rows
+}
+
+export async function getAllTransactions(portfolioId) {
+  if (!portfolioId) return []
+  const { data } = await supabase
+    .from('transactions')
+    .select('*')
+    .eq('portfolio_id', portfolioId)
+    .order('transacted_at', { ascending: true })
+  return data || []
+}
+
 export async function getSnapshots(portfolioId, days = 400) {
   if (!portfolioId) return []
   const { data, error } = await supabase

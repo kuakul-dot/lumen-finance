@@ -2,7 +2,7 @@ import { useState, useMemo, useEffect, useCallback } from 'react'
 import { PageHead, Delta, Icon } from './Nav'
 import { LineChart, Donut, BarChart } from './Charts'
 import { LUMEN_FMT, LUMEN_DERIVE, LUMEN_HISTORY, LUMEN_BENCH } from '../data'
-import { deriveHoldings, getTransactions, getSnapshots, addTransaction, updateTransaction, deleteTransaction } from '../lib/db'
+import { deriveHoldings, getTransactions, getSnapshots, getAllTransactions, upsertSnapshots, buildSnapshotSeries, addTransaction, updateTransaction, deleteTransaction } from '../lib/db'
 import { fetchHistory, toYahooSymbol } from '../lib/prices'
 
 export function AnalyticsPage({ t, lang, ccy, dataState, liveHoldings = [], prices = {}, fxRate = 36, portfolio }) {
@@ -119,7 +119,7 @@ export function AnalyticsPage({ t, lang, ccy, dataState, liveHoldings = [], pric
       {tab === "diversification" && <AnalyticsDiv t={t} lang={lang} ccy={ccy} rows={rows} totalValue={totalValue} demoData={demoData} dataState={dataState} />}
       {tab === "dividends"       && <AnalyticsDiv2 t={t} lang={lang} ccy={ccy} rows={rows} totalValue={totalValue} dataState={dataState} liveHoldings={liveHoldings} fxRate={fxRate} transactions={transactions} portfolio={portfolio} onTransactionAdded={handleTransactionAdded} onTransactionUpdated={handleTransactionUpdated} onTransactionDeleted={handleTransactionDeleted} />}
       {tab === "growth"          && <AnalyticsGrowth t={t} lang={lang} ccy={ccy} rows={rows} fxRate={fxRate} totalValue={totalValue} totalCost={totalCost} totalPL={totalPL} totalPlPct={totalPlPct} dataState={dataState} earliestHoldingDate={earliestHoldingDate} />}
-      {tab === "metrics"         && <AnalyticsMetrics t={t} lang={lang} ccy={ccy} rows={rows} totalValue={totalValue} totalPL={totalPL} totalPlPct={totalPlPct} dataState={dataState} portfolio={portfolio} />}
+      {tab === "metrics"         && <AnalyticsMetrics t={t} lang={lang} ccy={ccy} rows={rows} totalValue={totalValue} totalPL={totalPL} totalPlPct={totalPlPct} dataState={dataState} portfolio={portfolio} fxRate={fxRate} />}
     </div>
   )
 }
@@ -1501,11 +1501,13 @@ function AnalyticsGrowth({ t, lang, ccy, rows = [], fxRate = 36, totalValue, tot
 }
 
 /* ─── Metrics tab — live-aware ──────────────────────────────────────────────── */
-function AnalyticsMetrics({ t, lang, ccy, rows = [], totalValue = 0, totalPL = 0, totalPlPct = 0, dataState, portfolio }) {
+function AnalyticsMetrics({ t, lang, ccy, rows = [], totalValue = 0, totalPL = 0, totalPlPct = 0, dataState, portfolio, fxRate = 36 }) {
   const th = lang === "th"
   const isLive = dataState === "live"
   const [openKey, setOpenKey] = useState(null)   // which metric's formula is expanded
   const [snaps, setSnaps] = useState([])
+  const [backfilling, setBackfilling] = useState(false)
+  const [backfillMsg, setBackfillMsg] = useState(null)
 
   // Load the daily value series (recorded by App once per day)
   useEffect(() => {
@@ -1514,6 +1516,49 @@ function AnalyticsMetrics({ t, lang, ccy, rows = [], totalValue = 0, totalPL = 0
     getSnapshots(portfolio.id).then(d => { if (!cancelled) setSnaps(d) }).catch(() => {})
     return () => { cancelled = true }
   }, [isLive, portfolio?.id])
+
+  // Backfill: reconstruct the daily value series from transactions + historical
+  // prices, so TWR / Sharpe / Beta work immediately without waiting days.
+  const handleBackfill = useCallback(async () => {
+    if (!portfolio?.id) return
+    setBackfilling(true); setBackfillMsg(null)
+    try {
+      const txs = await getAllTransactions(portfolio.id)
+      if (!txs.length) { setBackfillMsg(th ? "ไม่พบธุรกรรมให้สร้างประวัติ" : "No transactions to rebuild from"); return }
+
+      const ccyByTicker = {}
+      for (const tx of txs) {
+        const tk = (tx.ticker || "").toUpperCase()
+        if (tk && !ccyByTicker[tk]) ccyByTicker[tk] = tx.currency || "THB"
+      }
+      const tickers = Object.keys(ccyByTicker)
+      const spanDays = (Date.now() - new Date(txs[0].transacted_at)) / 86400000
+      const range = spanDays > 365 * 2 ? "5y" : spanDays > 365 ? "2y" : spanDays > 180 ? "1y"
+                  : spanDays > 90 ? "6mo" : spanDays > 30 ? "3mo" : "1mo"
+
+      const seriesByTicker = {}
+      await Promise.all(tickers.map(async tk => {
+        const region = ccyByTicker[tk] === "USD" ? "US" : "TH"
+        const sym = toYahooSymbol(tk, region, "Equity")
+        const h = await fetchHistory(sym, range).catch(() => ({ series: [] }))
+        seriesByTicker[tk] = (h?.series || []).map(p => ({ d: new Date(p.t * 1000).toISOString().split("T")[0], c: p.c }))
+      }))
+
+      const series = buildSnapshotSeries(txs, seriesByTicker, ccyByTicker, fxRate)
+      if (!series.length) { setBackfillMsg(th ? "ดึงราคาย้อนหลังไม่ได้ ลองใหม่อีกครั้ง" : "Couldn't fetch historical prices — try again"); return }
+
+      const { error } = await upsertSnapshots(portfolio.id, series)
+      if (error) { setBackfillMsg((th ? "บันทึกไม่สำเร็จ: " : "Save failed: ") + error.message); return }
+
+      const fresh = await getSnapshots(portfolio.id)
+      setSnaps(fresh)
+      setBackfillMsg(th ? `สร้างประวัติ ${series.length} วันสำเร็จ` : `Rebuilt ${series.length} days`)
+    } catch (err) {
+      setBackfillMsg((th ? "ผิดพลาด: " : "Error: ") + (err?.message || String(err)))
+    } finally {
+      setBackfilling(false)
+    }
+  }, [portfolio?.id, fxRate, th])
 
   // History-based metrics from the flow-neutral money-multiple (value / cost):
   // a pure cash buy raises value and cost equally, so the ratio isolates
@@ -1760,14 +1805,30 @@ function AnalyticsMetrics({ t, lang, ccy, rows = [], totalValue = 0, totalPL = 0
 
       {isLive && (
         <div className="card" style={{ marginTop: 16, padding: "20px 24px" }}>
-          <h4 style={{ margin: 0, fontSize: 13, fontWeight: 600, marginBottom: 4 }}>
-            {th ? "ตัวชี้วัดจากประวัติพอร์ต (รายวัน)" : "History-based metrics (daily series)"}
-          </h4>
-          <p className="muted" style={{ fontSize: 12, margin: "0 0 16px" }}>
-            {th
-              ? `บันทึกแล้ว ${histMetrics.days} วัน · คำนวณจากดัชนีมูลค่า/ต้นทุน (ตัดผลการฝากถอน) · ยิ่งเก็บนานยิ่งแม่น`
-              : `${histMetrics.days} day(s) recorded · computed from the value/cost index (contribution-neutral) · accuracy improves over time`}
-          </p>
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 12, flexWrap: "wrap" }}>
+            <div>
+              <h4 style={{ margin: 0, fontSize: 13, fontWeight: 600, marginBottom: 4 }}>
+                {th ? "ตัวชี้วัดจากประวัติพอร์ต (รายวัน)" : "History-based metrics (daily series)"}
+              </h4>
+              <p className="muted" style={{ fontSize: 12, margin: "0 0 16px" }}>
+                {th
+                  ? `บันทึกแล้ว ${histMetrics.days} วัน · คำนวณจากดัชนีมูลค่า/ต้นทุน (ตัดผลการฝากถอน) · ยิ่งเก็บนานยิ่งแม่น`
+                  : `${histMetrics.days} day(s) recorded · computed from the value/cost index (contribution-neutral) · accuracy improves over time`}
+              </p>
+            </div>
+            <button className="btn btn-sm btn-outline" onClick={handleBackfill} disabled={backfilling}
+                    style={{ whiteSpace: "nowrap", flexShrink: 0 }}>
+              {backfilling
+                ? (th ? "กำลังสร้าง…" : "Rebuilding…")
+                : (th ? "สร้างประวัติย้อนหลัง" : "Rebuild history")}
+            </button>
+          </div>
+          {backfillMsg && (
+            <div style={{ fontSize: 12, color: "var(--ink-2)", marginBottom: 14, padding: "8px 12px",
+                          background: "var(--bg-2)", borderRadius: 8 }}>
+              {backfillMsg}
+            </div>
+          )}
 
           {!histMetrics.ready ? (
             <div style={{ padding: "16px 0", color: "var(--ink-3)", fontSize: 13, display: "flex", alignItems: "center", gap: 8 }}>
