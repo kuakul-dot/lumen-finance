@@ -2,7 +2,7 @@
 import { PageHead, Delta, Icon } from './Nav'
 import { Sparkline } from './Charts'
 import { LUMEN_FMT, LUMEN_DERIVE } from '../data'
-import { addHolding, updateHolding, deleteHolding, deriveHoldings, addTransaction, getTransactions, updateTransaction, deleteTransaction, deleteTransactionsByTicker } from '../lib/db'
+import { addHolding, updateHolding, deleteHolding, deriveHoldings, addTransaction, syncHoldingsFromTransactions, getTransactions, updateTransaction, deleteTransaction, deleteTransactionsByTicker } from '../lib/db'
 
 export function PortfolioPage({ t, lang, ccy, setRoute, dataState, portfolio, liveHoldings = [], prices = {}, refreshHoldings, loadingData, dataError, retryLoad, fxRate = 36 }) {
   const [showAdd, setShowAdd] = useState(false)
@@ -193,7 +193,7 @@ function LivePortfolioPage({ t, lang, ccy, portfolio, liveHoldings, prices = {},
       </div>
 
       {tab === "transactions" ? (
-        <TransactionsTab transactions={transactions} loading={txLoading} lang={lang} ccy={ccy} fxRate={fxRate} onReload={loadTransactions} portfolioId={portfolio?.id} />
+        <TransactionsTab transactions={transactions} loading={txLoading} lang={lang} ccy={ccy} fxRate={fxRate} onReload={async () => { await loadTransactions(); await refreshHoldings?.() }} portfolioId={portfolio?.id} />
       ) : rows.length === 0 ? (
         <div className="card empty">
           <h2 className="display" style={{ fontSize: 28, margin: 0 }}>
@@ -1399,11 +1399,16 @@ function ImportPDFModal({ lang, portfolioId, onClose, onImported }) {
   const handleImport = async () => {
     const toImport = rows.filter((_, i) => selected.has(i))
     setImporting(true)
-    let ok = 0; const errors = []
+    let ok = 0; const errors = []; const imported = []
     for (const tx of toImport) {
       const { error } = await addTransaction(portfolioId, tx)
       if (error) errors.push(`${tx.ticker || '?'} ${tx.transacted_at}: ${error.message}`)
-      else ok++
+      else { ok++; imported.push(tx) }
+    }
+    // Roll the imported buys/sells into the Holdings table
+    if (imported.length) {
+      const { errors: hErr } = await syncHoldingsFromTransactions(portfolioId, imported)
+      hErr.forEach(e => errors.push(`holding ${e}`))
     }
     setImporting(false)
     setImportResult({ ok, errors })

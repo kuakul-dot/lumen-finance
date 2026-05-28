@@ -80,6 +80,64 @@ export async function addTransaction(portfolioId, tx) {
   return { data, error }
 }
 
+// Roll a batch of transactions into the holdings table so the Holdings tab
+// reflects imported trades.  Buys add shares and update the weighted-average
+// cost; sells reduce shares.  Dividend / Deposit / Withdraw rows are ignored
+// (they don't change a position).  Returns { errors: string[] }.
+export async function syncHoldingsFromTransactions(portfolioId, txs) {
+  const existing = await getHoldings(portfolioId)
+  const byTicker = new Map()
+  for (const h of existing) {
+    if (h.ticker) byTicker.set(h.ticker.toUpperCase(), { ...h })
+  }
+
+  for (const tx of txs) {
+    if (!tx.ticker) continue
+    const key    = tx.ticker.toUpperCase()
+    const shares = Number(tx.shares) || 0
+    const price  = Number(tx.price)  || 0
+    if (!shares) continue
+
+    const h = byTicker.get(key)
+
+    if (tx.type === 'Buy') {
+      if (h) {
+        const prevShares = Number(h.shares) || 0
+        const prevCost   = Number(h.cost_price) || 0
+        const newShares  = prevShares + shares
+        h.cost_price = newShares > 0
+          ? (prevShares * prevCost + shares * price) / newShares
+          : price
+        h.shares  = newShares
+        h._dirty  = true
+      } else {
+        byTicker.set(key, {
+          _new: true, _dirty: true,
+          ticker: key, name: key, shares, cost_price: price,
+          currency: tx.currency || 'THB', asset_class: 'Equity',
+        })
+      }
+    } else if (tx.type === 'Sell' && h) {
+      h.shares = Math.max(0, (Number(h.shares) || 0) - shares)
+      h._dirty = true
+    }
+  }
+
+  const errors = []
+  for (const h of byTicker.values()) {
+    if (!h._dirty) continue
+    if (h._new) {
+      const { _new, _dirty, ...payload } = h
+      const { error } = await addHolding(portfolioId, payload)
+      if (error) errors.push(`${h.ticker}: ${error.message}`)
+    } else {
+      const { error } = await updateHolding(h.id, { shares: h.shares, cost_price: h.cost_price })
+      if (error) errors.push(`${h.ticker}: ${error.message}`)
+    }
+  }
+  return { errors }
+}
+
 export async function updateTransaction(id, updates) {
   const { data, error } = await supabase
     .from('transactions')
