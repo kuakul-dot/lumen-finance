@@ -100,6 +100,16 @@ export async function syncHoldingsFromTransactions(portfolioId, txs) {
 
     const h = byTicker.get(key)
 
+    // Backfill region/currency on an existing holding that lacks it, so US
+    // tickers stop being treated as Thai (.BK) — derived from the tx currency.
+    if (h && !h.region && tx.currency) {
+      const isUSD = tx.currency === 'USD'
+      h.region        = isUSD ? 'US' : 'TH'
+      h.currency      = h.currency || tx.currency
+      h.div_frequency = h.div_frequency || (isUSD ? 4 : 2)
+      h._dirty        = true
+    }
+
     if (tx.type === 'Buy') {
       if (h) {
         const prevShares = Number(h.shares) || 0
@@ -111,10 +121,14 @@ export async function syncHoldingsFromTransactions(portfolioId, txs) {
         h.shares  = newShares
         h._dirty  = true
       } else {
+        const isUSD = (tx.currency || 'THB') === 'USD'
         byTicker.set(key, {
           _new: true, _dirty: true,
           ticker: key, name: key, shares, cost_price: price,
-          currency: tx.currency || 'THB', asset_class: 'Equity',
+          currency: tx.currency || 'THB',
+          region: isUSD ? 'US' : 'TH',   // drives Yahoo symbol (.BK) + price currency
+          asset_class: 'Equity',
+          div_frequency: isUSD ? 4 : 2,
         })
       }
     } else if (tx.type === 'Sell' && h) {
@@ -131,7 +145,11 @@ export async function syncHoldingsFromTransactions(portfolioId, txs) {
       const { error } = await addHolding(portfolioId, payload)
       if (error) errors.push(`${h.ticker}: ${error.message}`)
     } else {
-      const { error } = await updateHolding(h.id, { shares: h.shares, cost_price: h.cost_price })
+      const patch = { shares: h.shares, cost_price: h.cost_price }
+      if (h.region)        patch.region        = h.region
+      if (h.currency)      patch.currency      = h.currency
+      if (h.div_frequency) patch.div_frequency = h.div_frequency
+      const { error } = await updateHolding(h.id, patch)
       if (error) errors.push(`${h.ticker}: ${error.message}`)
     }
   }
