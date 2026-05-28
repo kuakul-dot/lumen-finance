@@ -498,12 +498,12 @@ function AnalyticsCommon({ t, lang, ccy, rows, totalValue, totalPL, totalPlPct, 
           sub={th ? "ปันผลกระแสรายปี" : "annual income"} />
         {dataState === "live" ? (
           <BigKpi className="col-span-3"
-            label={t.analytics.twr}
+            label={th ? "ผลตอบแทนรวม" : "Total return"}
             value={(totalPlPct >= 0 ? "+" : "") + totalPlPct.toFixed(1) + "%"}
-            sub={th ? "จากต้นทุน · " + rows.length + " ตำแหน่ง" : "vs. cost · " + rows.length + " positions"}
+            sub={th ? "เทียบต้นทุน · TWR จริงดูที่แท็บ Metrics" : "vs. cost · see Metrics tab for TWR"}
             tone={totalPlPct >= 0 ? "gain" : "loss"} />
         ) : (
-          <BigKpi className="col-span-3" label={t.analytics.twr} value="+18.3%" sub={th ? "12 เดือนล่าสุด" : "trailing 12-mo"} tone="gain" />
+          <BigKpi className="col-span-3" label={th ? "ผลตอบแทนรวม" : "Total return"} value="+18.3%" sub={th ? "12 เดือนล่าสุด" : "trailing 12-mo"} tone="gain" />
         )}
       </div>
 
