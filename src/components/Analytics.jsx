@@ -9,11 +9,12 @@ export function AnalyticsPage({ t, lang, ccy, dataState, liveHoldings = [], pric
   const [tab, setTab] = useState("common")
   const [transactions, setTransactions] = useState([])
 
-  // Fetch transactions once — used to derive the actual first-investment date
+  // Fetch ALL transactions — the earliest-investment date and per-ticker
+  // purchase dates must see the full history, not just the latest 50.
   useEffect(() => {
     if (dataState !== "live" || !portfolio?.id) return
     let cancelled = false
-    getTransactions(portfolio.id)
+    getAllTransactions(portfolio.id)
       .then(d => { if (!cancelled) setTransactions(d || []) })
       .catch(() => {})
     return () => { cancelled = true }
