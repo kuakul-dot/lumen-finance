@@ -564,13 +564,13 @@ function AddHoldingModal({ lang, portfolioId, onClose, onSaved }) {
   return (
     <div style={{
       position: "fixed", inset: 0, background: "rgba(0,0,0,0.45)", backdropFilter: "blur(4px)",
-      display: "flex", alignItems: "flex-start", justifyContent: "center", zIndex: 1000,
+      display: "flex", alignItems: "center", justifyContent: "center", zIndex: 1000,
       overflowY: "auto", padding: "24px 16px",
     }} onClick={e => e.target === e.currentTarget && onClose()}>
       <div style={{
         background: "var(--bg)", borderRadius: 20, padding: "32px 28px 40px",
         width: "100%", maxWidth: 560, margin: "auto",
-        boxShadow: "0 8px 48px rgba(0,0,0,0.18)",
+        boxShadow: "0 8px 48px rgba(0,0,0,0.18)", maxHeight: "calc(100dvh - 48px)", overflowY: "auto",
         animation: "fadeIn 0.18s ease",
       }}>
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 24 }}>
@@ -750,13 +750,13 @@ function EditHoldingModal({ lang, holding, onClose, onSaved }) {
   return (
     <div style={{
       position: "fixed", inset: 0, background: "rgba(0,0,0,0.45)", backdropFilter: "blur(4px)",
-      display: "flex", alignItems: "flex-start", justifyContent: "center", zIndex: 1000,
+      display: "flex", alignItems: "center", justifyContent: "center", zIndex: 1000,
       overflowY: "auto", padding: "24px 16px",
     }} onClick={e => e.target === e.currentTarget && onClose()}>
       <div style={{
         background: "var(--bg)", borderRadius: 20, padding: "32px 28px 40px",
         width: "100%", maxWidth: 560, margin: "auto",
-        boxShadow: "0 8px 48px rgba(0,0,0,0.18)",
+        boxShadow: "0 8px 48px rgba(0,0,0,0.18)", maxHeight: "calc(100dvh - 48px)", overflowY: "auto",
         animation: "fadeIn 0.18s ease",
       }}>
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 24 }}>
@@ -915,13 +915,13 @@ function SellModal({ lang, ccy, holding, portfolioId, onClose, onSaved }) {
   return (
     <div style={{
       position: "fixed", inset: 0, background: "rgba(0,0,0,0.45)", backdropFilter: "blur(4px)",
-      display: "flex", alignItems: "flex-start", justifyContent: "center", zIndex: 1000,
+      display: "flex", alignItems: "center", justifyContent: "center", zIndex: 1000,
       overflowY: "auto", padding: "24px 16px",
     }} onClick={e => e.target === e.currentTarget && onClose()}>
       <div style={{
         background: "var(--bg)", borderRadius: 20, padding: "32px 28px 40px",
         width: "100%", maxWidth: 460, margin: "auto",
-        boxShadow: "0 8px 48px rgba(0,0,0,0.18)", animation: "fadeIn 0.18s ease",
+        boxShadow: "0 8px 48px rgba(0,0,0,0.18)", maxHeight: "calc(100dvh - 48px)", overflowY: "auto", animation: "fadeIn 0.18s ease",
       }}>
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 6 }}>
           <h3 style={{ margin: 0, fontSize: 20, fontFamily: "var(--font-display)" }}>
@@ -1408,13 +1408,13 @@ function EditTransactionModal({ tx, holding, lang, onClose, onSaved }) {
   return (
     <div style={{
       position: "fixed", inset: 0, background: "rgba(0,0,0,0.45)", backdropFilter: "blur(4px)",
-      display: "flex", alignItems: "flex-start", justifyContent: "center", zIndex: 1000,
+      display: "flex", alignItems: "center", justifyContent: "center", zIndex: 1000,
       overflowY: "auto", padding: "24px 16px",
     }} onClick={e => e.target === e.currentTarget && onClose()}>
       <div style={{
         background: "var(--bg)", borderRadius: 20, padding: "32px 28px 40px",
         width: "100%", maxWidth: 560, margin: "auto",
-        boxShadow: "0 8px 48px rgba(0,0,0,0.18)",
+        boxShadow: "0 8px 48px rgba(0,0,0,0.18)", maxHeight: "calc(100dvh - 48px)", overflowY: "auto",
         animation: "fadeIn 0.18s ease",
       }}>
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 24 }}>
@@ -1681,13 +1681,13 @@ function ImportPDFModal({ lang, portfolioId, onClose, onImported }) {
   return (
     <div style={{
       position: "fixed", inset: 0, background: "rgba(0,0,0,0.45)", backdropFilter: "blur(4px)",
-      display: "flex", alignItems: "flex-start", justifyContent: "center", zIndex: 1100,
+      display: "flex", alignItems: "center", justifyContent: "center", zIndex: 1100,
       overflowY: "auto", padding: "24px 16px",
     }} onClick={e => e.target === e.currentTarget && onClose()}>
       <div style={{
         background: "var(--bg)", borderRadius: 20, padding: "32px 28px 40px",
         width: "100%", maxWidth: step === 2 ? 760 : 600, margin: "auto",
-        boxShadow: "0 8px 48px rgba(0,0,0,0.18)",
+        boxShadow: "0 8px 48px rgba(0,0,0,0.18)", maxHeight: "calc(100dvh - 48px)", overflowY: "auto",
         animation: "fadeIn 0.18s ease",
       }}>
         {/* Header */}
