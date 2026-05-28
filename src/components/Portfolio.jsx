@@ -1192,6 +1192,8 @@ function TransactionsTab({ transactions, holdings = [], loading, lang, ccy, fxRa
   const [editTx, setEditTx] = useState(null)     // tx object being edited
   const [deleting, setDeleting] = useState(null)  // id being deleted
   const [showImport, setShowImport] = useState(false)
+  const [fType, setFType] = useState("all")       // type filter
+  const [fQuery, setFQuery] = useState("")        // ticker/name search
 
   const handleDelete = async (tx) => {
     if (!window.confirm(th ? `ลบรายการ ${tx.ticker || ''} ${tx.type} นี้?` : `Delete this ${tx.type} transaction for ${tx.ticker || ''}?`)) return
@@ -1235,9 +1237,39 @@ function TransactionsTab({ transactions, holdings = [], loading, lang, ccy, fxRa
   const typeLabel = { en: { Buy: "Buy", Sell: "Sell", Dividend: "Dividend", Deposit: "Deposit", Withdraw: "Withdraw" }, th: { Buy: "ซื้อ", Sell: "ขาย", Dividend: "ปันผล", Deposit: "ฝาก", Withdraw: "ถอน" } }
   const typeIcon  = { Buy: "buy", Sell: "sell", Dividend: "dividend", Deposit: "deposit", Withdraw: "deposit" }
 
+  // Filter chips (only show types that actually exist) + ticker/name search
+  const typesPresent = [...new Set(transactions.map(tx => tx.type || "Buy"))]
+  const typeChips = ["all", ...["Buy", "Sell", "Dividend", "Deposit", "Withdraw"].filter(t => typesPresent.includes(t))]
+  const q = fQuery.trim().toLowerCase()
+  const filtered = transactions.filter(tx => {
+    if (fType !== "all" && (tx.type || "Buy") !== fType) return false
+    if (q && !(`${tx.ticker || ""} ${tx.note || ""}`).toLowerCase().includes(q)) return false
+    return true
+  })
+
   return (
     <>
-      <div style={{ display: "flex", justifyContent: "flex-end", marginBottom: 8 }}>
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 12, marginBottom: 12, flexWrap: "wrap" }}>
+        <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+          <div className="segmented" style={{ flexWrap: "wrap" }}>
+            {typeChips.map(k => (
+              <button key={k} className={fType === k ? "on" : ""} onClick={() => setFType(k)} style={{ fontSize: 12 }}>
+                {k === "all" ? (th ? "ทั้งหมด" : "All") : (typeLabel[lang] || typeLabel.en)[k]}
+              </button>
+            ))}
+          </div>
+          <input
+            value={fQuery}
+            onChange={e => setFQuery(e.target.value)}
+            placeholder={th ? "ค้นหา Ticker / ชื่อ" : "Search ticker / name"}
+            style={{ ...inputStyle, width: 200, padding: "8px 12px", fontSize: 13 }}
+          />
+          {(fType !== "all" || q) && (
+            <span className="muted" style={{ fontSize: 12 }}>
+              {filtered.length}/{transactions.length}
+            </span>
+          )}
+        </div>
         <button className="btn btn-outline btn-sm" onClick={() => setShowImport(true)}>
           <Icon name="upload" size={13} /> {th ? "นำเข้า PDF" : "Import PDF"}
         </button>
@@ -1257,7 +1289,12 @@ function TransactionsTab({ transactions, holdings = [], loading, lang, ccy, fxRa
             </tr>
           </thead>
           <tbody>
-            {transactions.map(tx => {
+            {filtered.length === 0 && (
+              <tr><td colSpan="8" style={{ padding: "32px 16px", textAlign: "center", color: "var(--ink-3)", fontSize: 13 }}>
+                {th ? "ไม่พบรายการที่ตรงกับตัวกรอง" : "No transactions match the filter"}
+              </td></tr>
+            )}
+            {filtered.map(tx => {
               const type = tx.type || 'Buy'
               const date = tx.transacted_at
                 ? new Date(tx.transacted_at).toLocaleDateString(th ? "th-TH" : "en-US", { day: "numeric", month: "short", year: "2-digit" })
