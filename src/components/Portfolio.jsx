@@ -485,6 +485,10 @@ function AddHoldingModal({ lang, portfolioId, onClose, onSaved }) {
     setError(null)
     const shares = parseFloat(form.shares)
     const cost_price = parseFloat(form.cost_price)
+    const fee = form.fee ? parseFloat(form.fee) : 0
+    const tax = form.tax ? parseFloat(form.tax) : 0
+    // Cost basis includes buy-side fee + tax (accounting standard)
+    const costWithFees = shares > 0 ? cost_price + (fee + tax) / shares : cost_price
     const { data: newHolding, error: addErr } = await addHolding(portfolioId, {
       ticker: form.ticker.toUpperCase(),
       name: form.name,
@@ -492,14 +496,15 @@ function AddHoldingModal({ lang, portfolioId, onClose, onSaved }) {
       region: form.region,
       sector: form.sector || null,
       shares,
-      cost_price,
+      cost_price: costWithFees,
       currency: form.currency,
       div_yield: form.div_yield ? parseFloat(form.div_yield) : 0,
       div_frequency: form.div_frequency ? parseInt(form.div_frequency) : 4,
     })
     setSaving(false)
     if (addErr) { setError(addErr.message); return }
-    // Auto-log transaction with actual purchase date
+    // Auto-log transaction with actual purchase date (price = raw per-share,
+    // fee/tax kept separate so the cost basis stays reproducible)
     try {
       const txDate = form.purchased_at
         ? new Date(form.purchased_at).toISOString()
@@ -510,8 +515,8 @@ function AddHoldingModal({ lang, portfolioId, onClose, onSaved }) {
         shares,
         price: cost_price,
         amount: shares * cost_price,
-        fee:    form.fee  ? parseFloat(form.fee)  : 0,
-        tax:    form.tax  ? parseFloat(form.tax)  : 0,
+        fee,
+        tax,
         currency: form.currency,
         transacted_at: txDate,
         note: form.name,
