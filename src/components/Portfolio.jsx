@@ -109,13 +109,32 @@ function LivePortfolioPage({ t, lang, ccy, portfolio, liveHoldings, prices = {},
 
   const rows = useMemo(() => deriveHoldings(liveHoldings, ccy, prices, fxRate), [liveHoldings, ccy, prices, fxRate])
 
-  const totalValue     = rows.reduce((s, r) => s + r.value, 0)
-  const totalPL        = rows.reduce((s, r) => s + r.pl, 0)
+  // Rows in the current region/class view — the summary reflects the active
+  // filter chip (search is applied only to the table below, not the totals).
+  const viewRows = useMemo(() => {
+    if (filter === "all") return rows
+    return rows.filter(r =>
+      filter === "TH"     ? r.region === "TH"  :
+      filter === "US"     ? r.region === "US"  :
+      filter === "ETF"    ? r.cls === "ETF"    :
+      filter === "Bond"   ? r.cls === "Bond"   :
+      filter === "Crypto" ? r.cls === "Crypto" : true)
+  }, [rows, filter])
+
+  const totalValue     = viewRows.reduce((s, r) => s + r.value, 0)
+  const totalPL        = viewRows.reduce((s, r) => s + r.pl, 0)
   const totalCostBasis = totalValue - totalPL
   const totalPlPct     = totalCostBasis > 0 ? (totalPL / totalCostBasis) * 100 : 0
-  const hasLivePrices  = rows.some(r => r.hasLivePrice)
-  const annualDiv      = rows.reduce((s, r) => s + r.value * (r.divYield || 0) / 100, 0)
-  const largestPos     = rows.length > 0 ? [...rows].sort((a, b) => b.value - a.value)[0] : null
+  const hasLivePrices  = viewRows.some(r => r.hasLivePrice)
+  const annualDiv      = viewRows.reduce((s, r) => s + r.value * (r.divYield || 0) / 100, 0)
+  const largestPos     = viewRows.length > 0 ? [...viewRows].sort((a, b) => b.value - a.value)[0] : null
+
+  // Realized P/L for the current view (all sales when unfiltered)
+  const realizedShown = useMemo(() => {
+    if (filter === "all") return realized.total
+    const set = new Set(viewRows.map(r => r.ticker.toUpperCase()))
+    return Object.entries(realized.byTicker || {}).reduce((s, [tk, v]) => set.has(tk) ? s + v : s, 0)
+  }, [filter, viewRows, realized])
 
   // All positions merged — used for filter counts and footer total
   const allGrouped = useMemo(() => groupByTicker(rows), [rows])
@@ -246,7 +265,7 @@ function LivePortfolioPage({ t, lang, ccy, portfolio, liveHoldings, prices = {},
         <>
           {/* ── Summary card — 5-column PortMetric layout matching demo ── */}
           <section className="card" style={{ padding: "24px 28px", marginBottom: 16 }}>
-            <div style={{ display: "grid", gridTemplateColumns: realized.total !== 0 ? "1.5fr 1fr 1fr 1fr 1fr 1fr" : "1.5fr 1fr 1fr 1fr 1fr", gap: 24, alignItems: "center" }}>
+            <div style={{ display: "grid", gridTemplateColumns: realizedShown !== 0 ? "1.5fr 1fr 1fr 1fr 1fr 1fr" : "1.5fr 1fr 1fr 1fr 1fr", gap: 24, alignItems: "center" }}>
               <div>
                 <div className="label-up" style={{ marginBottom: 6 }}>
                   {t.portfolio.total}
@@ -262,10 +281,10 @@ function LivePortfolioPage({ t, lang, ccy, portfolio, liveHoldings, prices = {},
                 value={(totalPL >= 0 ? "+" : "") + LUMEN_FMT.money(totalPL, ccy, { compact: true })}
                 sub={<Delta value={totalPlPct} />}
               />
-              {realized.total !== 0 && (
+              {realizedShown !== 0 && (
                 <PortMetric
                   label={th ? "กำไร/ขาดทุนที่รับรู้" : "Realized P/L"}
-                  value={(realized.total >= 0 ? "+" : "") + LUMEN_FMT.money(realized.total, ccy, { compact: true })}
+                  value={(realizedShown >= 0 ? "+" : "") + LUMEN_FMT.money(realizedShown, ccy, { compact: true })}
                   sub={<span className="muted" style={{ fontSize: 11 }}>{th ? "จากการขาย" : "from sales"}</span>}
                 />
               )}
