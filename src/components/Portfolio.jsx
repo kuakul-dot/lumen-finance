@@ -1203,7 +1203,7 @@ function TransactionsTab({ transactions, holdings = [], loading, lang, ccy, fxRa
   const [showImport, setShowImport] = useState(false)
   const [fType, setFType] = useState("all")       // type filter
   const [fQuery, setFQuery] = useState("")        // ticker/name search
-  const [collapsedYears, setCollapsedYears] = useState(() => new Set())  // collapsed year groups
+  const [selYear, setSelYear] = useState(null)    // selected year tab (null = latest)
 
   const handleDelete = async (tx) => {
     if (!window.confirm(th ? `ลบรายการ ${tx.ticker || ''} ${tx.type} นี้?` : `Delete this ${tx.type} transaction for ${tx.ticker || ''}?`)) return
@@ -1257,17 +1257,11 @@ function TransactionsTab({ transactions, holdings = [], loading, lang, ccy, fxRa
     return true
   })
 
-  // Group filtered (newest-first) into collapsible year sections
-  const byYear = []
-  const yearIndex = new Map()
-  filtered.forEach(tx => {
-    const y = tx.transacted_at ? new Date(tx.transacted_at).getFullYear() : "—"
-    if (!yearIndex.has(y)) { const g = { year: y, items: [] }; yearIndex.set(y, g); byYear.push(g) }
-    yearIndex.get(y).items.push(tx)
-  })
-  const toggleYear = y => setCollapsedYears(s => {
-    const n = new Set(s); n.has(y) ? n.delete(y) : n.add(y); return n
-  })
+  // Year tabs (newest-first) derived from the type/search-filtered set
+  const yearOf = tx => tx.transacted_at ? String(new Date(tx.transacted_at).getFullYear()) : "—"
+  const years = [...new Set(filtered.map(yearOf))].sort((a, b) => b.localeCompare(a))
+  const activeYear = (selYear && years.includes(selYear)) ? selYear : (years[0] || null)
+  const shown = filtered.filter(tx => yearOf(tx) === activeYear)
 
   const renderRow = (tx) => {
     const type = tx.type || 'Buy'
@@ -1360,6 +1354,28 @@ function TransactionsTab({ transactions, holdings = [], loading, lang, ccy, fxRa
           <Icon name="upload" size={13} /> {th ? "นำเข้า PDF" : "Import PDF"}
         </button>
       </div>
+
+      {/* Year selector — horizontally scrollable */}
+      {years.length > 0 && (
+        <div style={{ display: "flex", gap: 6, overflowX: "auto", paddingBottom: 8, marginBottom: 4, scrollbarWidth: "thin" }}>
+          {years.map(y => (
+            <button key={y} onClick={() => setSelYear(y)}
+              style={{
+                flexShrink: 0, padding: "6px 16px", borderRadius: 999, cursor: "pointer", fontSize: 13,
+                fontWeight: y === activeYear ? 700 : 500, fontFamily: "var(--font-mono)",
+                border: "1px solid " + (y === activeYear ? "var(--ink)" : "var(--line)"),
+                background: y === activeYear ? "var(--ink)" : "var(--bg)",
+                color: y === activeYear ? "var(--bg)" : "var(--ink-2)",
+              }}>
+              {y}
+              <span style={{ marginLeft: 6, opacity: 0.6, fontSize: 11 }}>
+                {filtered.filter(tx => yearOf(tx) === y).length}
+              </span>
+            </button>
+          ))}
+        </div>
+      )}
+
       <section className="card" style={{ padding: 0, overflow: "hidden" }}>
         <table className="table">
           <thead>
@@ -1380,23 +1396,7 @@ function TransactionsTab({ transactions, holdings = [], loading, lang, ccy, fxRa
                 {th ? "ไม่พบรายการที่ตรงกับตัวกรอง" : "No transactions match the filter"}
               </td></tr>
             )}
-            {byYear.map(group => {
-              const collapsed = collapsedYears.has(group.year)
-              return (
-                <Fragment key={group.year}>
-                  <tr onClick={() => toggleYear(group.year)} style={{ cursor: "pointer", background: "var(--bg-2)" }}>
-                    <td colSpan="8" style={{ padding: "8px 14px", fontSize: 12, fontWeight: 600, color: "var(--ink-2)" }}>
-                      <span style={{ display: "inline-flex", alignItems: "center", gap: 8 }}>
-                        <span style={{ display: "inline-block", transform: collapsed ? "rotate(-90deg)" : "none", transition: "transform 0.15s", color: "var(--ink-3)" }}>▾</span>
-                        {group.year}
-                        <span className="muted" style={{ fontWeight: 400 }}>· {group.items.length} {th ? "รายการ" : "items"}</span>
-                      </span>
-                    </td>
-                  </tr>
-                  {!collapsed && group.items.map(renderRow)}
-                </Fragment>
-              )
-            })}
+            {shown.map(renderRow)}
           </tbody>
         </table>
       </section>
