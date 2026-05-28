@@ -1618,9 +1618,13 @@ function AnalyticsMetrics({ t, lang, ccy, rows = [], totalValue = 0, totalPL = 0
     drawdown: "min((Vₜ − peakₜ) ÷ peakₜ)",
   }
 
-  const metricsList = isLive && liveMetrics ? liveMetrics : demoMetrics
-  const bodyMap = isLive ? null : demoBody
-  const formulaMap = isLive ? null : demoFormula
+  // Which list is actually on screen — live metrics need holdings; otherwise
+  // fall back to the demo set.  Body/formula lookups must follow THIS, not just
+  // login state, or demo cards (shown while live but empty) lose their text.
+  const showingLive = isLive && liveMetrics
+  const metricsList = showingLive ? liveMetrics : demoMetrics
+  const bodyMap = showingLive ? null : demoBody
+  const formulaMap = showingLive ? null : demoFormula
 
   return (
     <div className="fade-in">
@@ -1650,7 +1654,7 @@ function AnalyticsMetrics({ t, lang, ccy, rows = [], totalValue = 0, totalPL = 0
 
       <div className="grid grid-2" style={{ gap: 16 }}>
         {metricsList.map(m => {
-          const formula = isLive ? m.formula : formulaMap[m.key]
+          const formula = showingLive ? m.formula : formulaMap[m.key]
           const open = openKey === m.key
           return (
           <div key={m.key} className="card" style={{ padding: 28 }}>
@@ -1675,7 +1679,7 @@ function AnalyticsMetrics({ t, lang, ccy, rows = [], totalValue = 0, totalPL = 0
               )}
             </button>
             <p className="muted" style={{ fontSize: 12, marginTop: 6, marginBottom: open ? 12 : 22 }}>
-              {isLive ? m.body : bodyMap[m.key]}
+              {showingLive ? m.body : bodyMap[m.key]}
             </p>
             {open && formula && (
               <div style={{
