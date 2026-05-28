@@ -401,35 +401,23 @@ export const LUMEN_FMT = {
     // opts.fxRate overrides live rate; fallback to _liveRate (updated from Yahoo Finance)
     const rate = opts.fxRate ?? _liveRate;
     const v = inUSD ? value / rate : value;
-    const decimals = opts.decimals ?? (Math.abs(v) >= 100 ? 0 : 2);
+    // Always show full numbers with 2 decimals — no K/M abbreviation.
+    const decimals = opts.decimals ?? 2;
     const symbol = inUSD ? "$" : "฿";
     const sign = v < 0 ? "-" : "";
     const abs = Math.abs(v);
-    let str;
-    if (opts.compact && abs >= 1_000_000) {
-      str = (abs / 1_000_000).toFixed(abs >= 10_000_000 ? 1 : 2) + "M";
-    } else if (opts.compact && abs >= 1_000) {
-      str = (abs / 1_000).toFixed(abs >= 10_000 ? 0 : 1) + "K";
-    } else {
-      str = abs.toLocaleString(undefined, { minimumFractionDigits: decimals, maximumFractionDigits: decimals });
-    }
+    const str = abs.toLocaleString(undefined, { minimumFractionDigits: decimals, maximumFractionDigits: decimals });
     return sign + symbol + str;
   },
   // Format a price that is already in its native currency (no FX conversion).
   // Use for per-share price/cost columns where the value should display as-is.
   moneyNative(value, ccy, opts = {}) {
     const symbol = ccy === 'USD' ? '$' : '฿'
-    const decimals = opts.decimals ?? (Math.abs(value) >= 100 ? 0 : 2)
+    // Always show full numbers with 2 decimals — no K/M abbreviation.
+    const decimals = opts.decimals ?? 2
     const sign = value < 0 ? '-' : ''
     const abs = Math.abs(value)
-    let str
-    if (opts.compact && abs >= 1_000_000) {
-      str = (abs / 1_000_000).toFixed(abs >= 10_000_000 ? 1 : 2) + 'M'
-    } else if (opts.compact && abs >= 1_000) {
-      str = (abs / 1_000).toFixed(abs >= 10_000 ? 0 : 1) + 'K'
-    } else {
-      str = abs.toLocaleString(undefined, { minimumFractionDigits: decimals, maximumFractionDigits: decimals })
-    }
+    const str = abs.toLocaleString(undefined, { minimumFractionDigits: decimals, maximumFractionDigits: decimals })
     return sign + symbol + str
   },
   pct(value, decimals = 1, withSign = false) {
