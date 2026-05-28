@@ -124,6 +124,9 @@ drop policy if exists "Users can manage own snapshots" on portfolio_snapshots;
 create policy "Users can manage own snapshots"
   on portfolio_snapshots for all
   using (portfolio_id in (select id from portfolios where user_id = auth.uid()));
+-- Table-level privileges (RLS still restricts rows to the owner)
+grant select, insert, update, delete on table portfolio_snapshots to authenticated;
+grant select, insert, update, delete on table portfolio_snapshots to service_role;
 
 -- ── Indexes ──────────────────────────────────────────────────────────────────
 create index if not exists holdings_portfolio_idx on holdings(portfolio_id);
