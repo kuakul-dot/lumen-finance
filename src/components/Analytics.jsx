@@ -1354,7 +1354,7 @@ function AnalyticsGrowth({ t, lang, ccy, rows = [], fxRate = 36, totalValue, tot
     if (!rows.length) return []
     const map = {}
     rows.forEach(r => {
-      if (!map[r.ticker]) map[r.ticker] = { ticker: r.ticker, name: r.name, value: 0, pl: 0 }
+      if (!map[r.ticker]) map[r.ticker] = { ticker: r.ticker, name: r.name, region: r.region, cls: r.cls, logo_url: r.logo_url, value: 0, pl: 0 }
       map[r.ticker].value += r.value
       map[r.ticker].pl   += r.pl
     })
