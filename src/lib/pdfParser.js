@@ -253,83 +253,162 @@ function pickTicker(texts) {
 
 // ─── Main export ──────────────────────────────────────────────────────────────
 
-export function detectTransactions(rows) {
+export function detectTransactions(rows, debug = false) {
   const header = findHeader(rows)
 
-  // ── DEBUG — open DevTools → Console to see this ───────────────────────────
-  console.log('[pdfParser] header:', header
-    ? `ends row ${header.headerRow} | colMap ` + JSON.stringify(Object.fromEntries(
-        Object.entries(header.colMap).map(([k, v]) => [k, Math.round(v)])))
-    : '⚠️ none')
-  console.log(`[pdfParser] FULL DUMP — ${rows.length} rows:`)
-  rows.slice(0, 70).forEach((r, i) => {
-    const hasDate = DATE_RE.test(r.map(c => c.text).join(' '))
-    console.log(`  [${i}]${hasDate ? '📅' : '  '}`, r.map(c => `"${c.text}"@${Math.round(c.x)}`).join(' | '))
-  })
-  // ─────────────────────────────────────────────────────────────────────────
-
-  // ── Mode A: header-guided, X-position based ───────────────────────────────
-  if (header) {
-    const { headerRow, colMap } = header
-    const results = []
-
-    // g(field, row): return text of the data cell whose X is closest to the
-    // header field's X.  Falls back to '' if nothing is within X_TOL.
-    const g = (f, row) => {
-      if (colMap[f] === undefined) return ''
-      const tx = colMap[f]
-      let best = null, minD = Infinity
-      for (const { x, text } of row) {
-        const d = Math.abs(x - tx)
-        if (d < minD) { minD = d; best = text }
-      }
-      return minD <= X_TOL ? (best ?? '') : ''
-    }
-
-    for (let ri = headerRow + 1; ri < rows.length; ri++) {
-      const row  = rows[ri]
-      const texts = row.map(c => c.text)
-      const line  = texts.join(' ')
-      if (!DATE_RE.test(line)) continue
-
-      const rawDate = g('transacted_at', row) || texts.find(t => DATE_RE.test(t)) || ''
-      const date    = parseDate(rawDate)
-      if (!date) continue
-
-      // Ticker: strip [EXCHANGE] suffix e.g. "VOO [ARCX]" → "VOO"
-      const rawTicker = g('ticker', row)
-      const ticker    = (rawTicker.replace(/\[.*?\]/g, '').trim().toUpperCase()
-                         || pickTicker(texts)
-                         || '').replace(/\.BK$/i, '') || null
-
-      // Currency from CCY column; fall back to line scan
-      const rawCcy   = g('currency', row).trim().toUpperCase()
-      const currency = rawCcy === 'USD' ? 'USD'
-                     : rawCcy === 'THB' ? 'THB'
-                     : /\bUSD\b/.test(line) ? 'USD' : 'THB'
-
-      // Prefer gross amount; fall back to total
-      const amtRaw = g('amount', row) || g('total', row)
-      const feeRaw = g('fee',    row)
-      const taxRaw = g('tax',    row)
-
-      results.push({
-        transacted_at: date,
-        type:   mapType(g('type', row)),
-        ticker,
-        shares: snum(g('shares', row)),
-        price:  snum(g('price',  row)),
-        amount: snum(amtRaw),
-        fee:    snum(feeRaw) || 0,
-        tax:    snum(taxRaw) || 0,
-        currency,
-        note:   null,
-      })
-    }
-    return results
+  if (debug) {
+    console.log('[pdfParser] header:', header
+      ? `ends row ${header.headerRow} | colMap ` + JSON.stringify(Object.fromEntries(
+          Object.entries(header.colMap).map(([k, v]) => [k, Math.round(v)])))
+      : '⚠️ none')
+    rows.slice(0, 70).forEach((r, i) => {
+      const d = DATE_RE.test(r.map(c => c.text).join(' '))
+      console.log(`  [${i}]${d ? '📅' : '  '}`, r.map(c => `"${c.text}"@${Math.round(c.x)}`).join(' | '))
+    })
   }
 
-  // ── Mode B: heuristic (no header found) ───────────────────────────────────
+  // Try detectors in order of precision; use the first that yields results.
+  let results = header ? parseWithHeader(rows, header) : []
+  if (results.length === 0) results = parseAnchored(rows)   // Dime! multi-row layout
+  if (results.length === 0) results = parseHeuristic(rows)  // last-ditch
+
+  if (debug) console.log('[pdfParser] detected', results.length, 'transactions:', results)
+  return results
+}
+
+// ── Mode A: header-guided, X-position column matching ─────────────────────────
+// Best for brokers whose data sits in one clean row per transaction.
+function parseWithHeader(rows, { headerRow, colMap }) {
+  const results = []
+
+  // g(field, row): text of the data cell whose X is closest to the header
+  // field's X (within X_TOL); '' if nothing close enough.
+  const g = (f, row) => {
+    if (colMap[f] === undefined) return ''
+    const tx = colMap[f]
+    let best = null, minD = Infinity
+    for (const { x, text } of row) {
+      const d = Math.abs(x - tx)
+      if (d < minD) { minD = d; best = text }
+    }
+    return minD <= X_TOL ? (best ?? '') : ''
+  }
+
+  for (let ri = headerRow + 1; ri < rows.length; ri++) {
+    const row   = rows[ri]
+    const texts = row.map(c => c.text)
+    const line  = texts.join(' ')
+    if (!DATE_RE.test(line)) continue
+
+    const rawDate = g('transacted_at', row) || texts.find(t => DATE_RE.test(t)) || ''
+    const date    = parseDate(rawDate)
+    if (!date) continue
+
+    const rawTicker = g('ticker', row)
+    const ticker    = (rawTicker.replace(/\[.*?\]/g, '').trim().toUpperCase()
+                       || pickTicker(texts)
+                       || '').replace(/\.BK$/i, '') || null
+
+    const rawCcy   = g('currency', row).trim().toUpperCase()
+    const currency = rawCcy === 'USD' ? 'USD'
+                   : rawCcy === 'THB' ? 'THB'
+                   : /\bUSD\b/.test(line) ? 'USD' : 'THB'
+
+    const amtRaw = g('amount', row) || g('total', row)
+
+    results.push({
+      transacted_at: date,
+      type:   mapType(g('type', row)),
+      ticker,
+      shares: snum(g('shares', row)),
+      price:  snum(g('price',  row)),
+      amount: snum(amtRaw),
+      fee:    snum(g('fee', row)) || 0,
+      tax:    snum(g('tax', row)) || 0,
+      currency,
+      note:   null,
+    })
+  }
+  return results
+}
+
+// ── Mode A2: anchor-based (Dime! offshore confirmation note) ──────────────────
+// Each transaction is spread over several physical rows.  The "main" row holds
+//   OrderID | SettlementDate | BUY/SELL | Units | UnitPrice | CCY
+// while the ticker and the USD/THB money columns sit on adjacent rows.
+const ISNUM_RE = /^-?[\d,]+\.?\d*$/
+const toNum    = t => parseFloat(String(t).replace(/,/g, ''))
+
+function parseAnchored(rows) {
+  const results = []
+
+  for (let i = 0; i < rows.length; i++) {
+    const cells = rows[i]
+    const texts = cells.map(c => c.text)
+    const line  = texts.join(' ')
+
+    // Anchor signature: a date + a buy/sell word + a currency code, all in one row
+    if (!DATE_RE.test(line)) continue
+    const typeTok = line.match(/\bBUY\b|\bSELL\b|ซื้อ|ขาย/i)
+    const ccyTok  = line.match(/\b(USD|THB)\b/i)
+    if (!typeTok || !ccyTok) continue
+
+    const dateCell = cells.find(c => DATE_RE.test(c.text))
+    const date     = parseDate(dateCell?.text)
+    if (!date) continue
+
+    // Numeric cells to the right of the date = Units, Unit Price (in order)
+    const nums = cells
+      .filter(c => c.x > dateCell.x && ISNUM_RE.test(c.text.trim()))
+      .sort((a, b) => a.x - b.x)
+      .map(c => toNum(c.text))
+    const shares = nums[0] ?? null
+    const price  = nums[1] ?? null
+    const currency = /USD/i.test(ccyTok[0]) ? 'USD' : 'THB'
+
+    // Ticker: scan this row, then outward (prefer rows above), skipping brackets
+    let ticker = null
+    for (let d = 0; d <= 3 && !ticker; d++) {
+      const probes = d === 0 ? [i] : [i - d, i + d]
+      for (const j of probes) {
+        if (j < 0 || j >= rows.length) continue
+        const t = pickTicker(rows[j].map(c => c.text))
+        if (t) { ticker = t; break }
+      }
+    }
+
+    // Gross amount = Units × Unit Price (in the transaction currency)
+    const amount = (shares != null && price != null)
+      ? +(shares * price).toFixed(2)
+      : (price ?? null)
+
+    // Fee / tax: nearby money row whose first figure ≈ gross amount (same ccy)
+    let fee = 0, tax = 0
+    if (amount) {
+      search:
+      for (let d = 1; d <= 3; d++) {
+        for (const j of [i - d, i + d]) {
+          if (j < 0 || j >= rows.length) continue
+          const ns = rows[j].map(c => c.text).filter(t => ISNUM_RE.test(t.trim())).map(toNum)
+          if (ns.length >= 3 && Math.abs(ns[0] - amount) <= amount * 0.03) {
+            fee = ns[1] || 0; tax = ns[2] || 0
+            break search
+          }
+        }
+      }
+    }
+
+    results.push({
+      transacted_at: date,
+      type: mapType(typeTok[0]),
+      ticker, shares, price, amount, fee, tax, currency, note: null,
+    })
+  }
+  return results
+}
+
+// ── Mode B: pure heuristic (no header, no anchor) ─────────────────────────────
+function parseHeuristic(rows) {
   const results = []
 
   for (const row of rows) {
@@ -379,16 +458,8 @@ export function detectTransactions(rows) {
     results.push({
       transacted_at: date,
       type:   typeMatch ? mapType(typeMatch[0]) : 'Buy',
-      ticker,
-      shares,
-      price,
-      amount,
-      fee,
-      tax,
-      currency,
-      note:   null,
+      ticker, shares, price, amount, fee, tax, currency, note: null,
     })
   }
-
   return results
 }
