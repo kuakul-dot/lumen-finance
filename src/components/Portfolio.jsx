@@ -693,7 +693,7 @@ function AddHoldingModal({ lang, portfolioId, onClose, onSaved }) {
             lang={lang}
           />
 
-          <div style={{ display: "flex", gap: 10, marginTop: 8 }}>
+          <div style={{ display: "flex", gap: 10, marginTop: 8, position: "sticky", bottom: 0, background: "var(--bg)", paddingTop: 14, paddingBottom: 2 }}>
             <button type="button" className="btn btn-outline" style={{ flex: 1 }} onClick={onClose}>
               {th ? "ยกเลิก" : "Cancel"}
             </button>
@@ -848,7 +848,7 @@ function EditHoldingModal({ lang, holding, onClose, onSaved }) {
             </Field>
           </div>
 
-          <div style={{ display: "flex", gap: 10, marginTop: 8 }}>
+          <div style={{ display: "flex", gap: 10, marginTop: 8, position: "sticky", bottom: 0, background: "var(--bg)", paddingTop: 14, paddingBottom: 2 }}>
             <button type="button" className="btn btn-outline" style={{ flex: 1 }} onClick={onClose}>
               {th ? "ยกเลิก" : "Cancel"}
             </button>
@@ -970,7 +970,7 @@ function SellModal({ lang, ccy, holding, portfolioId, onClose, onSaved }) {
             </span>
           </div>
 
-          <div style={{ display: "flex", gap: 10, marginTop: 8 }}>
+          <div style={{ display: "flex", gap: 10, marginTop: 8, position: "sticky", bottom: 0, background: "var(--bg)", paddingTop: 14, paddingBottom: 2 }}>
             <button type="button" className="btn btn-outline" style={{ flex: 1 }} onClick={onClose}>{th ? "ยกเลิก" : "Cancel"}</button>
             <button type="submit" className="btn" style={{ flex: 2 }} disabled={saving}>
               {saving ? (th ? "กำลังบันทึก…" : "Saving…") : (th ? "ยืนยันการขาย" : "Confirm sale")}
@@ -1537,7 +1537,7 @@ function EditTransactionModal({ tx, holding, lang, onClose, onSaved }) {
                    placeholder={th ? "ชื่อหลักทรัพย์ หรือหมายเหตุ" : "Asset name or note"} style={inputStyle} />
           </Field>
 
-          <div style={{ display: "flex", gap: 10, marginTop: 8 }}>
+          <div style={{ display: "flex", gap: 10, marginTop: 8, position: "sticky", bottom: 0, background: "var(--bg)", paddingTop: 14, paddingBottom: 2 }}>
             <button type="button" className="btn btn-outline" style={{ flex: 1 }} onClick={onClose}>
               {th ? "ยกเลิก" : "Cancel"}
             </button>
@@ -1976,7 +1976,7 @@ function ImportPDFModal({ lang, portfolioId, onClose, onImported }) {
                     : "* Shares, price, amount are auto-extracted and may not be perfect — you can edit after import."}
                 </div>
 
-                <div style={{ display: "flex", gap: 10, marginTop: 16 }}>
+                <div style={{ display: "flex", gap: 10, marginTop: 16, position: "sticky", bottom: 0, background: "var(--bg)", paddingTop: 14, paddingBottom: 2 }}>
                   <button type="button" className="btn btn-outline" style={{ flex: 1 }} onClick={() => setStep(1)} disabled={importing}>
                     {th ? "← ย้อนกลับ" : "← Back"}
                   </button>
