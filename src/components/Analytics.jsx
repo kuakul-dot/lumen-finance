@@ -170,6 +170,7 @@ function AnalyticsCommon({ t, lang, ccy, rows, totalValue, totalPL, totalPlPct, 
   }, [dataState, daysSinceFirst])
   const [chartPeriod, setChartPeriod] = useState(defaultPeriod)
   useEffect(() => { setChartPeriod(defaultPeriod) }, [defaultPeriod])
+  const [chartMode, setChartMode] = useState("pct")   // "pct" = growth %, "value" = THB value
 
   // Which buttons are usable in live mode? (need enough history)
   const periodDaysMap = useMemo(() => {
@@ -398,29 +399,33 @@ function AnalyticsCommon({ t, lang, ccy, rows, totalValue, totalPL, totalPlPct, 
     ]
   }, [dataState, totalCost, totalValue, th, chartPeriod, periodDaysMap, daysSinceFirst, spxData, liveHoldings, holdingHistories, purchaseSecByTicker, fxRate])
 
-  // ── Accurate growth comparison (rebased to 100) from daily snapshots ───────
-  // Portfolio uses the contribution-neutral value/cost index; S&P uses real
-  // closes.  Both rebased to 100 at the window start → a fair, same-scale
-  // comparison free of the deposit distortion that warps a raw-value chart.
-  const growthSeries = useMemo(() => {
-    if (dataState !== "live" || snaps.length < 2) return null
-
-    // Window cutoff (YYYY-MM-DD)
+  // Snapshots sliced to the selected period (shared by both chart modes)
+  const windowSnaps = useMemo(() => {
+    if (snaps.length < 2) return []
     let from = "0000-00-00"
     if (chartPeriod === "ytd") from = new Date(new Date().getFullYear(), 0, 1).toISOString().split("T")[0]
     else if (chartPeriod !== "all") {
       const days = periodDaysMap[chartPeriod] || 365
       from = new Date(Date.now() - days * 86400000).toISOString().split("T")[0]
     }
-    let win = snaps.filter(s => s.date >= from)
-    if (win.length < 2) win = snaps
+    const w = snaps.filter(s => s.date >= from)
+    return w.length >= 2 ? w : snaps
+  }, [snaps, chartPeriod, periodDaysMap])
 
+  const labelFor = useMemo(() => {
+    const locale = th ? "th-TH" : "en-US"
+    return d => d.toLocaleString(locale, { month: "short" }) + " '" + String(d.getFullYear()).slice(2)
+  }, [th])
+
+  // ── Mode A: growth % comparison (rebased to 100) ───────────────────────────
+  // Portfolio uses the contribution-neutral value/cost index; S&P uses real
+  // closes.  Both rebased to 100 at the window start → fair, same-scale.
+  const growthSeries = useMemo(() => {
+    if (dataState !== "live" || windowSnaps.length < 2) return null
+    const win = windowSnaps
     const indexOf = s => Number(s.total_cost) > 0 ? Number(s.total_value) / Number(s.total_cost) : null
     const base = indexOf(win.find(s => indexOf(s) != null))
     if (base == null || base === 0) return null
-
-    const locale = th ? "th-TH" : "en-US"
-    const mkLabel = d => d.toLocaleString(locale, { month: "short" }) + " '" + String(d.getFullYear()).slice(2)
 
     const spxSorted = [...(spxData?.series || [])].sort((a, b) => a.t - b.t)
     const spxOnOrBefore = dateStr => {
@@ -436,7 +441,7 @@ function AnalyticsCommon({ t, lang, ccy, rows, totalValue, totalPL, totalPlPct, 
     win.forEach((s, i) => {
       if (i % stride !== 0 && i !== win.length - 1) return
       const gi = indexOf(s)
-      const label = mkLabel(new Date(s.date))
+      const label = labelFor(new Date(s.date))
       port.push({ x: port.length, y: 100 * (gi != null ? gi : base) / base, label })
       if (spxBase) {
         const c = spxOnOrBefore(s.date)
@@ -446,7 +451,27 @@ function AnalyticsCommon({ t, lang, ccy, rows, totalValue, totalPL, totalPlPct, 
     const out = [{ name: th ? "พอร์ตของคุณ" : "Your portfolio", color: "var(--ink)", fill: true, data: port }]
     if (sp.length >= 2) out.push({ name: "S&P 500", color: "var(--accent)", data: sp })
     return out
-  }, [dataState, snaps, chartPeriod, periodDaysMap, spxData, th])
+  }, [dataState, windowSnaps, spxData, th, labelFor])
+
+  // ── Mode B: actual value (THB) — market value vs cost basis over time ──────
+  const valueSeries = useMemo(() => {
+    if (dataState !== "live" || windowSnaps.length < 2) return null
+    const win = windowSnaps
+    const stride = Math.max(1, Math.floor(win.length / 80))
+    const val = [], cost = []
+    win.forEach((s, i) => {
+      if (i % stride !== 0 && i !== win.length - 1) return
+      const label = labelFor(new Date(s.date))
+      val.push({ x: val.length, y: Number(s.total_value) || 0, label })
+      cost.push({ x: cost.length, y: Number(s.total_cost) || 0, label })
+    })
+    return [
+      { name: th ? "มูลค่าตลาด" : "Market value", color: "var(--ink)", fill: true, data: val },
+      { name: th ? "ต้นทุน" : "Cost basis", color: "var(--accent)", data: cost },
+    ]
+  }, [dataState, windowSnaps, th, labelFor])
+
+  const snapSeries = chartMode === "value" ? valueSeries : growthSeries
 
   // Merge same-ticker lots before sorting (so QH with 2 lots appears once)
   const livePerformers = useMemo(() => {
@@ -500,24 +525,22 @@ function AnalyticsCommon({ t, lang, ccy, rows, totalValue, totalPL, totalPlPct, 
         <div className="card" style={{ marginBottom: 16 }}>
           <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-end", marginBottom: 16 }}>
             <div>
-              <h3 className="section-title">{dataState === "live" && growthSeries
-                ? (th ? "การเติบโต: พอร์ต vs. S&P 500 (ฐาน 100%)" : "Growth: Portfolio vs. S&P 500 (rebased)")
-                : (th ? "มูลค่าพอร์ต vs. S&P 500" : "Portfolio value vs. S&P 500")}</h3>
+              <h3 className="section-title">{
+                dataState === "live" && snapSeries
+                  ? (chartMode === "value"
+                      ? (th ? "มูลค่าพอร์ต & ต้นทุน (฿)" : "Portfolio value & cost basis")
+                      : (th ? "การเติบโต: พอร์ต vs. S&P 500 (ฐาน 100%)" : "Growth: Portfolio vs. S&P 500 (rebased)"))
+                  : (th ? "มูลค่าพอร์ต vs. S&P 500" : "Portfolio value vs. S&P 500")}</h3>
               <div className="muted" style={{ fontSize: 12, marginTop: 4 }}>
-                <span className="dot" style={{ background: "var(--ink)" }} /> {th ? "พอร์ตของคุณ" : "Your portfolio"}
-                {dataState === "live" && (
+                <span className="dot" style={{ background: "var(--ink)" }} /> {dataState === "live" && snapSeries && chartMode === "value" ? (th ? "มูลค่าตลาด" : "Market value") : (th ? "พอร์ตของคุณ" : "Your portfolio")}
+                {dataState === "live" && chartMode !== "value" && (
                   <span style={{ fontSize: 11, marginLeft: 4, color: hasRealHistory ? "var(--green)" : "var(--ink-4)" }}>
                     {hasRealHistory
                       ? (th ? "(ราคาจริงจาก Yahoo Finance)" : "(real prices · Yahoo Finance)")
                       : (th ? "(กำลังโหลดข้อมูล…)" : "(loading real prices…)")}
                   </span>
                 )}
-                <span style={{ marginLeft: 12 }}><span className="dot" style={{ background: "var(--accent)" }} /> S&P 500</span>
-                {dataState === "live" && spxData?.series?.length > 0 && (
-                  <span style={{ fontSize: 11, color: "var(--ink-4)", marginLeft: 4 }}>
-                    {th ? "(ราคาจริงจาก Yahoo Finance)" : "(real prices · Yahoo Finance)"}
-                  </span>
-                )}
+                <span style={{ marginLeft: 12 }}><span className="dot" style={{ background: "var(--accent)" }} /> {dataState === "live" && snapSeries && chartMode === "value" ? (th ? "ต้นทุน" : "Cost basis") : "S&P 500"}</span>
                 {dataState === "live" && earliestHoldingDate && (
                   <div style={{ fontSize: 11, color: "var(--ink-4)", marginTop: 2 }}>
                     {th
@@ -527,27 +550,35 @@ function AnalyticsCommon({ t, lang, ccy, rows, totalValue, totalPL, totalPlPct, 
                 )}
               </div>
             </div>
-            <div className="segmented">
-              {["1m","3m","6m","ytd","1y","5y","all"].map(k => {
-                const enabled = isPeriodEnabled(k)
-                const active = dataState === "live" ? chartPeriod === k : k === "all"
-                return (
-                  <button key={k}
-                          className={active ? "on" : ""}
-                          disabled={dataState === "live" && !enabled}
-                          title={dataState === "live" && !enabled ? (th ? "ข้อมูลย้อนหลังไม่พอ" : "Not enough history yet") : undefined}
-                          style={{ opacity: dataState === "live" && !enabled ? 0.35 : 1, cursor: dataState === "live" && !enabled ? "not-allowed" : "pointer" }}
-                          onClick={() => dataState === "live" && enabled && setChartPeriod(k)}>
-                    {t.analytics.timeRange[k]}
-                  </button>
-                )
-              })}
+            <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap", justifyContent: "flex-end" }}>
+              {dataState === "live" && (growthSeries || valueSeries) && (
+                <div className="segmented">
+                  <button className={chartMode === "pct" ? "on" : ""} onClick={() => setChartMode("pct")} title={th ? "การเติบโต %" : "Growth %"}>%</button>
+                  <button className={chartMode === "value" ? "on" : ""} onClick={() => setChartMode("value")} title={th ? "มูลค่า ฿" : "Value"}>฿</button>
+                </div>
+              )}
+              <div className="segmented">
+                {["1m","3m","6m","ytd","1y","5y","all"].map(k => {
+                  const enabled = isPeriodEnabled(k)
+                  const active = dataState === "live" ? chartPeriod === k : k === "all"
+                  return (
+                    <button key={k}
+                            className={active ? "on" : ""}
+                            disabled={dataState === "live" && !enabled}
+                            title={dataState === "live" && !enabled ? (th ? "ข้อมูลย้อนหลังไม่พอ" : "Not enough history yet") : undefined}
+                            style={{ opacity: dataState === "live" && !enabled ? 0.35 : 1, cursor: dataState === "live" && !enabled ? "not-allowed" : "pointer" }}
+                            onClick={() => dataState === "live" && enabled && setChartPeriod(k)}>
+                      {t.analytics.timeRange[k]}
+                    </button>
+                  )
+                })}
+              </div>
             </div>
           </div>
           <LineChart
-            series={dataState === "live" ? (growthSeries || liveSeries) : series}
+            series={dataState === "live" ? (snapSeries || liveSeries) : series}
             height={340}
-            fmt={dataState === "live" && growthSeries
+            fmt={dataState === "live" && snapSeries && chartMode === "pct"
               ? (v => (v >= 100 ? "+" : "") + (v - 100).toFixed(0) + "%")
               : (v => FMT.money(v, ccy, { compact: true }))} />
         </div>
