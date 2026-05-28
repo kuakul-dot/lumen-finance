@@ -115,7 +115,7 @@ export function AnalyticsPage({ t, lang, ccy, dataState, liveHoldings = [], pric
         ))}
       </div>
 
-      {tab === "common"          && <AnalyticsCommon t={t} lang={lang} ccy={ccy} rows={rows} totalValue={totalValue} totalPL={totalPL} totalPlPct={totalPlPct} totalCost={totalCost} hasLivePrices={hasLivePrices} demoData={demoData} dataState={dataState} earliestHoldingDate={earliestHoldingDate} liveHoldings={liveHoldings} transactions={transactions} fxRate={fxRate} />}
+      {tab === "common"          && <AnalyticsCommon t={t} lang={lang} ccy={ccy} rows={rows} totalValue={totalValue} totalPL={totalPL} totalPlPct={totalPlPct} totalCost={totalCost} hasLivePrices={hasLivePrices} demoData={demoData} dataState={dataState} earliestHoldingDate={earliestHoldingDate} liveHoldings={liveHoldings} transactions={transactions} fxRate={fxRate} portfolio={portfolio} />}
       {tab === "diversification" && <AnalyticsDiv t={t} lang={lang} ccy={ccy} rows={rows} totalValue={totalValue} demoData={demoData} dataState={dataState} />}
       {tab === "dividends"       && <AnalyticsDiv2 t={t} lang={lang} ccy={ccy} rows={rows} totalValue={totalValue} dataState={dataState} liveHoldings={liveHoldings} fxRate={fxRate} transactions={transactions} portfolio={portfolio} onTransactionAdded={handleTransactionAdded} onTransactionUpdated={handleTransactionUpdated} onTransactionDeleted={handleTransactionDeleted} />}
       {tab === "growth"          && <AnalyticsGrowth t={t} lang={lang} ccy={ccy} rows={rows} fxRate={fxRate} totalValue={totalValue} totalCost={totalCost} totalPL={totalPL} totalPlPct={totalPlPct} dataState={dataState} earliestHoldingDate={earliestHoldingDate} />}
@@ -150,7 +150,7 @@ function groupRowsByTicker(rows) {
 }
 
 /* ─── Common tab ─────────────────────────────────────────────────────────────── */
-function AnalyticsCommon({ t, lang, ccy, rows, totalValue, totalPL, totalPlPct, totalCost, hasLivePrices, demoData, dataState, earliestHoldingDate, liveHoldings = [], transactions = [], fxRate = 36 }) {
+function AnalyticsCommon({ t, lang, ccy, rows, totalValue, totalPL, totalPlPct, totalCost, hasLivePrices, demoData, dataState, earliestHoldingDate, liveHoldings = [], transactions = [], fxRate = 36, portfolio }) {
   const FMT = LUMEN_FMT
   const th = lang === "th"
 
@@ -192,6 +192,16 @@ function AnalyticsCommon({ t, lang, ccy, rows, totalValue, totalPL, totalPlPct, 
     fetchHistory("^GSPC", range).then(d => { if (!cancelled) setSpxData(d) }).catch(() => {})
     return () => { cancelled = true }
   }, [dataState, daysSinceFirst])
+
+  // Daily portfolio value/cost snapshots — power the accurate, contribution-
+  // neutral growth comparison against S&P 500.
+  const [snaps, setSnaps] = useState([])
+  useEffect(() => {
+    if (dataState !== "live" || !portfolio?.id) { setSnaps([]); return }
+    let cancelled = false
+    getSnapshots(portfolio.id).then(d => { if (!cancelled) setSnaps(d) }).catch(() => {})
+    return () => { cancelled = true }
+  }, [dataState, portfolio?.id])
 
   // ── Real holding price histories (same logic as Dashboard) ─────────────────
   const [holdingHistories, setHoldingHistories] = useState({})
@@ -388,6 +398,56 @@ function AnalyticsCommon({ t, lang, ccy, rows, totalValue, totalPL, totalPlPct, 
     ]
   }, [dataState, totalCost, totalValue, th, chartPeriod, periodDaysMap, daysSinceFirst, spxData, liveHoldings, holdingHistories, purchaseSecByTicker, fxRate])
 
+  // ── Accurate growth comparison (rebased to 100) from daily snapshots ───────
+  // Portfolio uses the contribution-neutral value/cost index; S&P uses real
+  // closes.  Both rebased to 100 at the window start → a fair, same-scale
+  // comparison free of the deposit distortion that warps a raw-value chart.
+  const growthSeries = useMemo(() => {
+    if (dataState !== "live" || snaps.length < 2) return null
+
+    // Window cutoff (YYYY-MM-DD)
+    let from = "0000-00-00"
+    if (chartPeriod === "ytd") from = new Date(new Date().getFullYear(), 0, 1).toISOString().split("T")[0]
+    else if (chartPeriod !== "all") {
+      const days = periodDaysMap[chartPeriod] || 365
+      from = new Date(Date.now() - days * 86400000).toISOString().split("T")[0]
+    }
+    let win = snaps.filter(s => s.date >= from)
+    if (win.length < 2) win = snaps
+
+    const indexOf = s => Number(s.total_cost) > 0 ? Number(s.total_value) / Number(s.total_cost) : null
+    const base = indexOf(win.find(s => indexOf(s) != null))
+    if (base == null || base === 0) return null
+
+    const locale = th ? "th-TH" : "en-US"
+    const mkLabel = d => d.toLocaleString(locale, { month: "short" }) + " '" + String(d.getFullYear()).slice(2)
+
+    const spxSorted = [...(spxData?.series || [])].sort((a, b) => a.t - b.t)
+    const spxOnOrBefore = dateStr => {
+      const sec = new Date(dateStr + "T23:59:59Z").getTime() / 1000
+      let best = null
+      for (const p of spxSorted) { if (p.t <= sec) best = p.c; else break }
+      return best
+    }
+    const spxBase = spxSorted.length ? spxOnOrBefore(win[0].date) : null
+
+    const stride = Math.max(1, Math.floor(win.length / 80))
+    const port = [], sp = []
+    win.forEach((s, i) => {
+      if (i % stride !== 0 && i !== win.length - 1) return
+      const gi = indexOf(s)
+      const label = mkLabel(new Date(s.date))
+      port.push({ x: port.length, y: 100 * (gi != null ? gi : base) / base, label })
+      if (spxBase) {
+        const c = spxOnOrBefore(s.date)
+        sp.push({ x: sp.length, y: c ? 100 * c / spxBase : 100, label })
+      }
+    })
+    const out = [{ name: th ? "พอร์ตของคุณ" : "Your portfolio", color: "var(--ink)", fill: true, data: port }]
+    if (sp.length >= 2) out.push({ name: "S&P 500", color: "var(--accent)", data: sp })
+    return out
+  }, [dataState, snaps, chartPeriod, periodDaysMap, spxData, th])
+
   // Merge same-ticker lots before sorting (so QH with 2 lots appears once)
   const livePerformers = useMemo(() => {
     const src = hasLivePrices ? rows.filter(r => r.hasLivePrice) : rows
@@ -440,7 +500,9 @@ function AnalyticsCommon({ t, lang, ccy, rows, totalValue, totalPL, totalPlPct, 
         <div className="card" style={{ marginBottom: 16 }}>
           <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-end", marginBottom: 16 }}>
             <div>
-              <h3 className="section-title">{th ? "มูลค่าพอร์ต vs. S&P 500" : "Portfolio value vs. S&P 500"}</h3>
+              <h3 className="section-title">{dataState === "live" && growthSeries
+                ? (th ? "การเติบโต: พอร์ต vs. S&P 500 (ฐาน 100%)" : "Growth: Portfolio vs. S&P 500 (rebased)")
+                : (th ? "มูลค่าพอร์ต vs. S&P 500" : "Portfolio value vs. S&P 500")}</h3>
               <div className="muted" style={{ fontSize: 12, marginTop: 4 }}>
                 <span className="dot" style={{ background: "var(--ink)" }} /> {th ? "พอร์ตของคุณ" : "Your portfolio"}
                 {dataState === "live" && (
@@ -482,7 +544,12 @@ function AnalyticsCommon({ t, lang, ccy, rows, totalValue, totalPL, totalPlPct, 
               })}
             </div>
           </div>
-          <LineChart series={dataState === "live" ? liveSeries : series} height={340} fmt={v => FMT.money(v, ccy, { compact: true })} />
+          <LineChart
+            series={dataState === "live" ? (growthSeries || liveSeries) : series}
+            height={340}
+            fmt={dataState === "live" && growthSeries
+              ? (v => (v >= 100 ? "+" : "") + (v - 100).toFixed(0) + "%")
+              : (v => FMT.money(v, ccy, { compact: true }))} />
         </div>
       )}
 
