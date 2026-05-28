@@ -2,7 +2,7 @@
 import { PageHead, Delta, Icon } from './Nav'
 import { Sparkline } from './Charts'
 import { LUMEN_FMT, LUMEN_DERIVE } from '../data'
-import { addHolding, updateHolding, deleteHolding, deriveHoldings, addTransaction, syncHoldingsFromTransactions, rebuildHolding, updateHoldingMeta, getTransactions, updateTransaction, deleteTransaction, deleteTransactionsByTicker } from '../lib/db'
+import { addHolding, updateHolding, deleteHolding, deriveHoldings, addTransaction, syncHoldingsFromTransactions, rebuildHolding, updateHoldingMeta, getTransactions, getAllTransactions, computeRealized, updateTransaction, deleteTransaction, deleteTransactionsByTicker } from '../lib/db'
 
 export function PortfolioPage({ t, lang, ccy, setRoute, dataState, portfolio, liveHoldings = [], prices = {}, refreshHoldings, loadingData, dataError, retryLoad, fxRate = 36 }) {
   const [showAdd, setShowAdd] = useState(false)
@@ -71,12 +71,24 @@ function LivePortfolioPage({ t, lang, ccy, portfolio, liveHoldings, prices = {},
   const [tab, setTab] = useState("holdings")
   const [deleting, setDeleting] = useState(null)
   const [editHolding, setEditHolding] = useState(null)
+  const [sellHolding, setSellHolding] = useState(null)
   const [sortKey, setSortKey] = useState("value")
   const [sortDir, setSortDir] = useState("desc")
   const [q, setQ] = useState("")
   const [filter, setFilter] = useState("all")
   const [transactions, setTransactions] = useState([])
   const [txLoading, setTxLoading] = useState(false)
+  const [realized, setRealized] = useState({ total: 0, byTicker: {} })
+
+  // Realized P/L — recompute from all transactions whenever holdings change
+  useEffect(() => {
+    if (!portfolio?.id) { setRealized({ total: 0, byTicker: {} }); return }
+    let cancelled = false
+    getAllTransactions(portfolio.id)
+      .then(txs => { if (!cancelled) setRealized(computeRealized(txs, fxRate)) })
+      .catch(() => {})
+    return () => { cancelled = true }
+  }, [portfolio?.id, liveHoldings, fxRate])
 
   const loadTransactions = useCallback(async () => {
     if (!portfolio?.id) return
@@ -210,7 +222,7 @@ function LivePortfolioPage({ t, lang, ccy, portfolio, liveHoldings, prices = {},
         <>
           {/* ── Summary card — 5-column PortMetric layout matching demo ── */}
           <section className="card" style={{ padding: "24px 28px", marginBottom: 16 }}>
-            <div style={{ display: "grid", gridTemplateColumns: "1.5fr 1fr 1fr 1fr 1fr", gap: 24, alignItems: "center" }}>
+            <div style={{ display: "grid", gridTemplateColumns: realized.total !== 0 ? "1.5fr 1fr 1fr 1fr 1fr 1fr" : "1.5fr 1fr 1fr 1fr 1fr", gap: 24, alignItems: "center" }}>
               <div>
                 <div className="label-up" style={{ marginBottom: 6 }}>
                   {t.portfolio.total}
@@ -226,6 +238,13 @@ function LivePortfolioPage({ t, lang, ccy, portfolio, liveHoldings, prices = {},
                 value={(totalPL >= 0 ? "+" : "") + LUMEN_FMT.money(totalPL, ccy, { compact: true })}
                 sub={<Delta value={totalPlPct} />}
               />
+              {realized.total !== 0 && (
+                <PortMetric
+                  label={th ? "กำไร/ขาดทุนที่รับรู้" : "Realized P/L"}
+                  value={(realized.total >= 0 ? "+" : "") + LUMEN_FMT.money(realized.total, ccy, { compact: true })}
+                  sub={<span className="muted" style={{ fontSize: 11 }}>{th ? "จากการขาย" : "from sales"}</span>}
+                />
+              )}
               <PortMetric
                 label={th ? "ปันผล/ปี (ประมาณ)" : "Est. annual dividends"}
                 value={annualDiv > 0 ? LUMEN_FMT.money(annualDiv, ccy, { compact: true }) : "—"}
@@ -344,6 +363,11 @@ function LivePortfolioPage({ t, lang, ccy, portfolio, liveHoldings, prices = {},
                       <td>
                         <div style={{ display: "flex", gap: 2, justifyContent: "flex-end" }}>
                           <button
+                            onClick={() => setSellHolding(r)}
+                            style={{ background: "none", border: "none", cursor: "pointer", color: "var(--loss)", padding: "4px 7px", borderRadius: 6, fontSize: 12, fontWeight: 600, lineHeight: 1 }}
+                            title={th ? "ขาย" : "Sell"}
+                          >{th ? "ขาย" : "Sell"}</button>
+                          <button
                             onClick={() => { const orig = liveHoldings.find(h => h.id === r._ids[0]); if (orig) setEditHolding(orig) }}
                             style={{ background: "none", border: "none", cursor: "pointer", color: "var(--ink-3)", padding: "4px 7px", borderRadius: 6, fontSize: 15, lineHeight: 1 }}
                             title={th ? "แก้ไข" : "Edit"}
@@ -400,6 +424,16 @@ function LivePortfolioPage({ t, lang, ccy, portfolio, liveHoldings, prices = {},
           holding={editHolding}
           onClose={() => setEditHolding(null)}
           onSaved={async () => { setEditHolding(null); await refreshHoldings() }}
+        />
+      )}
+      {sellHolding && (
+        <SellModal
+          lang={lang}
+          ccy={ccy}
+          holding={sellHolding}
+          portfolioId={portfolio?.id}
+          onClose={() => setSellHolding(null)}
+          onSaved={async () => { setSellHolding(null); await refreshHoldings() }}
         />
       )}
     </div>
@@ -820,6 +854,126 @@ function EditHoldingModal({ lang, holding, onClose, onSaved }) {
             </button>
             <button type="submit" className="btn" style={{ flex: 2 }} disabled={saving}>
               {saving ? (th ? "กำลังบันทึก…" : "Saving…") : (th ? "บันทึกการเปลี่ยนแปลง" : "Save changes")}
+            </button>
+          </div>
+        </form>
+      </div>
+    </div>
+  )
+}
+
+// ─── Sell Modal ───────────────────────────────────────────────────────────────
+function SellModal({ lang, ccy, holding, portfolioId, onClose, onSaved }) {
+  const th = lang === "th"
+  const today = new Date().toISOString().split('T')[0]
+  const nativeCcy = holding.nativeCcy || holding.currency || (holding.region === 'US' ? 'USD' : 'THB')
+  const heldShares = Number(holding.shares) || 0
+  const avgCostNative = Number(holding.costNative) || 0       // per-share cost (native)
+  const isUS = (holding.region === 'US') || nativeCcy === 'USD'
+
+  const [form, setForm] = useState({
+    shares: String(heldShares),
+    price:  holding.priceNative != null ? String(+Number(holding.priceNative).toFixed(2)) : '',
+    fee: '', tax: '',
+    date: today,
+  })
+  const [saving, setSaving] = useState(false)
+  const [error, setError] = useState(null)
+  const set = (k, v) => setForm(f => ({ ...f, [k]: v }))
+
+  const sh    = parseFloat(form.shares) || 0
+  const price = parseFloat(form.price)  || 0
+  const fee   = parseFloat(form.fee)    || 0
+  const tax   = parseFloat(form.tax)    || 0
+  // Estimated realized P/L (native ccy) = net proceeds − cost of shares sold
+  const realizedNative = (price * sh - fee - tax) - (avgCostNative * sh)
+
+  const handleSubmit = async (e) => {
+    e.preventDefault()
+    if (sh <= 0) { setError(th ? "ใส่จำนวนหุ้นที่จะขาย" : "Enter shares to sell"); return }
+    if (sh > heldShares + 1e-9) { setError(th ? "จำนวนหุ้นเกินที่ถืออยู่" : "More than you hold"); return }
+    setSaving(true); setError(null)
+    const { error: err } = await addTransaction(portfolioId, {
+      type: 'Sell',
+      ticker: holding.ticker,
+      shares: sh,
+      price,
+      amount: +(sh * price).toFixed(2),
+      fee, tax,
+      currency: nativeCcy,
+      transacted_at: new Date(form.date).toISOString(),
+      note: holding.name,
+    })
+    if (err) { setSaving(false); setError(err.message); return }
+    await rebuildHolding(portfolioId, holding.ticker)
+    setSaving(false)
+    onSaved()
+  }
+
+  const sym = nativeCcy === 'USD' ? '$' : '฿'
+
+  return (
+    <div style={{
+      position: "fixed", inset: 0, background: "rgba(0,0,0,0.45)", backdropFilter: "blur(4px)",
+      display: "flex", alignItems: "flex-start", justifyContent: "center", zIndex: 1000,
+      overflowY: "auto", padding: "24px 16px",
+    }} onClick={e => e.target === e.currentTarget && onClose()}>
+      <div style={{
+        background: "var(--bg)", borderRadius: 20, padding: "32px 28px 40px",
+        width: "100%", maxWidth: 460, margin: "auto",
+        boxShadow: "0 8px 48px rgba(0,0,0,0.18)", animation: "fadeIn 0.18s ease",
+      }}>
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 6 }}>
+          <h3 style={{ margin: 0, fontSize: 20, fontFamily: "var(--font-display)" }}>
+            {th ? "ขาย" : "Sell"} {holding.ticker}
+          </h3>
+          <button onClick={onClose} style={{ background: "none", border: "none", cursor: "pointer", fontSize: 20, color: "var(--ink-3)", lineHeight: 1 }}>×</button>
+        </div>
+        <p className="muted" style={{ fontSize: 12, margin: "0 0 20px" }}>
+          {th ? "ถืออยู่ " : "Holding "}{heldShares.toLocaleString(undefined, { maximumFractionDigits: 4 })}
+          {th ? " หุ้น · ต้นทุนเฉลี่ย " : " shares · avg cost "}{sym}{avgCostNative.toLocaleString(undefined, { maximumFractionDigits: 2 })}
+        </p>
+
+        <form onSubmit={handleSubmit} style={{ display: "flex", flexDirection: "column", gap: 14 }}>
+          {error && (
+            <div style={{ padding: "10px 14px", borderRadius: 8, background: "oklch(0.96 0.05 25)", color: "oklch(0.40 0.12 25)", fontSize: 13 }}>{error}</div>
+          )}
+          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
+            <Field label={th ? "จำนวนหุ้นที่ขาย" : "Shares to sell"}>
+              <input type="number" step={isUS ? "any" : "1"} min="0" max={heldShares} value={form.shares}
+                     onChange={e => set('shares', e.target.value)} style={inputStyle} />
+            </Field>
+            <Field label={(th ? "ราคาขาย/หุ้น " : "Sell price/share ") + `(${nativeCcy})`}>
+              <input type="number" step="any" min="0" value={form.price}
+                     onChange={e => set('price', e.target.value)} placeholder="0.00" style={inputStyle} />
+            </Field>
+          </div>
+          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
+            <Field label={th ? "ค่าธรรมเนียม (ไม่บังคับ)" : "Fee (optional)"}>
+              <input type="number" step="any" min="0" value={form.fee}
+                     onChange={e => set('fee', e.target.value)} placeholder="0.00" style={inputStyle} />
+            </Field>
+            <Field label={th ? "ภาษี (ไม่บังคับ)" : "Tax (optional)"}>
+              <input type="number" step="any" min="0" value={form.tax}
+                     onChange={e => set('tax', e.target.value)} placeholder="0.00" style={inputStyle} />
+            </Field>
+          </div>
+          <Field label={th ? "วันที่ขาย" : "Sell date"}>
+            <input type="date" value={form.date} onChange={e => set('date', e.target.value)} style={inputStyle} />
+          </Field>
+
+          {/* Realized P/L preview */}
+          <div style={{ padding: "12px 14px", borderRadius: 10, background: "var(--bg-2)", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+            <span style={{ fontSize: 12, color: "var(--ink-3)" }}>{th ? "กำไร/ขาดทุนโดยประมาณ" : "Estimated realized P/L"}</span>
+            <span style={{ fontSize: 18, fontWeight: 600, fontFamily: "var(--font-display)", color: realizedNative >= 0 ? "var(--gain)" : "var(--loss)" }}>
+              {realizedNative >= 0 ? "+" : "−"}{sym}{Math.abs(realizedNative).toLocaleString(undefined, { maximumFractionDigits: 2 })}
+            </span>
+          </div>
+
+          <div style={{ display: "flex", gap: 10, marginTop: 8 }}>
+            <button type="button" className="btn btn-outline" style={{ flex: 1 }} onClick={onClose}>{th ? "ยกเลิก" : "Cancel"}</button>
+            <button type="submit" className="btn" style={{ flex: 2 }} disabled={saving}>
+              {saving ? (th ? "กำลังบันทึก…" : "Saving…") : (th ? "ยืนยันการขาย" : "Confirm sale")}
             </button>
           </div>
         </form>

@@ -339,6 +339,44 @@ export function buildSnapshotSeries(transactions, seriesByTicker, ccyByTicker, f
   return rows
 }
 
+// Realized P/L from all transactions, returned in THB (USD converted at the
+// given fxRate).  Each ticker is processed chronologically with a running
+// weighted-average cost; every Sell books (net proceeds − avg cost of the
+// shares sold).  Buys include fee+tax in cost basis (matches our convention).
+export function computeRealized(transactions, fxRate = 36) {
+  const sorted = [...(transactions || [])].sort((a, b) =>
+    String(a.transacted_at).localeCompare(String(b.transacted_at)))
+  const pos = {}                 // ticker → { shares, cost (native ccy) }
+  const byTicker = {}
+  let total = 0
+
+  for (const t of sorted) {
+    const tk = (t.ticker || '').toUpperCase(); if (!tk) continue
+    const s   = Number(t.shares) || 0
+    const pr  = Number(t.price)  || 0
+    const fee = Number(t.fee)    || 0
+    const tax = Number(t.tax)    || 0
+    const fx  = (t.currency === 'USD') ? fxRate : 1
+    if (!pos[tk]) pos[tk] = { shares: 0, cost: 0 }
+
+    if (t.type === 'Buy') {
+      pos[tk].shares += s
+      pos[tk].cost   += s * pr + fee + tax
+    } else if (t.type === 'Sell' && s > 0) {
+      const avg      = pos[tk].shares > 0 ? pos[tk].cost / pos[tk].shares : 0
+      const sold     = Math.min(s, pos[tk].shares || s)
+      const proceeds = s * pr - fee - tax    // net proceeds (native ccy)
+      const costBasis= avg * sold            // native ccy
+      const gainTHB  = (proceeds - costBasis) * fx
+      total += gainTHB
+      byTicker[tk] = (byTicker[tk] || 0) + gainTHB
+      pos[tk].shares = Math.max(0, pos[tk].shares - s)
+      pos[tk].cost   = Math.max(0, pos[tk].cost - costBasis)
+    }
+  }
+  return { total, byTicker }
+}
+
 export async function getAllTransactions(portfolioId) {
   if (!portfolioId) return []
   const { data } = await supabase
