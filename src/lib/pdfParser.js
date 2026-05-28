@@ -477,29 +477,26 @@ function parseDocDated(rows, header) {
     if (!okTicker(ticker)) continue
 
     const priceCell = gCell('price', row)
-    const totalCell = gCell('total', row)
     const shares = snum(g('shares', row))
     const price  = snum(priceCell?.text)
     if (shares == null || price == null || shares <= 0 || price <= 0) continue  // real trades only
 
     const gross = +(shares * price).toFixed(2)
 
-    // The Total-Fee block sits between the Unit Price value and the Total
-    // Amount value and holds two figures: [Net fee, VAT].  Read them by
-    // position (using the actual value cells' X, not the header X, since
-    // numbers are right-aligned) so fee vs tax stay separate (InnovestX).
+    // Numeric cells to the right of Unit Price, in order, are:
+    //   [Net fee, VAT, …, Total Amount]   (contract/order nos. aren't numeric)
+    // The Total Amount is the last (rightmost) figure; everything before it is
+    // the fee block.  This avoids depending on a fragile 'total' header match
+    // (InnovestX splits "Total Fee" so a bare "Total" can hijack that column).
     let fee = 0, tax = 0
-    if (priceCell && totalCell) {
-      const mid = row
-        .filter(c => c.x > priceCell.x + 5 && c.x < totalCell.x - 5 && ISNUM_RE.test(c.text.trim()))
+    if (priceCell) {
+      const rightNums = row
+        .filter(c => c.x > priceCell.x + 5 && ISNUM_RE.test(c.text.trim()))
         .sort((a, b) => a.x - b.x)
         .map(c => toNum(c.text))
-      if (mid.length >= 2) { fee = mid[0]; tax = mid[1] }
-      else if (mid.length === 1) { fee = mid[0] }
-    }
-    if (fee === 0 && tax === 0) {
-      const total = snum(totalCell?.text)
-      if (total != null) fee = +Math.abs(total - gross).toFixed(2)
+      const feeBlock = rightNums.slice(0, -1)   // drop the trailing Total Amount
+      fee = feeBlock[0] || 0
+      tax = feeBlock[1] || 0
     }
 
     // Buy/Sell from the contract-number prefix (BU-…/SE-…/SL-…), default Buy
