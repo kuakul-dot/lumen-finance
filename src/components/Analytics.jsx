@@ -551,12 +551,6 @@ function AnalyticsCommon({ t, lang, ccy, rows, totalValue, totalPL, totalPlPct, 
               </div>
             </div>
             <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap", justifyContent: "flex-end" }}>
-              {dataState === "live" && (growthSeries || valueSeries) && (
-                <div className="segmented">
-                  <button className={chartMode === "pct" ? "on" : ""} onClick={() => setChartMode("pct")} title={th ? "การเติบโต %" : "Growth %"}>%</button>
-                  <button className={chartMode === "value" ? "on" : ""} onClick={() => setChartMode("value")} title={th ? "มูลค่า ฿" : "Value"}>฿</button>
-                </div>
-              )}
               <div className="segmented">
                 {["1m","3m","6m","ytd","1y","5y","all"].map(k => {
                   const enabled = isPeriodEnabled(k)
