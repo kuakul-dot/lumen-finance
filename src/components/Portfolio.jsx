@@ -1552,11 +1552,34 @@ function ImportPDFModal({ lang, portfolioId, onClose, onImported }) {
         {/* ── Step 1: Upload ── */}
         {step === 1 && (
           <div>
-            <p style={{ fontSize: 13, color: "var(--ink-2)", marginBottom: 16, lineHeight: 1.6 }}>
+            <p style={{ fontSize: 13, color: "var(--ink-2)", marginBottom: 12, lineHeight: 1.6 }}>
               {th
                 ? "อัปโหลด Statement หรือใบยืนยันการซื้อขายจากโบรกเกอร์ (ต้องเป็น PDF แบบข้อความ ไม่ใช่ภาพสแกน)"
                 : "Upload a broker statement or trade confirmation. Must be a text-based PDF — scanned images are not supported."}
             </p>
+
+            {/* Supported brokers */}
+            <div style={{
+              marginBottom: 16, padding: "12px 14px", borderRadius: 12,
+              background: "var(--bg-2)", border: "1px solid var(--line)",
+            }}>
+              <div style={{ fontSize: 11, fontWeight: 700, color: "var(--ink-2)", marginBottom: 8 }}>
+                {th ? "โบรกเกอร์ที่รองรับ" : "Supported brokers"}
+              </div>
+              <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
+                {["Dime!", "InnovestX", "Settrade", "Bualuang", "KGI", "Finansia"].map(b => (
+                  <span key={b} style={{
+                    fontSize: 11, fontWeight: 600, padding: "3px 9px", borderRadius: 999,
+                    background: "var(--accent-soft)", color: "var(--accent-ink)",
+                  }}>{b}</span>
+                ))}
+              </div>
+              <div style={{ fontSize: 10.5, color: "var(--ink-3)", marginTop: 8, lineHeight: 1.5 }}>
+                {th
+                  ? "โบรกอื่นที่เป็น PDF ข้อความก็ลองได้ (ระบบจะอ่านอัตโนมัติ) — รองรับทั้งหุ้นไทย (THB) และหุ้นต่างประเทศ (USD)"
+                  : "Other text-based PDFs may also work (auto-detected) — both Thai (THB) and foreign (USD) trades are supported."}
+              </div>
+            </div>
 
             <div
               onDragOver={e => { e.preventDefault(); setDragOver(true) }}

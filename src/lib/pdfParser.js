@@ -6,6 +6,7 @@
 //
 // Confirmed working brokers:
 //   ✅ Dime! (ไดม์)          — Confirmation Note / Tax Invoice (US stocks, USD)
+//   ✅ InnovestX (อินโนเวสท์) — Confirmation Note / Tax Invoice (TH stocks, THB)
 //   ✅ Settrade / SET-linked  — รายงานการซื้อขาย, ใบยืนยัน (TH stocks, THB)
 //   ✅ Bualuang Securities    — ใบยืนยันการซื้อขาย (THB)
 //   ✅ KGI Securities         — Trade Confirmation (THB / USD)
@@ -253,26 +254,26 @@ function pickTicker(texts) {
 
 // ─── Main export ──────────────────────────────────────────────────────────────
 
-export function detectTransactions(rows, debug = false) {
+export function detectTransactions(rows) {
   const header = findHeader(rows)
 
-  if (debug) {
-    console.log('[pdfParser] header:', header
-      ? `ends row ${header.headerRow} | colMap ` + JSON.stringify(Object.fromEntries(
+  // Try detectors in order of precision; use the first that yields results.
+  let results = header ? parseWithHeader(rows, header) : []
+  if (results.length === 0) results = parseAnchored(rows)            // Dime! multi-row layout
+  if (results.length === 0) results = parseDocDated(rows, header)    // InnovestX (date in doc header)
+  if (results.length === 0) results = parseHeuristic(rows)           // last-ditch
+
+  // Self-diagnosing dump — only logs when nothing matched (no spam on success)
+  if (results.length === 0) {
+    console.log('[pdfParser] ⚠️ no transactions detected. header:', header
+      ? `row ${header.headerRow} ` + JSON.stringify(Object.fromEntries(
           Object.entries(header.colMap).map(([k, v]) => [k, Math.round(v)])))
-      : '⚠️ none')
-    rows.slice(0, 70).forEach((r, i) => {
+      : 'none')
+    rows.slice(0, 80).forEach((r, i) => {
       const d = DATE_RE.test(r.map(c => c.text).join(' '))
       console.log(`  [${i}]${d ? '📅' : '  '}`, r.map(c => `"${c.text}"@${Math.round(c.x)}`).join(' | '))
     })
   }
-
-  // Try detectors in order of precision; use the first that yields results.
-  let results = header ? parseWithHeader(rows, header) : []
-  if (results.length === 0) results = parseAnchored(rows)   // Dime! multi-row layout
-  if (results.length === 0) results = parseHeuristic(rows)  // last-ditch
-
-  if (debug) console.log('[pdfParser] detected', results.length, 'transactions:', results)
   return results
 }
 
@@ -402,6 +403,97 @@ function parseAnchored(rows) {
       transacted_at: date,
       type: mapType(typeTok[0]),
       ticker, shares, price, amount, fee, tax, currency, note: null,
+    })
+  }
+  return results
+}
+
+// ── Mode A3: document-dated table (InnovestX confirmation note) ───────────────
+// The trade date lives in the document header ("Trading Date 20/05/2026"), not
+// in each data row, and the securities row carries no date at all.  We take the
+// document date, then read Securities / Unit / Unit Price / Total Amount from
+// the table columns by X position.
+
+// Find the trade date: prefer the value tied to a "Trading Date" label,
+// otherwise the earliest date in the document (trade date precedes settlement).
+function findDocDate(rows) {
+  let labelX = null, labelRow = null
+  const dates = []
+  const plausible = (d) => {
+    const [y, m, day] = d.split('-').map(Number)
+    return y >= 2000 && y <= 2100 && m >= 1 && m <= 12 && day >= 1 && day <= 31
+  }
+  rows.forEach((row, ri) => {
+    for (const { x, text } of row) {
+      if (/trading.?date|วันที่ซื้อขาย/i.test(text)) { labelX = x; labelRow = ri }
+      const m = text.match(DATE_RE)
+      if (m) { const d = parseDate(m[0]); if (d && plausible(d)) dates.push({ ri, x, date: d }) }
+    }
+  })
+  if (dates.length === 0) return null
+  if (labelX != null) {
+    let best = null, bestScore = Infinity
+    for (const d of dates) {
+      const score = Math.abs(d.ri - labelRow) * 1000 + Math.abs(d.x - labelX)
+      if (score < bestScore) { bestScore = score; best = d }
+    }
+    if (best) return best.date
+  }
+  return dates.map(d => d.date).sort()[0]   // earliest = trade date
+}
+
+function parseDocDated(rows, header) {
+  if (!header) return []
+  const { headerRow, colMap } = header
+  // Must look like a securities table: a ticker column + price or total
+  if (colMap.ticker === undefined) return []
+  if (colMap.price === undefined && colMap.total === undefined) return []
+
+  const date = findDocDate(rows)
+  if (!date) return []
+
+  const g = (f, row) => {
+    if (colMap[f] === undefined) return ''
+    const tx = colMap[f]
+    let best = null, minD = Infinity
+    for (const { x, text } of row) {
+      const d = Math.abs(x - tx)
+      if (d < minD) { minD = d; best = text }
+    }
+    return minD <= X_TOL ? (best ?? '') : ''
+  }
+
+  const okTicker = t => /^[A-Z][A-Z0-9.\-]{0,6}$/.test(t) && !SKIP_TICKER.has(t)
+
+  const results = []
+  for (let ri = headerRow + 1; ri < rows.length; ri++) {
+    const row   = rows[ri]
+    const texts = row.map(c => c.text)
+    const line  = texts.join(' ')
+    if (DATE_RE.test(line)) continue   // a dated row here is a footer, not a trade
+
+    let ticker = g('ticker', row).replace(/\[.*?\]/g, '').trim().toUpperCase()
+    if (!okTicker(ticker)) ticker = (pickTicker(texts) || '')
+    if (!okTicker(ticker)) continue
+
+    const shares = snum(g('shares', row))
+    const price  = snum(g('price',  row))
+    if (shares == null || price == null || shares <= 0 || price <= 0) continue  // real trades only
+
+    const total = snum(g('total', row)) ?? snum(g('amount', row))
+    const gross = +(shares * price).toFixed(2)
+    const fee   = total != null ? +Math.abs(total - gross).toFixed(2) : (snum(g('fee', row)) || 0)
+
+    // Buy/Sell from the contract-number prefix (BU-…/SE-…/SL-…), default Buy
+    const ct   = texts.find(t => /^(BU|SE|SL)[-\s]?\d/i.test(t.trim()))
+    const type = ct && /^(SE|SL)/i.test(ct.trim()) ? 'Sell' : 'Buy'
+
+    const currency = /\bUSD\b/.test(line) ? 'USD' : 'THB'
+
+    results.push({
+      transacted_at: date,
+      type, ticker, shares, price,
+      amount: gross, fee, tax: 0, currency, note: null,
     })
   }
   return results
