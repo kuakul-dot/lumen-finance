@@ -1328,20 +1328,15 @@ function TransactionsTab({ transactions, holdings = [], loading, lang, ccy, fxRa
 
   return (
     <>
-      {/* One clean toolbar: year pills (left) · search · type · import (right) */}
+      {/* One clean toolbar: year (left) · search · type · import (right) */}
       <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 14, flexWrap: "wrap" }}>
         {years.length > 0 && (
-          <div style={{ display: "flex", gap: 6, overflowX: "auto", flex: "1 1 200px", paddingBottom: 2 }}>
+          <select value={activeYear || ""} onChange={e => setSelYear(e.target.value)}
+            style={{ ...inputStyle, width: "auto", padding: "7px 28px 7px 12px", fontSize: 13, fontFamily: "var(--font-mono)", fontWeight: 600, marginRight: "auto" }}>
             {years.map(y => (
-              <button key={y} onClick={() => setSelYear(y)} style={{
-                flexShrink: 0, padding: "6px 14px", borderRadius: 999, cursor: "pointer", fontSize: 13,
-                fontFamily: "var(--font-mono)", fontWeight: y === activeYear ? 700 : 500,
-                border: "1px solid " + (y === activeYear ? "var(--ink)" : "var(--line)"),
-                background: y === activeYear ? "var(--ink)" : "transparent",
-                color: y === activeYear ? "var(--bg)" : "var(--ink-2)",
-              }}>{y}</button>
+              <option key={y} value={y}>{th ? `ปี ${y}` : `Year ${y}`} ({filtered.filter(tx => yearOf(tx) === y).length})</option>
             ))}
-          </div>
+          </select>
         )}
         <input
           value={fQuery}
