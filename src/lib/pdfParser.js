@@ -257,23 +257,15 @@ export function detectTransactions(rows) {
   const header = findHeader(rows)
 
   // ── DEBUG — open DevTools → Console to see this ───────────────────────────
-  if (!header) {
-    console.log('[pdfParser] ⚠️  No header found → heuristic mode')
-    console.log('[pdfParser] First 10 rows:')
-    rows.slice(0, 10).forEach((r, i) =>
-      console.log(`  [${i}]`, r.map(c => `"${c.text}"@${Math.round(c.x)}`).join(' | ')))
-  } else {
-    console.log('[pdfParser] ✅ Header ends at row', header.headerRow,
-      '| colMap:', JSON.stringify(Object.fromEntries(
-        Object.entries(header.colMap).map(([k, v]) => [k, Math.round(v)]))))
-    console.log('[pdfParser] Date-matching data rows (the ones parsed):')
-    let shown = 0
-    for (let i = header.headerRow + 1; i < rows.length && shown < 5; i++) {
-      if (!DATE_RE.test(rows[i].map(c => c.text).join(' '))) continue
-      console.log(`  [${i}]`, rows[i].map(c => `"${c.text}"@${Math.round(c.x)}`).join(' | '))
-      shown++
-    }
-  }
+  console.log('[pdfParser] header:', header
+    ? `ends row ${header.headerRow} | colMap ` + JSON.stringify(Object.fromEntries(
+        Object.entries(header.colMap).map(([k, v]) => [k, Math.round(v)])))
+    : '⚠️ none')
+  console.log(`[pdfParser] FULL DUMP — ${rows.length} rows:`)
+  rows.slice(0, 70).forEach((r, i) => {
+    const hasDate = DATE_RE.test(r.map(c => c.text).join(' '))
+    console.log(`  [${i}]${hasDate ? '📅' : '  '}`, r.map(c => `"${c.text}"@${Math.round(c.x)}`).join(' | '))
+  })
   // ─────────────────────────────────────────────────────────────────────────
 
   // ── Mode A: header-guided, X-position based ───────────────────────────────
