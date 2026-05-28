@@ -49,6 +49,7 @@ export function ToolsPage({ t, lang, ccy, dataState, liveHoldings = [], prices =
   const [showResult, setShowResult] = useState(false)
   const [editTargets, setEditTargets] = useState(false)
   const [targets,    setTargets]    = useState(loadTargets)
+  const [copied,     setCopied]     = useState(false)
 
   // Persist targets to localStorage
   useEffect(() => { saveTargets(targets) }, [targets])
@@ -149,6 +150,52 @@ export function ToolsPage({ t, lang, ccy, dataState, liveHoldings = [], prices =
   // cashRemaining in THB (depInTHB minus buy/sell amounts which are also THB)
   const cashRemaining = Math.max(0, depInTHB - trades.filter(tr => tr.action === "Buy").reduce((a, b) => a + b.amount, 0)
                                              + trades.filter(tr => tr.action === "Sell").reduce((a, b) => a + b.amount, 0))
+
+  // Target classes you allocate to but hold nothing in — can't be rebalanced into
+  const missingClasses = useMemo(() => {
+    const has = {
+      "TH Equity": rows.some(r => r.region === "TH" && (r.cls === "Equity" || r.cls === "ETF")),
+      "US Equity": rows.some(r => r.region === "US" && (r.cls === "Equity" || r.cls === "ETF")),
+      "Bonds":     rows.some(r => r.cls === "Bond"),
+      "Gold":      rows.some(r => r.cls === "Commodity"),
+      "Crypto":    rows.some(r => r.cls === "Crypto"),
+    }
+    return Object.entries(targets)
+      .filter(([k, v]) => k !== "Cash" && v > 0 && !has[k])
+      .map(([k]) => k)
+  }, [targets, rows])
+
+  // Export the suggested trades as a .csv download
+  const downloadCSV = () => {
+    if (!trades.length) return
+    const esc = s => `"${String(s ?? "").replace(/"/g, '""')}"`
+    const header = ["Action", "Ticker", "Name", "Class", "Shares", "Price", "PriceCcy", `Amount(${ccy})`]
+    const body = trades.map(tr => [
+      tr.action, tr.ticker, esc(tr.name), tr.cls, tr.shares,
+      (tr.priceNative ?? 0).toFixed(2), tr.nativeCcy,
+      (ccy === "USD" ? tr.amount / fxRate : tr.amount).toFixed(2),
+    ].join(","))
+    const csv = [header.join(","), ...body].join("\n")
+    const blob = new Blob(["﻿" + csv], { type: "text/csv;charset=utf-8;" })
+    const url = URL.createObjectURL(blob)
+    const a = document.createElement("a")
+    a.href = url
+    a.download = `rebalance-${new Date().toISOString().split("T")[0]}.csv`
+    a.click()
+    URL.revokeObjectURL(url)
+  }
+
+  // Copy the suggested trades as readable text
+  const copyTrades = async () => {
+    if (!trades.length) return
+    const text = trades.map(tr =>
+      `${tr.action === "Buy" ? (th ? "ซื้อ" : "Buy") : (th ? "ขาย" : "Sell")} ${tr.shares} ${tr.ticker} @ ${FMT.moneyNative(tr.priceNative, tr.nativeCcy)} = ${FMT.money(tr.amount, ccy)}`
+    ).join("\n")
+    try {
+      await navigator.clipboard.writeText(text)
+      setCopied(true); setTimeout(() => setCopied(false), 1500)
+    } catch {}
+  }
 
   if (dataState === "empty") {
     return (
@@ -331,6 +378,17 @@ export function ToolsPage({ t, lang, ccy, dataState, liveHoldings = [], prices =
             </div>
           </div>
 
+          {/* Missing-class warning */}
+          {missingClasses.length > 0 && (
+            <div className="card" style={{ padding: "12px 16px", background: "oklch(0.97 0.03 60)", border: "1px solid oklch(0.85 0.08 60)" }}>
+              <div style={{ fontSize: 12.5, color: "oklch(0.42 0.10 60)", lineHeight: 1.5 }}>
+                ⚠ {th
+                  ? `คุณตั้งเป้าไว้ที่ ${missingClasses.join(", ")} แต่ยังไม่มีสินทรัพย์ในกลุ่มนี้ — ระบบจะแนะนำซื้อให้ไม่ได้ ต้องเพิ่มหลักทรัพย์ในกลุ่มดังกล่าวก่อน`
+                  : `You allocate to ${missingClasses.join(", ")} but hold nothing there yet — no buys can be suggested until you add holdings in those classes.`}
+              </div>
+            </div>
+          )}
+
           {/* Suggested trades */}
           <div className="card">
             <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 16 }}>
@@ -392,8 +450,12 @@ export function ToolsPage({ t, lang, ccy, dataState, liveHoldings = [], prices =
               </table>
             )}
             <div style={{ display: "flex", gap: 8, marginTop: 16, justifyContent: "flex-end" }}>
-              <button className="btn btn-outline btn-sm">{th ? "ส่งออก CSV" : "Export CSV"}</button>
-              <button className="btn btn-sm">{th ? "บันทึกเป็นแผน" : "Save as plan"}</button>
+              <button className="btn btn-outline btn-sm" onClick={downloadCSV} disabled={!showResult || trades.length === 0}>
+                {th ? "ส่งออก CSV" : "Export CSV"}
+              </button>
+              <button className="btn btn-sm" onClick={copyTrades} disabled={!showResult || trades.length === 0}>
+                {copied ? (th ? "คัดลอกแล้ว ✓" : "Copied ✓") : (th ? "คัดลอกรายการ" : "Copy trades")}
+              </button>
             </div>
           </div>
         </div>
