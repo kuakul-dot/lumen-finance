@@ -2,7 +2,7 @@
 import { PageHead, Delta, Icon } from './Nav'
 import { Sparkline } from './Charts'
 import { LUMEN_FMT, LUMEN_DERIVE } from '../data'
-import { addHolding, updateHolding, deleteHolding, deriveHoldings, addTransaction, syncHoldingsFromTransactions, rebuildHolding, updateHoldingMeta, getTransactions, getAllTransactions, computeRealized, updateTransaction, deleteTransaction, deleteTransactionsByTicker } from '../lib/db'
+import { addHolding, updateHolding, deleteHolding, deriveHoldings, addTransaction, syncHoldingsFromTransactions, rebuildHolding, rebuildAllHoldings, updateHoldingMeta, getTransactions, getAllTransactions, computeRealized, updateTransaction, deleteTransaction, deleteTransactionsByTicker } from '../lib/db'
 
 export function PortfolioPage({ t, lang, ccy, setRoute, dataState, portfolio, liveHoldings = [], prices = {}, refreshHoldings, loadingData, dataError, retryLoad, fxRate = 36 }) {
   const [showAdd, setShowAdd] = useState(false)
@@ -169,6 +169,26 @@ function LivePortfolioPage({ t, lang, ccy, portfolio, liveHoldings, prices = {},
     await refreshHoldings()
   }
 
+  const [syncing, setSyncing] = useState(false)
+  const handleSync = async () => {
+    if (!portfolio?.id) return
+    const ok = window.confirm(th
+      ? "สร้าง Holdings ใหม่จากประวัติธุรกรรมทั้งหมด เพื่อให้ตรงกัน?\n\n• จำนวนหุ้น/ต้นทุนจะคำนวณใหม่จากรายการซื้อ-ขาย\n• ตำแหน่งที่ขายหมดจะถูกลบ\n(ข้อมูล region/ชื่อ ที่ตั้งไว้จะคงอยู่)"
+      : "Rebuild all Holdings from your full transaction history so they match?\n\n• Shares/cost recomputed from buys & sells\n• Fully-sold positions are removed\n(region/name metadata is kept)")
+    if (!ok) return
+    setSyncing(true)
+    const r = await rebuildAllHoldings(portfolio.id)
+    await refreshHoldings()
+    setSyncing(false)
+    const summary = th
+      ? `ซิงค์เสร็จ — อัปเดต ${r.updated} · เพิ่ม ${r.created} · ลบ ${r.removed}`
+      : `Synced — updated ${r.updated} · created ${r.created} · removed ${r.removed}`
+    const orphanNote = r.orphans?.length
+      ? (th ? `\n\n⚠ ไม่มีธุรกรรมรองรับ (ไม่แตะต้อง): ${r.orphans.join(', ')}` : `\n\n⚠ No transactions found (left as-is): ${r.orphans.join(', ')}`)
+      : ''
+    window.alert((r.error ? (th ? "มีข้อผิดพลาดบางส่วน: " : "Some errors: ") + r.error + "\n\n" : "") + summary + orphanNote)
+  }
+
   if (loadingData) {
     return (
       <div className="shell fade-in">
@@ -187,6 +207,10 @@ function LivePortfolioPage({ t, lang, ccy, portfolio, liveHoldings, prices = {},
         sub={t.portfolio.sub}
         right={
           <div style={{ display: "flex", gap: 8 }}>
+            <button className="btn btn-sm btn-outline" onClick={handleSync} disabled={syncing}
+                    title={th ? "สร้าง holdings ใหม่จากประวัติธุรกรรมทั้งหมด" : "Rebuild all holdings from transaction history"}>
+              <Icon name="filter" size={14} /> {syncing ? (th ? "กำลังซิงค์…" : "Syncing…") : (th ? "ตรวจสอบ & ซิงค์" : "Reconcile")}
+            </button>
             <button className="btn btn-sm" onClick={() => setShowAdd(true)}>
               <Icon name="plus" size={14} /> {t.common.addInvestment}
             </button>

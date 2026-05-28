@@ -387,6 +387,65 @@ export async function getAllTransactions(portfolioId) {
   return data || []
 }
 
+// Reconcile: rebuild EVERY holding from the full transaction history so the
+// holdings table and the ledger agree (transactions = source of truth).
+// Buys add shares + cost (incl fee+tax); sells reduce both; net-zero positions
+// are deleted; tickers in the ledger but missing a holding are created.
+// Existing holdings whose ticker has NO transactions are left untouched and
+// reported as `orphans` (likely added manually) — caller decides what to do.
+export async function rebuildAllHoldings(portfolioId) {
+  if (!portfolioId) return { error: null, updated: 0, created: 0, removed: 0, orphans: [] }
+  const txs = await getAllTransactions(portfolioId)
+
+  const pos = {}   // ticker → { shares, cost, currency, name }
+  for (const t of txs) {
+    const tk = (t.ticker || '').toUpperCase(); if (!tk) continue
+    const s = Number(t.shares) || 0, p = Number(t.price) || 0
+    if (!pos[tk]) pos[tk] = { shares: 0, cost: 0, currency: t.currency || 'THB', name: t.note || tk }
+    if (t.currency) pos[tk].currency = t.currency
+    if (t.note && (!pos[tk].name || pos[tk].name === tk)) pos[tk].name = t.note
+    if (t.type === 'Buy') {
+      pos[tk].shares += s
+      pos[tk].cost   += s * p + (Number(t.fee) || 0) + (Number(t.tax) || 0)
+    } else if (t.type === 'Sell') {
+      const avg = pos[tk].shares > 0 ? pos[tk].cost / pos[tk].shares : 0
+      pos[tk].shares = Math.max(0, pos[tk].shares - s)
+      pos[tk].cost   = Math.max(0, pos[tk].cost - avg * s)
+    }
+    // Dividend / Deposit / Withdraw don't change a stock position
+  }
+
+  const existing = await getHoldings(portfolioId)
+  const byTicker = new Map(existing.map(h => [h.ticker?.toUpperCase(), h]))
+  let updated = 0, created = 0, removed = 0
+  const errors = []
+
+  for (const [tk, P] of Object.entries(pos)) {
+    const h = byTicker.get(tk)
+    if (P.shares > 1e-9) {
+      const cost_price = P.cost / P.shares
+      if (h) {
+        const { error } = await updateHolding(h.id, { shares: P.shares, cost_price })
+        if (error) errors.push(`${tk}: ${error.message}`); else updated++
+      } else {
+        const isUSD = P.currency === 'USD'
+        const { error } = await addHolding(portfolioId, {
+          ticker: tk, name: P.name || tk, shares: P.shares, cost_price,
+          currency: P.currency || 'THB',
+          region: isUSD ? 'US' : 'TH', asset_class: 'Equity',
+          div_frequency: isUSD ? 4 : 2,
+        })
+        if (error) errors.push(`${tk}: ${error.message}`); else created++
+      }
+    } else if (h) {
+      await deleteHolding(h.id); removed++
+    }
+  }
+
+  const orphans = existing.filter(h => !(h.ticker?.toUpperCase() in pos)).map(h => h.ticker)
+  return { error: errors.length ? errors.join('; ') : null, updated, created, removed, orphans }
+}
+
 export async function getSnapshots(portfolioId, days = 1000) {
   if (!portfolioId) return []
   // Fetch the most recent `days` rows, then return ascending for time-series math
