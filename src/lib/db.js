@@ -349,16 +349,17 @@ export async function getAllTransactions(portfolioId) {
   return data || []
 }
 
-export async function getSnapshots(portfolioId, days = 400) {
+export async function getSnapshots(portfolioId, days = 1000) {
   if (!portfolioId) return []
+  // Fetch the most recent `days` rows, then return ascending for time-series math
   const { data, error } = await supabase
     .from('portfolio_snapshots')
     .select('date,total_value,total_cost')
     .eq('portfolio_id', portfolioId)
-    .order('date', { ascending: true })
+    .order('date', { ascending: false })
     .limit(days)
   if (error) { console.warn('[Lumen] getSnapshots:', error.message); return [] }
-  return data || []
+  return (data || []).reverse()
 }
 
 export async function getGoals(userId) {
