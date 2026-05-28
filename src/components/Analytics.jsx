@@ -1654,17 +1654,26 @@ function AnalyticsMetrics({ t, lang, ccy, rows = [], totalValue = 0, totalPL = 0
           const open = openKey === m.key
           return (
           <div key={m.key} className="card" style={{ padding: 28 }}>
-            <h4 style={{ margin: 0, fontSize: 14, fontWeight: 500, display: "flex", alignItems: "center", gap: 6 }}>
-              {m.sub}
-              <button
-                onClick={() => setOpenKey(open ? null : m.key)}
-                title={th ? "ดูสูตรการคำนวณ" : "Show formula"}
-                style={{ background: "none", border: "none", cursor: "pointer", padding: 2, lineHeight: 0,
-                         color: open ? "var(--accent-ink)" : "var(--ink-3)" }}
-              >
-                <Icon name="info" size={13} />
-              </button>
-            </h4>
+            <button
+              onClick={() => formula && setOpenKey(open ? null : m.key)}
+              title={th ? "ดูสูตรการคำนวณ" : "Show formula"}
+              style={{
+                width: "100%", background: "none", border: "none", padding: 0, margin: 0,
+                cursor: formula ? "pointer" : "default", textAlign: "left",
+                display: "flex", alignItems: "center", gap: 6,
+                fontSize: 14, fontWeight: 500, fontFamily: "inherit", color: "var(--ink)",
+              }}
+            >
+              <span>{m.sub}</span>
+              {formula && (
+                <span style={{
+                  display: "inline-flex", alignItems: "center", gap: 3, marginLeft: "auto",
+                  fontSize: 11, fontWeight: 600, color: open ? "var(--accent-ink)" : "var(--ink-3)",
+                }}>
+                  <Icon name="info" size={13} /> {th ? "สูตร" : "Formula"}
+                </span>
+              )}
+            </button>
             <p className="muted" style={{ fontSize: 12, marginTop: 6, marginBottom: open ? 12 : 22 }}>
               {isLive ? m.body : bodyMap[m.key]}
             </p>
