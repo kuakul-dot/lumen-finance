@@ -1,4 +1,4 @@
-﻿import { useState, useMemo, useEffect, useCallback, useRef } from 'react'
+﻿import { useState, useMemo, useEffect, useCallback, useRef, Fragment } from 'react'
 import { PageHead, Delta, Icon } from './Nav'
 import { Sparkline } from './Charts'
 import { LUMEN_FMT, LUMEN_DERIVE } from '../data'
@@ -1203,6 +1203,7 @@ function TransactionsTab({ transactions, holdings = [], loading, lang, ccy, fxRa
   const [showImport, setShowImport] = useState(false)
   const [fType, setFType] = useState("all")       // type filter
   const [fQuery, setFQuery] = useState("")        // ticker/name search
+  const [collapsedYears, setCollapsedYears] = useState(() => new Set())  // collapsed year groups
 
   const handleDelete = async (tx) => {
     if (!window.confirm(th ? `ลบรายการ ${tx.ticker || ''} ${tx.type} นี้?` : `Delete this ${tx.type} transaction for ${tx.ticker || ''}?`)) return
@@ -1256,6 +1257,82 @@ function TransactionsTab({ transactions, holdings = [], loading, lang, ccy, fxRa
     return true
   })
 
+  // Group filtered (newest-first) into collapsible year sections
+  const byYear = []
+  const yearIndex = new Map()
+  filtered.forEach(tx => {
+    const y = tx.transacted_at ? new Date(tx.transacted_at).getFullYear() : "—"
+    if (!yearIndex.has(y)) { const g = { year: y, items: [] }; yearIndex.set(y, g); byYear.push(g) }
+    yearIndex.get(y).items.push(tx)
+  })
+  const toggleYear = y => setCollapsedYears(s => {
+    const n = new Set(s); n.has(y) ? n.delete(y) : n.add(y); return n
+  })
+
+  const renderRow = (tx) => {
+    const type = tx.type || 'Buy'
+    const date = tx.transacted_at
+      ? new Date(tx.transacted_at).toLocaleDateString(th ? "th-TH" : "en-US", { day: "numeric", month: "short", year: "2-digit" })
+      : "—"
+    const priceCcy = tx.currency || 'THB'
+    const amountDisp = (() => {
+      const a = tx.amount || (tx.shares * tx.price) || 0
+      return priceCcy === 'USD' ? a * fxRate : a
+    })()
+    return (
+      <tr key={tx.id} style={{ opacity: deleting === tx.id ? 0.4 : 1 }}>
+        <td className="mono muted" style={{ fontSize: 12 }}>{date}</td>
+        <td>
+          <span className="chip" style={{
+            background: typeBg[type] || "var(--bg-2)",
+            color: typeColor[type] || "var(--ink-2)",
+            fontSize: 11, fontWeight: 600, display: "inline-flex", alignItems: "center", gap: 4,
+          }}>
+            <Icon name={typeIcon[type] || "buy"} size={11} />
+            {(typeLabel[lang] || typeLabel.en)[type] || type}
+          </span>
+        </td>
+        <td>
+          <div style={{ fontWeight: 500, fontSize: 13 }}>{tx.ticker || "—"}</div>
+          {tx.note && <div className="muted" style={{ fontSize: 11 }}>{tx.note}</div>}
+        </td>
+        <td className="num">{tx.shares != null ? tx.shares.toLocaleString(undefined, { maximumFractionDigits: 4 }) : "—"}</td>
+        <td className="num">
+          {tx.price != null
+            ? (priceCcy === 'USD' ? '$' : '฿') + tx.price.toLocaleString(undefined, { maximumFractionDigits: 2 })
+            : "—"}
+        </td>
+        <td className="num" style={{ fontWeight: 500 }}>
+          {amountDisp > 0 ? LUMEN_FMT.money(amountDisp, ccy, { compact: true }) : "—"}
+          {((tx.fee || 0) + (tx.tax || 0)) > 0 && (
+            <div className="muted" style={{ fontSize: 10, marginTop: 1 }}>
+              {tx.fee > 0 && <span>fee {priceCcy === 'USD' ? '$' : '฿'}{Number(tx.fee).toLocaleString(undefined, { maximumFractionDigits: 2 })}</span>}
+              {tx.fee > 0 && tx.tax > 0 && <span> · </span>}
+              {tx.tax > 0 && <span>tax {priceCcy === 'USD' ? '$' : '฿'}{Number(tx.tax).toLocaleString(undefined, { maximumFractionDigits: 2 })}</span>}
+            </div>
+          )}
+        </td>
+        <td className="num hide-mob">
+          <span className="muted" style={{ fontSize: 11 }}>{priceCcy}</span>
+        </td>
+        <td>
+          <div style={{ display: "flex", gap: 4, justifyContent: "flex-end" }}>
+            <button onClick={() => setEditTx(tx)}
+              style={{ background: "none", border: "none", cursor: "pointer", padding: "4px 6px", borderRadius: 6, color: "var(--ink-3)", lineHeight: 1 }}
+              title={th ? "แก้ไข" : "Edit"}>
+              <Icon name="edit" size={13} />
+            </button>
+            <button onClick={() => handleDelete(tx)} disabled={deleting === tx.id}
+              style={{ background: "none", border: "none", cursor: "pointer", padding: "4px 6px", borderRadius: 6, color: "var(--loss)", lineHeight: 1 }}
+              title={th ? "ลบ" : "Delete"}>
+              <Icon name="trash" size={13} />
+            </button>
+          </div>
+        </td>
+      </tr>
+    )
+  }
+
   return (
     <>
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 12, marginBottom: 12, flexWrap: "wrap" }}>
@@ -1303,72 +1380,21 @@ function TransactionsTab({ transactions, holdings = [], loading, lang, ccy, fxRa
                 {th ? "ไม่พบรายการที่ตรงกับตัวกรอง" : "No transactions match the filter"}
               </td></tr>
             )}
-            {filtered.map(tx => {
-              const type = tx.type || 'Buy'
-              const date = tx.transacted_at
-                ? new Date(tx.transacted_at).toLocaleDateString(th ? "th-TH" : "en-US", { day: "numeric", month: "short", year: "2-digit" })
-                : "—"
-              const priceCcy = tx.currency || 'THB'
-              const amountDisp = (() => {
-                const a = tx.amount || (tx.shares * tx.price) || 0
-                return priceCcy === 'USD' ? a * fxRate : a
-              })()
+            {byYear.map(group => {
+              const collapsed = collapsedYears.has(group.year)
               return (
-                <tr key={tx.id} style={{ opacity: deleting === tx.id ? 0.4 : 1 }}>
-                  <td className="mono muted" style={{ fontSize: 12 }}>{date}</td>
-                  <td>
-                    <span className="chip" style={{
-                      background: typeBg[type] || "var(--bg-2)",
-                      color: typeColor[type] || "var(--ink-2)",
-                      fontSize: 11, fontWeight: 600, display: "inline-flex", alignItems: "center", gap: 4,
-                    }}>
-                      <Icon name={typeIcon[type] || "buy"} size={11} />
-                      {(typeLabel[lang] || typeLabel.en)[type] || type}
-                    </span>
-                  </td>
-                  <td>
-                    <div style={{ fontWeight: 500, fontSize: 13 }}>{tx.ticker || "—"}</div>
-                    {tx.note && <div className="muted" style={{ fontSize: 11 }}>{tx.note}</div>}
-                  </td>
-                  <td className="num">{tx.shares != null ? tx.shares.toLocaleString(undefined, { maximumFractionDigits: 4 }) : "—"}</td>
-                  <td className="num">
-                    {tx.price != null
-                      ? (priceCcy === 'USD' ? '$' : '฿') + tx.price.toLocaleString(undefined, { maximumFractionDigits: 2 })
-                      : "—"}
-                  </td>
-                  <td className="num" style={{ fontWeight: 500 }}>
-                    {amountDisp > 0 ? LUMEN_FMT.money(amountDisp, ccy, { compact: true }) : "—"}
-                    {((tx.fee || 0) + (tx.tax || 0)) > 0 && (
-                      <div className="muted" style={{ fontSize: 10, marginTop: 1 }}>
-                        {tx.fee > 0 && <span>fee {priceCcy === 'USD' ? '$' : '฿'}{Number(tx.fee).toLocaleString(undefined, { maximumFractionDigits: 2 })}</span>}
-                        {tx.fee > 0 && tx.tax > 0 && <span> · </span>}
-                        {tx.tax > 0 && <span>tax {priceCcy === 'USD' ? '$' : '฿'}{Number(tx.tax).toLocaleString(undefined, { maximumFractionDigits: 2 })}</span>}
-                      </div>
-                    )}
-                  </td>
-                  <td className="num hide-mob">
-                    <span className="muted" style={{ fontSize: 11 }}>{priceCcy}</span>
-                  </td>
-                  <td>
-                    <div style={{ display: "flex", gap: 4, justifyContent: "flex-end" }}>
-                      <button
-                        onClick={() => setEditTx(tx)}
-                        style={{ background: "none", border: "none", cursor: "pointer", padding: "4px 6px", borderRadius: 6, color: "var(--ink-3)", lineHeight: 1 }}
-                        title={th ? "แก้ไข" : "Edit"}
-                      >
-                        <Icon name="edit" size={13} />
-                      </button>
-                      <button
-                        onClick={() => handleDelete(tx)}
-                        disabled={deleting === tx.id}
-                        style={{ background: "none", border: "none", cursor: "pointer", padding: "4px 6px", borderRadius: 6, color: "var(--loss)", lineHeight: 1 }}
-                        title={th ? "ลบ" : "Delete"}
-                      >
-                        <Icon name="trash" size={13} />
-                      </button>
-                    </div>
-                  </td>
-                </tr>
+                <Fragment key={group.year}>
+                  <tr onClick={() => toggleYear(group.year)} style={{ cursor: "pointer", background: "var(--bg-2)" }}>
+                    <td colSpan="8" style={{ padding: "8px 14px", fontSize: 12, fontWeight: 600, color: "var(--ink-2)" }}>
+                      <span style={{ display: "inline-flex", alignItems: "center", gap: 8 }}>
+                        <span style={{ display: "inline-block", transform: collapsed ? "rotate(-90deg)" : "none", transition: "transform 0.15s", color: "var(--ink-3)" }}>▾</span>
+                        {group.year}
+                        <span className="muted" style={{ fontWeight: 400 }}>· {group.items.length} {th ? "รายการ" : "items"}</span>
+                      </span>
+                    </td>
+                  </tr>
+                  {!collapsed && group.items.map(renderRow)}
+                </Fragment>
               )
             })}
           </tbody>
