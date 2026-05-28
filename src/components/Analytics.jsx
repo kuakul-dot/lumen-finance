@@ -868,26 +868,34 @@ function AnalyticsDiv2({ t, lang, ccy, rows, totalValue, dataState, liveHoldings
         divTxs
           .filter(tx => tx.ticker === ticker && tx.transacted_at)
           .some(tx => Math.abs(new Date(tx.transacted_at).getTime() / 1000 - eventSec) < 60 * 86400)
-      // Combine multiple lots of the same ticker
-      const tickerTotals = {}
-      liveHoldings.forEach(h => {
-        if (!tickerTotals[h.ticker]) tickerTotals[h.ticker] = { ...h, totalShares: h.shares }
-        else tickerTotals[h.ticker].totalShares += h.shares
-      })
+      // Shares actually held on a given date (from the transaction ledger) —
+      // dividends accrue to the position on the ex-date, not today's total.
+      const sharesAsOf = (ticker, sec) => {
+        let s = 0
+        for (const tx of transactions) {
+          if (tx.ticker !== ticker || !tx.transacted_at) continue
+          if (new Date(tx.transacted_at).getTime() / 1000 > sec) continue
+          const q = Number(tx.shares) || 0
+          if (tx.type === 'Buy') s += q
+          else if (tx.type === 'Sell') s -= q
+        }
+        return Math.max(0, s)
+      }
+      // One entry per ticker (region/symbol metadata)
+      const tickerMeta = {}
+      liveHoldings.forEach(h => { if (!tickerMeta[h.ticker]) tickerMeta[h.ticker] = h })
       const suggestions = []
-      Object.values(tickerTotals).forEach(h => {
-        const sym = toYahooSymbol(h.ticker, h.region || 'TH', h.asset_class || 'Equity')
-        const purchaseSec = tickerPurchaseSec[h.ticker]
-          ?? (h.purchased_at ? new Date(h.purchased_at).getTime() / 1000
-            : h.created_at   ? new Date(h.created_at).getTime()   / 1000
-            : 0);
+      Object.values(tickerMeta).forEach(h => {
+        const sym = toYahooSymbol(h.ticker, h.region || 'TH', h.asset_class || 'Equity');
         (history[sym] || [])
-          .filter(e => e.date >= purchaseSec && e.date <= nowSec && !alreadyRecorded(h.ticker, e.date))
+          .filter(e => e.date <= nowSec && !alreadyRecorded(h.ticker, e.date))
           .forEach(e => {
+            const sharesHeld = sharesAsOf(h.ticker, e.date)
+            if (sharesHeld <= 0) return   // didn't hold it on the ex-date
             const d = new Date(e.date * 1000)
             const region  = h.region || 'TH'
             const isTHB   = region === 'TH'
-            const gross   = +(e.amount * h.totalShares).toFixed(2)
+            const gross   = +(e.amount * sharesHeld).toFixed(2)
             const taxRate = region === 'TH' ? 0.10 : region === 'US' ? 0.15 : 0
             const net     = +(gross * (1 - taxRate)).toFixed(2)
             suggestions.push({
@@ -895,7 +903,7 @@ function AnalyticsDiv2({ t, lang, ccy, rows, totalValue, dataState, liveHoldings
               date:      d.toISOString().slice(0, 10),
               dateLabel: d.toLocaleDateString(th ? 'th-TH' : 'en-US', { day: 'numeric', month: 'short', year: '2-digit' }),
               pricePerShare: e.amount,
-              shares: h.totalShares,
+              shares: sharesHeld,
               gross, taxRate, net,
               editedNet: net,
               currency: isTHB ? 'THB' : 'USD',
