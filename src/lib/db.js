@@ -111,12 +111,14 @@ export async function syncHoldingsFromTransactions(portfolioId, txs) {
     }
 
     if (tx.type === 'Buy') {
+      // Cost basis includes buy-side fee + tax (accounting standard)
+      const buyCost = shares * price + (Number(tx.fee) || 0) + (Number(tx.tax) || 0)
       if (h) {
         const prevShares = Number(h.shares) || 0
         const prevCost   = Number(h.cost_price) || 0
         const newShares  = prevShares + shares
         h.cost_price = newShares > 0
-          ? (prevShares * prevCost + shares * price) / newShares
+          ? (prevShares * prevCost + buyCost) / newShares
           : price
         h.shares  = newShares
         h._dirty  = true
@@ -124,7 +126,8 @@ export async function syncHoldingsFromTransactions(portfolioId, txs) {
         const isUSD = (tx.currency || 'THB') === 'USD'
         byTicker.set(key, {
           _new: true, _dirty: true,
-          ticker: key, name: tx.note || key, shares, cost_price: price,
+          ticker: key, name: tx.note || key, shares,
+          cost_price: shares > 0 ? buyCost / shares : price,
           currency: tx.currency || 'THB',
           region: isUSD ? 'US' : 'TH',   // drives Yahoo symbol (.BK) + price currency
           asset_class: 'Equity',
@@ -176,7 +179,8 @@ export async function rebuildHolding(portfolioId, ticker) {
     const p = Number(tx.price)  || 0
     if (!currency && tx.currency) currency = tx.currency
     if (tx.type === 'Buy') {
-      shares += s; costTotal += s * p
+      // Cost basis includes buy-side fee + tax (accounting standard)
+      shares += s; costTotal += s * p + (Number(tx.fee) || 0) + (Number(tx.tax) || 0)
     } else if (tx.type === 'Sell') {
       const avg = shares > 0 ? costTotal / shares : 0
       shares    = Math.max(0, shares - s)
