@@ -478,9 +478,24 @@ function parseDocDated(rows, header) {
     const price  = snum(g('price',  row))
     if (shares == null || price == null || shares <= 0 || price <= 0) continue  // real trades only
 
-    const total = snum(g('total', row)) ?? snum(g('amount', row))
     const gross = +(shares * price).toFixed(2)
-    const fee   = total != null ? +Math.abs(total - gross).toFixed(2) : (snum(g('fee', row)) || 0)
+
+    // The Total-Fee block sits between Unit Price and Total Amount and holds
+    // two figures: [Net fee, VAT].  Read them by position so fee vs tax stay
+    // separate (InnovestX).  Fall back to total − gross if the block is absent.
+    let fee = 0, tax = 0
+    if (colMap.price !== undefined && colMap.total !== undefined) {
+      const mid = row
+        .filter(c => c.x > colMap.price + 5 && c.x < colMap.total - 5 && ISNUM_RE.test(c.text.trim()))
+        .sort((a, b) => a.x - b.x)
+        .map(c => toNum(c.text))
+      if (mid.length >= 2) { fee = mid[0]; tax = mid[1] }
+      else if (mid.length === 1) { fee = mid[0] }
+    }
+    if (fee === 0 && tax === 0) {
+      const total = snum(g('total', row)) ?? snum(g('amount', row))
+      if (total != null) fee = +Math.abs(total - gross).toFixed(2)
+    }
 
     // Buy/Sell from the contract-number prefix (BU-…/SE-…/SL-…), default Buy
     const ct   = texts.find(t => /^(BU|SE|SL)[-\s]?\d/i.test(t.trim()))
@@ -491,7 +506,7 @@ function parseDocDated(rows, header) {
     results.push({
       transacted_at: date,
       type, ticker, shares, price,
-      amount: gross, fee, tax: 0, currency, note: null,
+      amount: gross, fee, tax, currency, note: null,
     })
   }
   return results
