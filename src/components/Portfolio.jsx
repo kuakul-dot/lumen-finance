@@ -2,7 +2,7 @@
 import { PageHead, Delta, Icon } from './Nav'
 import { Sparkline } from './Charts'
 import { LUMEN_FMT, LUMEN_DERIVE } from '../data'
-import { addHolding, updateHolding, deleteHolding, deriveHoldings, addTransaction, syncHoldingsFromTransactions, rebuildHolding, getTransactions, updateTransaction, deleteTransaction, deleteTransactionsByTicker } from '../lib/db'
+import { addHolding, updateHolding, deleteHolding, deriveHoldings, addTransaction, syncHoldingsFromTransactions, rebuildHolding, updateHoldingMeta, getTransactions, updateTransaction, deleteTransaction, deleteTransactionsByTicker } from '../lib/db'
 
 export function PortfolioPage({ t, lang, ccy, setRoute, dataState, portfolio, liveHoldings = [], prices = {}, refreshHoldings, loadingData, dataError, retryLoad, fxRate = 36 }) {
   const [showAdd, setShowAdd] = useState(false)
@@ -193,7 +193,7 @@ function LivePortfolioPage({ t, lang, ccy, portfolio, liveHoldings, prices = {},
       </div>
 
       {tab === "transactions" ? (
-        <TransactionsTab transactions={transactions} loading={txLoading} lang={lang} ccy={ccy} fxRate={fxRate} onReload={async () => { await loadTransactions(); await refreshHoldings?.() }} portfolioId={portfolio?.id} />
+        <TransactionsTab transactions={transactions} holdings={liveHoldings} loading={txLoading} lang={lang} ccy={ccy} fxRate={fxRate} onReload={async () => { await loadTransactions(); await refreshHoldings?.() }} portfolioId={portfolio?.id} />
       ) : rows.length === 0 ? (
         <div className="card empty">
           <h2 className="display" style={{ fontSize: 28, margin: 0 }}>
@@ -987,7 +987,7 @@ function DateSelectField({ label, value, onChange, lang }) {
 }
 
 // ─── Transactions Tab ────────────────────────────────────────────────────────
-function TransactionsTab({ transactions, loading, lang, ccy, fxRate = 36, onReload, portfolioId }) {
+function TransactionsTab({ transactions, holdings = [], loading, lang, ccy, fxRate = 36, onReload, portfolioId }) {
   const th = lang === "th"
   const [editTx, setEditTx] = useState(null)     // tx object being edited
   const [deleting, setDeleting] = useState(null)  // id being deleted
@@ -1132,13 +1132,18 @@ function TransactionsTab({ transactions, loading, lang, ccy, fxRate = 36, onRelo
       {editTx && (
         <EditTransactionModal
           tx={editTx}
+          holding={holdings.find(h => h.ticker?.toUpperCase() === (editTx.ticker || '').toUpperCase())}
           lang={lang}
           onClose={() => setEditTx(null)}
           onSaved={async (updated) => {
-            // Re-sync holdings for the affected ticker(s) — handles renames too
             if (portfolioId) {
+              // Rebuild positions for the affected ticker(s) — handles renames
               const tickers = new Set([editTx.ticker, updated?.ticker].filter(Boolean))
               for (const tk of tickers) await rebuildHolding(portfolioId, tk)
+              // Apply classification (region/sector/asset class/name) to the holding
+              if (updated?.ticker && updated.meta) {
+                await updateHoldingMeta(portfolioId, updated.ticker, updated.meta)
+              }
             }
             setEditTx(null); onReload?.()
           }}
@@ -1154,27 +1159,37 @@ function TransactionsTab({ transactions, loading, lang, ccy, fxRate = 36, onRelo
 }
 
 // ─── Edit Transaction Modal ───────────────────────────────────────────────────
-function EditTransactionModal({ tx, lang, onClose, onSaved }) {
+function EditTransactionModal({ tx, holding, lang, onClose, onSaved }) {
   const th = lang === "th"
   const toDateInput = (v) => {
     if (!v) return new Date().toISOString().split('T')[0]
     return new Date(v).toISOString().split('T')[0]
   }
+  // Classification fields default from the existing holding, then fall back to
+  // sensible guesses derived from the transaction currency.
+  const ccyDefault = tx.currency || holding?.currency || 'THB'
   const [form, setForm] = useState({
     type:         tx.type || 'Buy',
     ticker:       tx.ticker || '',
+    name:         holding?.name || tx.note || tx.ticker || '',
+    asset_class:  holding?.asset_class || 'Equity',
+    region:       holding?.region || (ccyDefault === 'USD' ? 'US' : 'TH'),
+    sector:       holding?.sector || '',
     shares:       tx.shares != null ? String(tx.shares) : '',
     price:        tx.price  != null ? String(tx.price)  : '',
     amount:       tx.amount != null ? String(tx.amount) : '',
     fee:          tx.fee    != null && tx.fee  !== 0 ? String(tx.fee)  : '',
     tax:          tx.tax    != null && tx.tax  !== 0 ? String(tx.tax)  : '',
-    currency:     tx.currency || 'THB',
+    currency:     ccyDefault,
     note:         tx.note || '',
     transacted_at: toDateInput(tx.transacted_at),
   })
   const [saving, setSaving] = useState(false)
   const [error,  setError]  = useState(null)
-  const set = (k, v) => setForm(f => ({ ...f, [k]: v }))
+  const set = (k, v) => setForm(f => ({
+    ...f, [k]: v,
+    ...(k === 'region' ? { div_frequency: v === 'TH' ? 2 : 4 } : {}),
+  }))
 
   const handleSubmit = async (e) => {
     e.preventDefault()
@@ -1197,7 +1212,17 @@ function EditTransactionModal({ tx, lang, onClose, onSaved }) {
     })
     setSaving(false)
     if (err) { setError(err.message); return }
-    onSaved({ ticker: form.ticker.toUpperCase() || null })
+    onSaved({
+      ticker: form.ticker.toUpperCase() || null,
+      meta: {
+        name:        form.name || null,
+        region:      form.region,
+        asset_class: form.asset_class,
+        sector:      form.sector || null,
+        currency:    form.currency,
+        div_frequency: form.div_frequency,
+      },
+    })
   }
 
   const TX_TYPES = ['Buy', 'Sell', 'Dividend', 'Deposit', 'Withdraw']
@@ -1211,7 +1236,7 @@ function EditTransactionModal({ tx, lang, onClose, onSaved }) {
     }} onClick={e => e.target === e.currentTarget && onClose()}>
       <div style={{
         background: "var(--bg)", borderRadius: 20, padding: "32px 28px 40px",
-        width: "100%", maxWidth: 520, margin: "auto",
+        width: "100%", maxWidth: 560, margin: "auto",
         boxShadow: "0 8px 48px rgba(0,0,0,0.18)",
         animation: "fadeIn 0.18s ease",
       }}>
@@ -1229,18 +1254,59 @@ function EditTransactionModal({ tx, lang, onClose, onSaved }) {
             </div>
           )}
 
-          {/* Type + Ticker */}
+          {/* Type + Ticker search */}
           <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
             <Field label={th ? "ประเภท" : "Type"}>
               <select value={form.type} onChange={e => set('type', e.target.value)} style={inputStyle}>
                 {TX_TYPES.map(t => <option key={t} value={t}>{(typeLabel[lang] || typeLabel.en)[t]}</option>)}
               </select>
             </Field>
-            <Field label={th ? "ติ๊กเกอร์" : "Ticker"}>
-              <input value={form.ticker} onChange={e => set('ticker', e.target.value)}
-                     placeholder="e.g. PTT" style={inputStyle} />
+            <Field label={th ? "ค้นหาหลักทรัพย์" : "Search ticker"}>
+              <TickerSearch
+                lang={lang}
+                value={form.ticker}
+                onType={v => set('ticker', v.toUpperCase())}
+                onSelect={({ ticker, name, region, asset_class, currency, div_frequency }) =>
+                  setForm(f => ({ ...f, ticker, name, region, asset_class, currency, div_frequency }))
+                }
+              />
             </Field>
           </div>
+
+          {/* Name */}
+          <Field label={th ? "ชื่อหลักทรัพย์" : "Name"}>
+            <input value={form.name} onChange={e => set('name', e.target.value)}
+                   placeholder={th ? "ชื่อเต็ม (กรอกเองหรือเลือกจากรายการ)" : "Full name (auto-filled or type manually)"} style={inputStyle} />
+          </Field>
+
+          {/* Asset Class + Region */}
+          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
+            <Field label={th ? "ประเภทสินทรัพย์" : "Asset Class"}>
+              <select value={form.asset_class} onChange={e => set('asset_class', e.target.value)} style={inputStyle}>
+                <option value="Equity">{th ? "หุ้น (Equity)" : "Equity"}</option>
+                <option value="ETF">ETF</option>
+                <option value="Bond">{th ? "พันธบัตร" : "Bond"}</option>
+                <option value="Crypto">{th ? "คริปโต" : "Crypto"}</option>
+                <option value="Commodity">{th ? "สินค้าโภคภัณฑ์" : "Commodity"}</option>
+              </select>
+            </Field>
+            <Field label={th ? "ตลาด" : "Region"}>
+              <select value={form.region} onChange={e => set('region', e.target.value)} style={inputStyle}>
+                <option value="TH">{th ? "ไทย (SET)" : "Thailand (SET)"}</option>
+                <option value="US">{th ? "สหรัฐ (NYSE/NASDAQ)" : "US (NYSE/NASDAQ)"}</option>
+                <option value="Other">{th ? "อื่นๆ" : "Other"}</option>
+              </select>
+            </Field>
+          </div>
+
+          {/* Sector */}
+          <Field label={th ? "กลุ่มอุตสาหกรรม (Sector)" : "Sector (optional)"}>
+            <select value={form.sector} onChange={e => set('sector', e.target.value)} style={inputStyle}>
+              {SECTORS.map(s => (
+                <option key={s.value} value={s.value}>{th ? s.th : s.en}</option>
+              ))}
+            </select>
+          </Field>
 
           {/* Shares + Price */}
           <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>

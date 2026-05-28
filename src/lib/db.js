@@ -206,6 +206,24 @@ export async function rebuildHolding(portfolioId, ticker) {
   })
 }
 
+// Apply classification metadata (name/region/sector/asset_class/currency/...)
+// to a holding identified by ticker.  Used when editing a transaction so the
+// position is filed and priced correctly.  Only non-empty fields are written.
+export async function updateHoldingMeta(portfolioId, ticker, meta = {}) {
+  if (!portfolioId || !ticker) return { error: null }
+  const key = ticker.toUpperCase()
+  const existing = await getHoldings(portfolioId)
+  const h = existing.find(x => x.ticker?.toUpperCase() === key)
+  if (!h) return { error: null }
+
+  const patch = {}
+  for (const k of ['name', 'region', 'asset_class', 'sector', 'currency', 'div_frequency', 'div_yield']) {
+    if (meta[k] !== undefined && meta[k] !== null && meta[k] !== '') patch[k] = meta[k]
+  }
+  if (Object.keys(patch).length === 0) return { error: null }
+  return updateHolding(h.id, patch)
+}
+
 export async function updateTransaction(id, updates) {
   const { data, error } = await supabase
     .from('transactions')
