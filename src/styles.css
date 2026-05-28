@@ -489,9 +489,12 @@ hr.rule { border: 0; border-top: 1px solid var(--line); margin: 24px 0; }
 }
 
 /* Subtle entry */
+/* Opacity-only so .fade-in (used on page shells) never establishes a
+   transform containing block — otherwise position:fixed modals would
+   anchor to the page shell instead of the viewport. */
 @keyframes fadeUp {
-  from { opacity: 0; transform: translateY(6px); }
-  to { opacity: 1; transform: none; }
+  from { opacity: 0; }
+  to   { opacity: 1; }
 }
 .fade-in { animation: fadeUp 0.4s ease both; }
 
