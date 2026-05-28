@@ -1504,6 +1504,7 @@ function AnalyticsGrowth({ t, lang, ccy, rows = [], fxRate = 36, totalValue, tot
 function AnalyticsMetrics({ t, lang, ccy, rows = [], totalValue = 0, totalPL = 0, totalPlPct = 0, dataState }) {
   const th = lang === "th"
   const isLive = dataState === "live"
+  const [openKey, setOpenKey] = useState(null)   // which metric's formula is expanded
 
   // ── Live-computable metrics (no historical data needed) ────────────────────
   const liveMetrics = useMemo(() => {
@@ -1524,27 +1525,33 @@ function AnalyticsMetrics({ t, lang, ccy, rows = [], totalValue = 0, totalPL = 0
       { key: "concentration", value: concentration.toFixed(0), unit: "/100", scale: Math.min(1, hhi * 2),
         min: "0", max: "100", inverse: true,
         sub: th ? "ความกระจุกตัว (HHI)" : "Concentration (HHI)",
-        body: th ? "0 = กระจายมาก · 100 = หุ้นเดียว — ต่ำ = ดี" : "0 = highly diversified · 100 = single holding — lower is safer" },
+        body: th ? "0 = กระจายมาก · 100 = หุ้นเดียว — ต่ำ = ดี" : "0 = highly diversified · 100 = single holding — lower is safer",
+        formula: "HHI = Σ(wᵢ)² × 100\nwᵢ = มูลค่าหุ้น i ÷ มูลค่าพอร์ตรวม" },
       { key: "top3", value: top3.toFixed(0) + "%", scale: top3 / 100,
         min: "0%", max: "100%", inverse: top3 > 60,
         sub: th ? "น้ำหนัก 3 อันดับแรก" : "Top-3 weight",
-        body: th ? "% ของพอร์ตในตำแหน่ง 3 อันดับแรก (มาก = กระจุก)" : "% in top 3 positions (high = concentrated)" },
+        body: th ? "% ของพอร์ตในตำแหน่ง 3 อันดับแรก (มาก = กระจุก)" : "% in top 3 positions (high = concentrated)",
+        formula: "Σ weight ของหุ้น 3 ตัวที่มูลค่าสูงสุด" },
       { key: "largest", value: topOne.toFixed(1) + "%", scale: Math.min(1, topOne / 50),
         min: "0%", max: "50%+", inverse: topOne > 30,
         sub: th ? "ตำแหน่งใหญ่สุด" : "Largest position",
-        body: th ? "หุ้นใหญ่สุด — เกิน 30% ถือว่าเสี่ยงกระจุก" : "Largest single holding — >30% is concentration risk" },
+        body: th ? "หุ้นใหญ่สุด — เกิน 30% ถือว่าเสี่ยงกระจุก" : "Largest single holding — >30% is concentration risk",
+        formula: "max(weightᵢ) ของทุกหุ้นในพอร์ต" },
       { key: "classes", value: uniqueClasses.toString(), scale: Math.min(1, uniqueClasses / 6),
         min: "1", max: "6+",
         sub: th ? "ประเภทสินทรัพย์" : "Asset classes",
-        body: th ? "ความหลากหลายของประเภทสินทรัพย์ในพอร์ต" : "Number of distinct asset classes held" },
+        body: th ? "ความหลากหลายของประเภทสินทรัพย์ในพอร์ต" : "Number of distinct asset classes held",
+        formula: th ? "นับจำนวนประเภทสินทรัพย์ที่ไม่ซ้ำกัน\n(Equity / ETF / Bond / Crypto / Commodity)" : "count of distinct asset classes" },
       { key: "yield", value: wYield.toFixed(2) + "%", scale: Math.min(1, wYield / 6),
         min: "0%", max: "6%+",
         sub: th ? "อัตราปันผลถ่วงน้ำหนัก" : "Weighted div yield",
-        body: th ? "อัตราปันผลเฉลี่ยตามน้ำหนักของแต่ละหลักทรัพย์" : "Dividend yield weighted by each holding's portfolio weight" },
+        body: th ? "อัตราปันผลเฉลี่ยตามน้ำหนักของแต่ละหลักทรัพย์" : "Dividend yield weighted by each holding's portfolio weight",
+        formula: "Σ (อัตราปันผลหุ้น i × weightᵢ)" },
       { key: "geo", value: thWeight.toFixed(0) + "% / " + usWeight.toFixed(0) + "%", scale: Math.abs(thWeight - usWeight) / 100,
         min: "TH", max: "US", inverse: Math.abs(thWeight - usWeight) > 70,
         sub: th ? "สัดส่วนภูมิภาค (TH / US)" : "Region split (TH / US)",
-        body: th ? "ยิ่งเอียงสุดทาง ความเสี่ยงตลาดเดียวยิ่งสูง" : "Lopsided splits expose you to single-market risk" },
+        body: th ? "ยิ่งเอียงสุดทาง ความเสี่ยงตลาดเดียวยิ่งสูง" : "Lopsided splits expose you to single-market risk",
+        formula: th ? "Σ weight หุ้น TH  /  Σ weight หุ้น US" : "Σ weight of TH holdings / Σ weight of US holdings" },
     ]
   }, [isLive, rows, totalValue, th])
 
@@ -1565,9 +1572,18 @@ function AnalyticsMetrics({ t, lang, ccy, rows = [], totalValue = 0, totalPL = 0
     sortino:  th ? "วัดผลตอบแทนต่อความเสี่ยงขาลงเท่านั้น"           : "How well profitability compensates for downside risk",
     drawdown: th ? "การลดลงสูงสุดจากจุดสูงสุดในประวัติ"              : "Largest peak-to-trough decline observed",
   }
+  const demoFormula = {
+    twr:      "Π(1 + rₜ) − 1\nrₜ = ผลตอบแทนช่วงย่อยระหว่างกระแสเงินสด",
+    pe:       "Σ (P/Eᵢ × weightᵢ)",
+    beta:     "Cov(พอร์ต, ตลาด) ÷ Var(ตลาด)",
+    sharpe:   "(Rₚ − R_f) ÷ σₚ\nσₚ = ส่วนเบี่ยงเบนมาตรฐานผลตอบแทน",
+    sortino:  "(Rₚ − R_f) ÷ σ_ขาลง",
+    drawdown: "min((Vₜ − peakₜ) ÷ peakₜ)",
+  }
 
   const metricsList = isLive && liveMetrics ? liveMetrics : demoMetrics
   const bodyMap = isLive ? null : demoBody
+  const formulaMap = isLive ? null : demoFormula
 
   return (
     <div className="fade-in">
@@ -1596,14 +1612,39 @@ function AnalyticsMetrics({ t, lang, ccy, rows = [], totalValue = 0, totalPL = 0
       )}
 
       <div className="grid grid-2" style={{ gap: 16 }}>
-        {metricsList.map(m => (
+        {metricsList.map(m => {
+          const formula = isLive ? m.formula : formulaMap[m.key]
+          const open = openKey === m.key
+          return (
           <div key={m.key} className="card" style={{ padding: 28 }}>
             <h4 style={{ margin: 0, fontSize: 14, fontWeight: 500, display: "flex", alignItems: "center", gap: 6 }}>
-              {m.sub} <Icon name="info" size={13} />
+              {m.sub}
+              <button
+                onClick={() => setOpenKey(open ? null : m.key)}
+                title={th ? "ดูสูตรการคำนวณ" : "Show formula"}
+                style={{ background: "none", border: "none", cursor: "pointer", padding: 2, lineHeight: 0,
+                         color: open ? "var(--accent-ink)" : "var(--ink-3)" }}
+              >
+                <Icon name="info" size={13} />
+              </button>
             </h4>
-            <p className="muted" style={{ fontSize: 12, marginTop: 6, marginBottom: 22 }}>
+            <p className="muted" style={{ fontSize: 12, marginTop: 6, marginBottom: open ? 12 : 22 }}>
               {isLive ? m.body : bodyMap[m.key]}
             </p>
+            {open && formula && (
+              <div style={{
+                marginBottom: 18, padding: "12px 14px", borderRadius: 10,
+                background: "var(--bg-2)", border: "1px solid var(--line)",
+              }}>
+                <div style={{ fontSize: 10.5, fontWeight: 700, color: "var(--ink-3)", marginBottom: 6, letterSpacing: 0.4 }}>
+                  {th ? "สูตรการคำนวณ" : "FORMULA"}
+                </div>
+                <pre style={{
+                  margin: 0, fontSize: 12, lineHeight: 1.6, color: "var(--ink-2)",
+                  fontFamily: "var(--font-mono)", whiteSpace: "pre-wrap",
+                }}>{formula}</pre>
+              </div>
+            )}
             <div className="display" style={{ fontSize: 48, lineHeight: 1, color: m.inverse ? "var(--loss)" : "var(--ink)" }}>
               {m.value}{m.unit && <span style={{ fontSize: 20, color: "var(--ink-3)", marginLeft: 4 }}>{m.unit}</span>}
             </div>
@@ -1615,7 +1656,8 @@ function AnalyticsMetrics({ t, lang, ccy, rows = [], totalValue = 0, totalPL = 0
               <span>{m.min}</span><span>{m.max}</span>
             </div>
           </div>
-        ))}
+          )
+        })}
       </div>
 
       {isLive && (
