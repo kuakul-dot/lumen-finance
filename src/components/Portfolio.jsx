@@ -335,7 +335,7 @@ function LivePortfolioPage({ t, lang, ccy, portfolio, liveHoldings, prices = {},
                     <tr key={r.ticker} style={{ opacity: deleting && r._ids.includes(deleting) ? 0.4 : 1 }}>
                       <td>
                         <div className="ticker">
-                          <TickerLogo ticker={r.ticker} logoUrl={r.logo_url} cls={r.cls} />
+                          <TickerLogo ticker={r.ticker} logoUrl={r.logo_url} cls={r.cls} region={r.region} />
                           <div>
                             <div style={{ fontWeight: 500 }}>{r.ticker}</div>
                             <div className="muted" style={{ fontSize: 11 }}>
@@ -875,7 +875,7 @@ function EditHoldingModal({ lang, holding, onClose, onSaved }) {
           {/* Logo URL (optional) — overrides the auto logo / initials */}
           <Field label={th ? "URL โลโก้ (ไม่บังคับ)" : "Logo URL (optional)"}>
             <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-              <TickerLogo ticker={form.ticker} logoUrl={form.logo_url?.trim() || null} cls={form.asset_class} size={36} />
+              <TickerLogo ticker={form.ticker} logoUrl={form.logo_url?.trim() || null} cls={form.asset_class} region={form.region} size={36} />
               <input value={form.logo_url} onChange={e => set('logo_url', e.target.value)}
                      placeholder="https://…/logo.png" style={inputStyle} />
             </div>
@@ -2300,11 +2300,15 @@ function classFg(cls) {
 }
 
 // Stock logo with graceful fallback: custom logoUrl → ticker logo API → initials.
-// US tickers resolve well; Thai/others usually fall back to the coloured initials.
-function TickerLogo({ ticker = "", logoUrl, cls, size = 34 }) {
+// The auto API is keyed by bare ticker, so a Thai symbol can collide with an
+// unrelated US one (e.g. a SET ticker matching a US ticker) and show the wrong
+// logo.  So only auto-fetch for non-Thai holdings; Thai stocks use a custom
+// logoUrl if provided, else the coloured initials.
+function TickerLogo({ ticker = "", logoUrl, cls, region, size = 34 }) {
   const [failed, setFailed] = useState(false)
   const base = ticker.replace(/\.BK$/i, "").toUpperCase()
-  const apiSrc = base ? `https://assets.parqet.com/logos/symbol/${encodeURIComponent(base)}?format=png&size=64` : null
+  const isThai = region === "TH"
+  const apiSrc = (!isThai && base) ? `https://assets.parqet.com/logos/symbol/${encodeURIComponent(base)}?format=png&size=64` : null
   const src = logoUrl || apiSrc
   const initials = (base || "?").slice(0, 2)
   if (!src || failed) {
