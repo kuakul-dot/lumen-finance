@@ -4,14 +4,12 @@
 // Column matching uses X-coordinate proximity (not array index) so it is robust
 // against empty cells, wrapped header text, and bilingual two-row headers.
 //
-// Confirmed working brokers:
+// Confirmed working (tested against real PDFs):
 //   ✅ Dime! (ไดม์)          — Confirmation Note / Tax Invoice (US stocks, USD)
 //   ✅ InnovestX (อินโนเวสท์) — Confirmation Note / Tax Invoice (TH stocks, THB)
-//   ✅ Settrade / SET-linked  — รายงานการซื้อขาย, ใบยืนยัน (TH stocks, THB)
-//   ✅ Bualuang Securities    — ใบยืนยันการซื้อขาย (THB)
-//   ✅ KGI Securities         — Trade Confirmation (THB / USD)
-//   ✅ Finansia Syrus         — ใบยืนยัน (THB)
-//   🟡 KTBST / KS / ASL      — works if PDF is text-based (heuristic mode)
+//
+// May work via the generic header/heuristic parsers (NOT yet verified):
+//   🟡 Settrade / Bualuang / KGI / Finansia / other text-based broker PDFs
 //   ❌ Scanned / image PDFs   — no OCR support
 
 import * as pdfjs from 'pdfjs-dist'

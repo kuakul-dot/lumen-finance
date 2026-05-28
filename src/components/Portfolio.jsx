@@ -1567,11 +1567,11 @@ function ImportPDFModal({ lang, portfolioId, onClose, onImported }) {
                 {th ? "โบรกเกอร์ที่รองรับ" : "Supported brokers"}
               </div>
               <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
-                {["Dime!", "InnovestX", "Settrade", "Bualuang", "KGI", "Finansia"].map(b => (
+                {["Dime!", "InnovestX"].map(b => (
                   <span key={b} style={{
                     fontSize: 11, fontWeight: 600, padding: "3px 9px", borderRadius: 999,
                     background: "var(--accent-soft)", color: "var(--accent-ink)",
-                  }}>{b}</span>
+                  }}>✓ {b}</span>
                 ))}
               </div>
               <div style={{ fontSize: 10.5, color: "var(--ink-3)", marginTop: 8, lineHeight: 1.5 }}>
