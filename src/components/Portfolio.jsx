@@ -3,7 +3,7 @@ import { PageHead, Delta, Icon, TickerLogo } from './Nav'
 import { Sparkline } from './Charts'
 import { LUMEN_FMT, LUMEN_DERIVE } from '../data'
 import { addHolding, updateHolding, deleteHolding, deriveHoldings, addTransaction, syncHoldingsFromTransactions, rebuildHolding, rebuildAllHoldings, updateHoldingMeta, getTransactions, getAllTransactions, computeRealized, updateTransaction, deleteTransaction, deleteTransactionsByTicker, applySplit } from '../lib/db'
-import { fetchSplits, toYahooSymbol } from '../lib/prices'
+import { fetchSplits, toYahooSymbol, fetchHistory } from '../lib/prices'
 
 export function PortfolioPage({ t, lang, ccy, setRoute, dataState, portfolio, liveHoldings = [], prices = {}, refreshHoldings, loadingData, dataError, retryLoad, fxRate = 36 }) {
   const [showAdd, setShowAdd] = useState(false)
@@ -112,6 +112,28 @@ function LivePortfolioPage({ t, lang, ccy, portfolio, liveHoldings, prices = {},
   }, [tab, loadTransactions])
 
   const rows = useMemo(() => deriveHoldings(liveHoldings, ccy, prices, fxRate), [liveHoldings, ccy, prices, fxRate])
+
+  // Real 30-day sparkline data: last month of daily closes per ticker from Yahoo
+  const [spark30, setSpark30] = useState({})  // { TICKER: { data: number[], ret: pct } }
+  useEffect(() => {
+    if (!liveHoldings.length) { setSpark30({}); return }
+    let cancelled = false
+    const seen = new Set(), uniq = []
+    liveHoldings.forEach(h => {
+      const sym = toYahooSymbol(h.ticker, h.region || 'TH', h.asset_class || 'Equity')
+      if (!seen.has(sym)) { seen.add(sym); uniq.push({ ticker: h.ticker.toUpperCase(), sym }) }
+    })
+    ;(async () => {
+      const out = {}
+      await Promise.all(uniq.map(async ({ ticker, sym }) => {
+        const h = await fetchHistory(sym, '1mo').catch(() => null)
+        const closes = (h?.series || []).map(p => p.c).filter(c => Number.isFinite(c))
+        if (closes.length >= 2) out[ticker] = { data: closes, ret: (closes[closes.length - 1] / closes[0] - 1) * 100 }
+      }))
+      if (!cancelled) setSpark30(out)
+    })()
+    return () => { cancelled = true }
+  }, [liveHoldings])
 
   // Rows in the current region/class view — the summary reflects the active
   // filter chip (search is applied only to the table below, not the totals).
@@ -423,9 +445,8 @@ function LivePortfolioPage({ t, lang, ccy, portfolio, liveHoldings, prices = {},
               <tbody>
                 {grouped.map(r => {
                   const costBasis = r.value - r.pl
-                  const sparkData = Array.from({ length: 20 }, (_, i) =>
-                    Math.sin(i / 2 + r.ticker.length) + Math.cos(i / 3 + r.ticker.length * 1.3) + (i / 20) * ((r.changePct || r.plPct / 10) > 0 ? 0.6 : -0.6))
-                  const sparkColor = (r.changePct || r.plPct) >= 0 ? "var(--gain)" : "var(--loss)"
+                  const sp = spark30[r.ticker?.toUpperCase()]
+                  const sparkColor = (sp ? sp.ret : (r.changePct || r.plPct)) >= 0 ? "var(--gain)" : "var(--loss)"
                   return (
                     <tr key={r.ticker} style={{ opacity: deleting && r._ids.includes(deleting) ? 0.4 : 1 }}>
                       <td>
@@ -460,7 +481,9 @@ function LivePortfolioPage({ t, lang, ccy, portfolio, liveHoldings, prices = {},
                           <div className="muted" style={{ fontSize: 11 }}>{th ? "รอราคา" : "pending"}</div>
                         )}
                       </td>
-                      <td><Sparkline data={sparkData} stroke={sparkColor} fill={sparkColor} /></td>
+                      <td>{sp
+                        ? <Sparkline data={sp.data} stroke={sparkColor} fill={sparkColor} />
+                        : <span className="muted" style={{ fontSize: 12 }}>—</span>}</td>
                       <td className="num">
                         <div style={{ display: "flex", flexDirection: "column", alignItems: "flex-end", gap: 1 }}>
                           <span style={{ color: r.pl >= 0 ? "var(--gain)" : "var(--loss)", fontWeight: 500 }}>
