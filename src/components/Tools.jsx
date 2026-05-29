@@ -570,7 +570,21 @@ export function ToolsPage({ t, lang, ccy, dataState, liveHoldings = [], prices =
 
           {/* Drift table */}
           <div className="card">
-            <h3 className="section-title" style={{ marginBottom: 16 }}>{th ? "เป้าหมาย vs. หลังปรับ" : "Target vs. after rebalance"}</h3>
+            <h3 className="section-title" style={{ marginBottom: 4 }}>{th ? "เป้าหมาย vs. หลังปรับ" : "Target vs. after rebalance"}</h3>
+            <p className="muted" style={{ fontSize: 11.5, margin: "0 0 14px", lineHeight: 1.5 }}>
+              {th
+                ? "ส่วนต่าง = น้ำหนักปัจจุบัน − เป้า · 🔴 + = เกินเป้า (ควรขาย/ลด) · 🟢 − = ต่ำกว่าเป้า (ควรซื้อเพิ่ม)"
+                : "Diff = current − target · 🔴 + = overweight (sell) · 🟢 − = underweight (buy)"}
+            </p>
+            {/* Column headers */}
+            <div style={{ display: "grid", gridTemplateColumns: "150px 50px 1fr 70px 70px 60px", alignItems: "center", gap: 12, paddingBottom: 6 }}>
+              <div className="label-up">{th ? "หลักทรัพย์" : "Holding"}</div>
+              <div className="label-up" style={{ fontSize: 9 }}>{th ? "เป้า" : "Target"}</div>
+              <div />
+              <div className="label-up" style={{ textAlign: "right", fontSize: 9 }}>{th ? "ปัจจุบัน" : "Now"}</div>
+              <div className="label-up" style={{ textAlign: "right", fontSize: 9 }}>{th ? "หลังปรับ" : "After"}</div>
+              <div className="label-up" style={{ textAlign: "right", fontSize: 9 }}>{th ? "ส่วนต่าง" : "Diff"}</div>
+            </div>
             <div style={{ display: "grid", gap: 10 }}>
               {suggestions.map(s => {
                 const after = newTotal > 0 ? (s.target / newTotal) * 100 : 0
