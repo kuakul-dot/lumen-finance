@@ -473,7 +473,8 @@ export function ToolsPage({ t, lang, ccy, dataState, liveHoldings = [], prices =
                         const w = hybridWeightPct(tr)
                         const eff = (effHybrid[tr.ticker] || 0) * 100
                         return (
-                          <div key={tr.ticker} style={{ display: "grid", gridTemplateColumns: "100px 1fr 70px 60px", gap: 10, alignItems: "center" }}>
+                          <div key={tr.ticker} style={{ display: "grid", gridTemplateColumns: "28px 90px 1fr 70px 60px", gap: 10, alignItems: "center" }}>
+                            <TickerLogo ticker={tr.ticker} logoUrl={tr.logo_url} region={tr.region} cls={tr.cls} size={26} />
                             <div style={{ fontSize: 13, fontWeight: 500, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{tr.ticker}</div>
                             <input type="range" min="0" max="100" step="1" value={w.toFixed(0)}
                               onChange={e => setTickerWeight(tr.ticker, e.target.value)} style={{ width: "100%", accentColor: "var(--accent)" }} />
@@ -492,10 +493,25 @@ export function ToolsPage({ t, lang, ccy, dataState, liveHoldings = [], prices =
                 </div>
               ) : (
               <div style={{ display: "grid", gap: 10, maxHeight: targetMode === "ticker" ? 320 : "none", overflowY: targetMode === "ticker" ? "auto" : "visible" }}>
-                {(targetMode === "ticker"
-                  ? tickerRows.map(tr => [tr.ticker, effTickerTargets[tr.ticker] ?? 0])
-                  : Object.entries(targets)
-                ).map(([k, v]) => (
+                {targetMode === "ticker"
+                  ? tickerRows.map(tr => {
+                      const v = effTickerTargets[tr.ticker] ?? 0
+                      return (
+                        <div key={tr.ticker} style={{ display: "grid", gridTemplateColumns: "28px 90px 1fr 80px", gap: 10, alignItems: "center" }}>
+                          <TickerLogo ticker={tr.ticker} logoUrl={tr.logo_url} region={tr.region} cls={tr.cls} size={26} />
+                          <div style={{ fontSize: 13, fontWeight: 500, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{tr.ticker}</div>
+                          <input type="range" min="0" max="100" step="1" value={(v * 100).toFixed(0)}
+                            onChange={e => setTargetPct(tr.ticker, e.target.value)} style={{ width: "100%", accentColor: "var(--accent)" }} />
+                          <div style={{ display: "flex", alignItems: "center", gap: 4 }}>
+                            <input type="number" min="0" max="100" step="1" value={(v * 100).toFixed(0)}
+                              onChange={e => setTargetPct(tr.ticker, e.target.value)}
+                              style={{ width: 50, padding: "4px 6px", borderRadius: 6, border: "1px solid var(--line)", background: "var(--bg)", fontSize: 13, textAlign: "right" }} />
+                            <span className="muted" style={{ fontSize: 12 }}>%</span>
+                          </div>
+                        </div>
+                      )
+                    })
+                  : Object.entries(targets).map(([k, v]) => (
                   <div key={k} style={{ display: "grid", gridTemplateColumns: "120px 1fr 80px", gap: 12, alignItems: "center" }}>
                     <div style={{ fontSize: 13, fontWeight: 500, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{k}</div>
                     <input type="range" min="0" max="100" step="1" value={(v * 100).toFixed(0)}
@@ -513,11 +529,19 @@ export function ToolsPage({ t, lang, ccy, dataState, liveHoldings = [], prices =
                 ))}
               </div>
               )}
-              {targetError && (
-                <div style={{ marginTop: 12, padding: "8px 12px", borderRadius: 8, background: "oklch(0.97 0.03 60)", fontSize: 12, color: "oklch(0.45 0.10 60)" }}>
-                  {th ? "⚠ เป้าหมายรวมไม่ครบ 100% — กด Normalize เพื่อปรับอัตโนมัติ" : "⚠ Targets don't sum to 100% — click Normalize to fix automatically"}
-                </div>
-              )}
+              {targetError && (() => {
+                const diffPct = (activeSum - 1) * 100
+                const over = diffPct > 0
+                return (
+                  <div style={{ marginTop: 12, padding: "8px 12px", borderRadius: 8,
+                    background: over ? "oklch(0.96 0.05 25)" : "oklch(0.97 0.03 60)",
+                    fontSize: 12, color: over ? "oklch(0.45 0.12 25)" : "oklch(0.45 0.10 60)" }}>
+                    ⚠ {th
+                      ? `${over ? "เกิน" : "ขาด"} ${Math.abs(diffPct).toFixed(1)}% (รวม ${(activeSum * 100).toFixed(1)}%) — กด Normalize เพื่อปรับเป็น 100%`
+                      : `${over ? "Over" : "Under"} by ${Math.abs(diffPct).toFixed(1)}% (sum ${(activeSum * 100).toFixed(1)}%) — click Normalize to fix`}
+                  </div>
+                )
+              })()}
             </div>
           )}
 
