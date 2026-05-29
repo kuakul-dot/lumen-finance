@@ -699,6 +699,49 @@ function LiveDashboardPage({ t, lang, ccy, setRoute, liveHoldings, prices = {}, 
         tone: up ? "good" : "warn"
       })
     }
+    // Region skew — heavily weighted to one market
+    if (rows.length >= 2) {
+      const byRegion = {}
+      rows.forEach(r => { const k = r.region === "TH" ? "TH" : "US"; byRegion[k] = (byRegion[k] || 0) + r.value })
+      const tot = (byRegion.TH || 0) + (byRegion.US || 0)
+      if (tot > 0) {
+        const usPct = (byRegion.US || 0) / tot * 100
+        const heavyPct = Math.max(usPct, 100 - usPct)
+        if (heavyPct >= 80) {
+          const heavy = usPct >= 50 ? (th ? "หุ้น US" : "US equities") : (th ? "หุ้นไทย" : "Thai equities")
+          out.push({
+            title: th ? `เอียงไป${heavy} ${heavyPct.toFixed(0)}%` : `${heavyPct.toFixed(0)}% in ${heavy}`,
+            body:  th ? "กระจายข้ามภูมิภาคช่วยลดความเสี่ยงตลาดเดียว" : "Diversifying across regions reduces single-market risk",
+            tone: heavyPct >= 90 ? "warn" : "neutral"
+          })
+        }
+      }
+    }
+    // Idle cash — large uninvested balance
+    if (netWorth > 0 && cashTotal > 0) {
+      const cashPct = cashTotal / netWorth * 100
+      if (cashPct >= 15) {
+        out.push({
+          title: th ? `เงินสด ${cashPct.toFixed(0)}% ของพอร์ตรวม` : `Cash is ${cashPct.toFixed(0)}% of net worth`,
+          body:  th ? `~${LUMEN_FMT.money(cashTotal, ccy, { compact: true })} ยังไม่ลงทุน — พิจารณานำไปลงทุน` : `~${LUMEN_FMT.money(cashTotal, ccy, { compact: true })} idle — consider deploying it`,
+          tone: cashPct >= 30 ? "warn" : "neutral"
+        })
+      }
+    }
+    // Standout performer — the holding with the largest move (best or worst)
+    const livePerf = groupRowsByTicker(rows).filter(r => r.hasLivePrice && Number.isFinite(r.plPct))
+    if (livePerf.length >= 2) {
+      const standout = [...livePerf].sort((a, b) => Math.abs(b.plPct) - Math.abs(a.plPct))[0]
+      if (standout && Math.abs(standout.plPct) >= 10) {
+        const up = standout.plPct >= 0
+        out.push({
+          title: th ? `${standout.ticker} ${up ? "กำไร +" : "ขาดทุน "}${standout.plPct.toFixed(1)}%` : `${standout.ticker} ${up ? "up +" : "down "}${standout.plPct.toFixed(1)}%`,
+          body:  up ? (th ? "ตัวที่ทำกำไรดีสุดในพอร์ต" : "Your strongest performer")
+                    : (th ? "ตัวที่อ่อนแรงสุด — ทบทวนสมมุติฐานการถือ" : "Your weakest holding — review your thesis"),
+          tone: up ? "good" : "warn"
+        })
+      }
+    }
     if (rows.length > 0) {
       // Group lots by ticker before finding the top holding (avoids showing per-lot weight)
       const tickerWeights = {}
@@ -726,8 +769,8 @@ function LiveDashboardPage({ t, lang, ccy, setRoute, liveHoldings, prices = {}, 
         tone: "neutral"
       })
     }
-    return out.slice(0, 3)
-  }, [rows, totalPL, totalPlPct, annualDiv, ccy, th])
+    return out.slice(0, 5)
+  }, [rows, totalPL, totalPlPct, annualDiv, ccy, th, cashTotal, netWorth])
 
   // Upcoming — estimated quarterly dividends (aggregated by ticker to avoid per-lot duplicates)
   const upcoming = useMemo(() => {
