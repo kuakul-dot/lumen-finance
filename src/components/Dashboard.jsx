@@ -970,8 +970,12 @@ function LiveDashboardPage({ t, lang, ccy, setRoute, liveHoldings, prices = {}, 
             </tr></thead>
             <tbody>
               {movers.map(r => {
-                const sparkData = Array.from({ length: 20 }, (_, i) =>
-                  Math.sin(i / 3 + r.ticker.length) + Math.cos(i / 2 + r.ticker.length * 2) + (i / 20) * ((r.changePct || r.plPct / 10) > 0 ? 0.6 : -0.6))
+                // Real 30-day sparkline — slice the last month from loaded history
+                const sym = toYahooSymbol(r.ticker, r.region || 'TH', r.cls || 'Equity')
+                const cutoff = Date.now() / 1000 - 30 * 86400
+                const closes = (holdingHistories[sym]?.series || []).filter(p => p.t >= cutoff).map(p => p.c).filter(Number.isFinite)
+                const sp = closes.length >= 2 ? closes : null
+                const spColor = (sp ? (closes[closes.length - 1] / closes[0] - 1) : r.changePct) >= 0 ? "var(--gain)" : "var(--loss)"
                 return (
                   <tr key={r.ticker}>
                     <td>
@@ -983,7 +987,9 @@ function LiveDashboardPage({ t, lang, ccy, setRoute, liveHoldings, prices = {}, 
                         </div>
                       </div>
                     </td>
-                    <td><Sparkline data={sparkData} stroke={r.changePct >= 0 ? "var(--gain)" : "var(--loss)"} fill={r.changePct >= 0 ? "var(--gain)" : "var(--loss)"} /></td>
+                    <td>{sp
+                      ? <Sparkline data={sp} stroke={spColor} fill={spColor} />
+                      : <span className="muted" style={{ fontSize: 12 }}>—</span>}</td>
                     <td className="num">{LUMEN_FMT.moneyNative(r.priceNative, r.nativeCcy)}</td>
                     <td className="num">
                       {r.hasLivePrice ? <Delta value={r.changePct} /> : <span className="muted" style={{ fontSize: 12 }}>—</span>}
