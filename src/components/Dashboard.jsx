@@ -547,18 +547,35 @@ function LiveDashboardPage({ t, lang, ccy, setRoute, liveHoldings, prices = {}, 
   const netWorth = totalValue + cashTotal
   const hasCash  = cashAccounts.length > 0
 
+  // Allocation breakdown — selectable dimension
+  const [allocMode, setAllocMode] = useState("regionclass")
+  const ALLOC_MODES = [
+    { k: "regionclass", label: th ? "ภูมิภาค + ประเภท" : "Region + class" },
+    { k: "class",       label: th ? "ประเภทสินทรัพย์" : "Asset class" },
+    { k: "region",      label: th ? "ภูมิภาค" : "Region" },
+    { k: "holding",     label: th ? "รายหลักทรัพย์" : "By holding" },
+  ]
   const allocClass = useMemo(() => {
     if (rows.length === 0) return []
-    const map = {}
-    rows.forEach(r => {
-      const key = r.cls === "Equity"
+    const keyOf = r => {
+      if (allocMode === "class")   return r.cls || "Equity"
+      if (allocMode === "region")  return r.region === "TH" ? (th ? "ไทย" : "Thailand") : (th ? "สหรัฐฯ" : "United States")
+      if (allocMode === "holding") return r.ticker
+      return r.cls === "Equity"    // regionclass (default)
         ? (r.region === "TH" ? (th ? "หุ้นไทย" : "TH Equity") : (th ? "หุ้น US" : "US Equity"))
         : r.cls
-      map[key] = (map[key] || 0) + r.value
-    })
+    }
+    const map = {}
+    rows.forEach(r => { const k = keyOf(r); map[k] = (map[k] || 0) + r.value })
     const colors = ["var(--c1)", "var(--c2)", "var(--c3)", "var(--c4)", "var(--c5)", "var(--c6)", "var(--c7)"]
-    return Object.entries(map).map(([k, v], i) => ({ name: k, value: v, color: colors[i % 7] }))
-  }, [rows, th])
+    let arr = Object.entries(map).map(([k, v]) => ({ name: k, value: v })).sort((a, b) => b.value - a.value)
+    // By-holding can be long — keep the top slices, fold the rest into "Others"
+    if (allocMode === "holding" && arr.length > 8) {
+      const rest = arr.slice(7).reduce((s, x) => s + x.value, 0)
+      arr = [...arr.slice(0, 7), { name: th ? "อื่นๆ" : "Others", value: rest, _other: true }]
+    }
+    return arr.map((x, i) => ({ ...x, color: x._other ? "var(--ink-4)" : colors[i % colors.length] }))
+  }, [rows, th, allocMode])
 
   // Top movers — group same-ticker lots first, then sort by |changePct|
   const movers = useMemo(() => {
@@ -865,11 +882,17 @@ function LiveDashboardPage({ t, lang, ccy, setRoute, liveHoldings, prices = {}, 
       {/* ── ROW 2: Allocation + Top Movers ── */}
       <section className="grid grid-12" style={{ marginBottom: 16 }}>
         <div className="card col-span-5">
-          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 20 }}>
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 20, gap: 8 }}>
             <h3 className="section-title">{t.dashboard.allocation}</h3>
-            <button className="btn-ghost btn btn-sm" onClick={() => setRoute("analytics")}>
-              {t.dashboard.seeDetails} <Icon name="chevron" size={12} />
-            </button>
+            <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+              <select value={allocMode} onChange={e => setAllocMode(e.target.value)}
+                style={{ padding: "5px 24px 5px 10px", borderRadius: 8, fontSize: 12, border: "1.5px solid var(--line)", background: "var(--bg)", color: "var(--ink)", outline: "none", fontFamily: "var(--font-mono)", fontWeight: 400, cursor: "pointer" }}>
+                {ALLOC_MODES.map(m => <option key={m.k} value={m.k}>{m.label}</option>)}
+              </select>
+              <button className="btn-ghost btn btn-sm" onClick={() => setRoute("analytics")}>
+                {t.dashboard.seeDetails} <Icon name="chevron" size={12} />
+              </button>
+            </div>
           </div>
           <div style={{ display: "flex", alignItems: "center", gap: 24 }}>
             <Donut data={allocClass} size={180} thickness={26}
