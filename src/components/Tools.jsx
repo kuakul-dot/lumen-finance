@@ -89,14 +89,12 @@ export function ToolsPage({ t, lang, ccy, dataState, liveHoldings = [], prices =
   const [targetMode, setTargetMode] = useState(() => {
     try { const m = localStorage.getItem("lumen_rebalance_mode"); return m === "hybrid" ? "hybrid" : "class" } catch { return "class" }
   })
-  const [tickerTargets, setTickerTargets] = useState(() => { try { return JSON.parse(localStorage.getItem("lumen_rebalance_ticker_targets") || "{}") } catch { return {} } })
   const [tickerWeights, setTickerWeights] = useState(() => { try { return JSON.parse(localStorage.getItem("lumen_rebalance_ticker_weights") || "{}") } catch { return {} } })
 
   // Persist to localStorage
   useEffect(() => { saveTargets(targets) }, [targets])
   useEffect(() => { try { localStorage.setItem(BAND_STORAGE_KEY, String(band)) } catch {} }, [band])
   useEffect(() => { try { localStorage.setItem("lumen_rebalance_mode", targetMode) } catch {} }, [targetMode])
-  useEffect(() => { try { localStorage.setItem("lumen_rebalance_ticker_targets", JSON.stringify(tickerTargets)) } catch {} }, [tickerTargets])
   useEffect(() => { try { localStorage.setItem("lumen_rebalance_ticker_weights", JSON.stringify(tickerWeights)) } catch {} }, [tickerWeights])
 
   // ── Derive rows ──────────────────────────────────────────────────────────────
@@ -134,15 +132,6 @@ export function ToolsPage({ t, lang, ccy, dataState, liveHoldings = [], prices =
     return Object.values(m).sort((a, b) => b.value - a.value)
   }, [rows])
 
-  // Effective ticker targets (pure ticker mode) — unset → current weight
-  const effTickerTargets = useMemo(() => {
-    const out = {}
-    tickerRows.forEach(tr => {
-      out[tr.ticker] = tickerTargets[tr.ticker] != null ? tickerTargets[tr.ticker] : (total > 0 ? tr.value / total : 0)
-    })
-    return out
-  }, [tickerRows, tickerTargets, total])
-
   // Tickers grouped by class (for hybrid mode)
   const tickersByClass = useMemo(() => {
     const g = {}
@@ -169,35 +158,23 @@ export function ToolsPage({ t, lang, ccy, dataState, liveHoldings = [], prices =
     return out
   }, [tickersByClass, tickerWeights, targets])
 
-  const setTargetPct = (key, pctStr) => {
-    const v = Math.max(0, Math.min(100, parseFloat(pctStr) || 0)) / 100
-    if (targetMode === "ticker") setTickerTargets(prev => ({ ...prev, [key]: v }))
-    else setTargets(prev => ({ ...prev, [key]: v }))   // class + hybrid edit class targets
-  }
+  // Class slider edits (class + hybrid modes both edit class targets)
+  const setTargetPct = (key, pctStr) =>
+    setTargets(prev => ({ ...prev, [key]: Math.max(0, Math.min(100, parseFloat(pctStr) || 0)) / 100 }))
   const setTickerWeight = (tk, pctStr) =>
     setTickerWeights(prev => ({ ...prev, [tk]: Math.max(0, Math.min(100, parseFloat(pctStr) || 0)) }))
 
-  // Sum to validate (ticker mode → ticker targets; class/hybrid → class targets)
-  const activeSum = targetMode === "ticker"
-    ? Object.values(effTickerTargets).reduce((s, v) => s + v, 0)
-    : Object.values(targets).reduce((s, v) => s + v, 0)
+  // Class targets must sum to 100% (within-class weights auto-normalize)
+  const activeSum = Object.values(targets).reduce((s, v) => s + v, 0)
   const targetError = Math.abs(activeSum - 1) > 0.001
 
   const normalizeTargets = () => {
-    if (targetMode === "ticker") {
-      const sum = Object.values(effTickerTargets).reduce((s, v) => s + v, 0); if (!sum) return
-      setTickerTargets(Object.fromEntries(Object.entries(effTickerTargets).map(([k, v]) => [k, v / sum])))
-    } else {
-      const sum = Object.values(targets).reduce((s, v) => s + v, 0); if (!sum) return
-      setTargets(prev => Object.fromEntries(Object.entries(prev).map(([k, v]) => [k, v / sum])))
-    }
+    const sum = Object.values(targets).reduce((s, v) => s + v, 0); if (!sum) return
+    setTargets(prev => Object.fromEntries(Object.entries(prev).map(([k, v]) => [k, v / sum])))
   }
 
-  // ── Rebalance units (class buckets / individual tickers / hybrid) ───────────
+  // ── Rebalance units (class buckets, or per-ticker in hybrid mode) ───────────
   const units = useMemo(() => {
-    if (targetMode === "ticker") {
-      return tickerRows.map(tr => ({ key: tr.ticker, current: tr.value, candidates: [tr], tgt: effTickerTargets[tr.ticker] ?? 0 }))
-    }
     if (targetMode === "hybrid") {
       return tickerRows.map(tr => ({ key: tr.ticker, current: tr.value, candidates: [tr], tgt: effHybrid[tr.ticker] ?? 0 }))
     }
@@ -210,7 +187,7 @@ export function ToolsPage({ t, lang, ccy, dataState, liveHoldings = [], prices =
       "Cash":      [],
     }
     return Object.entries(targets).map(([k, tgt]) => ({ key: k, current: currentByClass[k] || 0, candidates: sample[k] || [], tgt }))
-  }, [targetMode, tickerRows, effTickerTargets, effHybrid, targets, currentByClass, rows])
+  }, [targetMode, tickerRows, effHybrid, targets, currentByClass, rows])
 
   // ── Suggestions ─────────────────────────────────────────────────────────────
   const suggestions = useMemo(() => units.map(u => {
@@ -459,9 +436,8 @@ export function ToolsPage({ t, lang, ccy, dataState, liveHoldings = [], prices =
                     {th ? "ปรับให้รวม 100%" : "Normalize"}
                   </button>
                   <button className="btn btn-outline btn-sm" onClick={() => {
-                    if (targetMode === "ticker") setTickerTargets({})
-                    else if (targetMode === "hybrid") { setTickerWeights({}); setTargets(DEFAULT_TARGETS); saveTargets(DEFAULT_TARGETS) }
-                    else { setTargets(DEFAULT_TARGETS); saveTargets(DEFAULT_TARGETS) }
+                    if (targetMode === "hybrid") setTickerWeights({})
+                    setTargets(DEFAULT_TARGETS); saveTargets(DEFAULT_TARGETS)
                   }}>
                     {th ? "รีเซ็ต" : "Reset"}
                   </button>
@@ -514,26 +490,8 @@ export function ToolsPage({ t, lang, ccy, dataState, liveHoldings = [], prices =
                   ))}
                 </div>
               ) : (
-              <div style={{ display: "grid", gap: 10, maxHeight: targetMode === "ticker" ? 320 : "none", overflowY: targetMode === "ticker" ? "auto" : "visible" }}>
-                {targetMode === "ticker"
-                  ? tickerRows.map(tr => {
-                      const v = effTickerTargets[tr.ticker] ?? 0
-                      return (
-                        <div key={tr.ticker} style={{ display: "grid", gridTemplateColumns: "28px 90px 1fr 80px", gap: 10, alignItems: "center" }}>
-                          <TickerLogo ticker={tr.ticker} logoUrl={tr.logo_url} region={tr.region} cls={tr.cls} size={26} />
-                          <div style={{ fontSize: 13, fontWeight: 500, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{tr.ticker}</div>
-                          <input type="range" min="0" max="100" step="1" value={(v * 100).toFixed(0)}
-                            onChange={e => setTargetPct(tr.ticker, e.target.value)} style={{ width: "100%", accentColor: "var(--accent)" }} />
-                          <div style={{ display: "flex", alignItems: "center", gap: 4 }}>
-                            <input type="number" min="0" max="100" step="1" value={(v * 100).toFixed(0)}
-                              onChange={e => setTargetPct(tr.ticker, e.target.value)}
-                              style={{ width: 50, padding: "4px 6px", borderRadius: 6, border: "1px solid var(--line)", background: "var(--bg)", fontSize: 13, textAlign: "right" }} />
-                            <span className="muted" style={{ fontSize: 12 }}>%</span>
-                          </div>
-                        </div>
-                      )
-                    })
-                  : Object.entries(targets).map(([k, v]) => (
+              <div style={{ display: "grid", gap: 10 }}>
+                {Object.entries(targets).map(([k, v]) => (
                   <div key={k} style={{ display: "grid", gridTemplateColumns: "150px 1fr 80px", gap: 12, alignItems: "center" }}>
                     <div style={{ fontSize: 13, fontWeight: 500, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}><ClassBadge name={k} /></div>
                     <input type="range" min="0" max="100" step="1" value={(v * 100).toFixed(0)}
