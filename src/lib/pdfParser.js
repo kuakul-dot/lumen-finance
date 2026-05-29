@@ -223,7 +223,7 @@ function parseDate(v) {
 function mapType(v) {
   const s = String(v || '').trim().toLowerCase()
   if (/^b(uy|ought)?$|^ซื้อ/.test(s) || s === 'long') return 'Buy'
-  if (/^s(ell|old|ale)?$|^ขาย/.test(s) || s === 'short') return 'Sell'
+  if (/^s(ell|el|old|ale)?$|^ขาย/.test(s) || s === 'short') return 'Sell'
   if (/^div|ปันผล/.test(s)) return 'Dividend'
   if (/deposit|ฝาก/.test(s)) return 'Deposit'
   if (/with|ถอน/.test(s)) return 'Withdraw'
@@ -352,7 +352,7 @@ function parseAnchored(rows) {
     // text baseline), so fall back to the row above/below when the currency
     // code isn't on the anchor row itself.
     if (!DATE_RE.test(line)) continue
-    const typeTok = line.match(/\bBUY\b|\bSELL\b|ซื้อ|ขาย/i)
+    const typeTok = line.match(/\bBUY\b|\bSELL?\b|ซื้อ|ขาย/i)   // SELL? also matches Dime!'s "SEL"
     if (!typeTok) continue
 
     const dateCell = cells.find(c => DATE_RE.test(c.text))
@@ -382,7 +382,7 @@ function parseAnchored(rows) {
     // which the shared pickTicker rejects.
     const okT = (txt) => {
       const c = txt.replace(/\[.*?\]/g, '').trim()
-      return /^[A-Z][A-Z0-9.\-]{0,7}$/.test(c) && !SKIP_TICKER.has(c)
+      return /^[A-Z][A-Z0-9.\-]{0,7}$/.test(c) && !SKIP_TICKER.has(c) && !/^(BUY|SEL|SELL)$/.test(c)
     }
     const tickerIn = (arr) => { const hit = arr.find(okT); return hit ? hit.replace(/\[.*?\]/g, '').trim() : null }
     let ticker = tickerIn(texts)
@@ -414,6 +414,23 @@ function parseAnchored(rows) {
       transacted_at: date,
       type: mapType(typeTok[0]),
       ticker, shares, price, amount, fee, tax, currency, note: null,
+    })
+  }
+  // ── TEMP DEBUG (Dime! only): dump trade-shaped cells, PII redacted ──
+  if (results.length) {
+    const safe = (t) => {
+      const s = String(t).trim()
+      if (/^\d{1,2}\/\d{1,2}\/\d{2,4}$/.test(s)) return s            // date
+      if (/^-?[\d,]+\.\d+$/.test(s)) return s                        // decimal number
+      if (/^\d{1,7}$/.test(s)) return s                              // short int (order id, not tax/acct)
+      if (/^\[.*\]$/.test(s)) return s                               // [exchange]
+      if (/^[A-Z]{1,6}$/.test(s)) return s                           // ticker / BUY / SEL / USD
+      return null
+    }
+    console.log('[dime] results', results.map(r => `${r.type} ${r.ticker} ${r.shares}@${r.price}=${r.amount} fee${r.fee}`))
+    rows.forEach((r, i) => {
+      const cells = r.map(c => safe(c.text)).filter(Boolean)
+      if (cells.length >= 2) console.log('[dime row]', i, cells.join(' | '))
     })
   }
   return results
