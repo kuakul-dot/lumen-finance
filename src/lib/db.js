@@ -1,6 +1,12 @@
 import { supabase } from './supabase'
 import { toYahooSymbol } from './prices'
 
+// A position with fewer shares than this is treated as closed. Buy/sell
+// quantities entered with different decimal rounding (e.g. bought 0.4442,
+// sold 0.4441925) can leave a sub-microshare residue; anything below this is
+// negligible (worth a fraction of a cent) and should not linger as a holding.
+const SHARE_EPS = 1e-4
+
 export async function getOrCreatePortfolio(userId, currency = 'THB') {
   const { data, error } = await supabase
     .from('portfolios')
@@ -143,7 +149,7 @@ export async function syncHoldingsFromTransactions(portfolioId, txs) {
   const errors = []
   for (const h of byTicker.values()) {
     if (!h._dirty) continue
-    const flat = (Number(h.shares) || 0) <= 1e-9   // position sold to zero
+    const flat = (Number(h.shares) || 0) <= SHARE_EPS   // position sold to zero
     if (h._new) {
       if (flat) continue                           // never create an empty position
       const { _new, _dirty, ...payload } = h
@@ -196,7 +202,7 @@ export async function rebuildHolding(portfolioId, ticker) {
   const existing = await getHoldings(portfolioId)
   const h = existing.find(x => x.ticker?.toUpperCase() === key)
 
-  if (shares <= 0) {
+  if (shares <= SHARE_EPS) {
     if (h) await deleteHolding(h.id)
     return { error: null }
   }
@@ -443,7 +449,7 @@ export async function rebuildAllHoldings(portfolioId) {
 
   for (const [tk, P] of Object.entries(pos)) {
     const h = byTicker.get(tk)
-    if (P.shares > 1e-9) {
+    if (P.shares > SHARE_EPS) {
       const cost_price = P.cost / P.shares
       if (h) {
         const { error } = await updateHolding(h.id, { shares: P.shares, cost_price })
