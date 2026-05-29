@@ -9,7 +9,7 @@ import { ToolsPage } from './components/Tools'
 import { PlanningPage } from './components/Planning'
 import { LUMEN_I18N, setLiveFxRate } from './data'
 import { supabase } from './lib/supabase'
-import { getOrCreatePortfolio, getHoldingsSafe, getCashAccounts, deriveHoldings, recordSnapshot } from './lib/db'
+import { getOrCreatePortfolio, getHoldingsSafe, getCashAccounts, deriveHoldings, recordSnapshot, exportData } from './lib/db'
 import { fetchPrices, fetchFxRate } from './lib/prices'
 
 const TWEAK_DEFAULTS = {
@@ -167,6 +167,30 @@ export default function App() {
 
   const signOut = () => supabase.auth.signOut()
 
+  const downloadBlob = (content, filename, type) => {
+    const blob = new Blob([content], { type })
+    const url = URL.createObjectURL(blob)
+    const a = document.createElement('a'); a.href = url; a.download = filename; a.click()
+    URL.revokeObjectURL(url)
+  }
+  const today = () => new Date().toISOString().split('T')[0]
+  const handleExportJSON = async () => {
+    if (!portfolio?.id) return
+    const data = await exportData(portfolio.id, session?.user?.id)
+    downloadBlob(JSON.stringify(data, null, 2), `lumen-backup-${today()}.json`, 'application/json')
+  }
+  const handleExportCSV = async () => {
+    if (!portfolio?.id) return
+    const data = await exportData(portfolio.id, session?.user?.id)
+    const esc = s => `"${String(s ?? '').replace(/"/g, '""')}"`
+    const header = ['Date', 'Type', 'Ticker', 'Shares', 'Price', 'Amount', 'Fee', 'Tax', 'Currency', 'Note']
+    const rows = (data?.transactions || []).map(t => [
+      (t.transacted_at || '').split('T')[0], t.type, t.ticker || '', t.shares ?? '', t.price ?? '',
+      t.amount ?? '', t.fee ?? 0, t.tax ?? 0, t.currency || '', esc(t.note),
+    ].join(','))
+    downloadBlob('﻿' + [header.join(','), ...rows].join('\n'), `lumen-transactions-${today()}.csv`, 'text/csv;charset=utf-8;')
+  }
+
   if (session === undefined) {
     return (
       <div style={{ display: "flex", alignItems: "center", justifyContent: "center", height: "100vh" }}>
@@ -315,6 +339,22 @@ export default function App() {
               ]}
               onChange={(v) => setTweak("data", v)}
             />
+          </>
+        )}
+
+        {session && portfolio && (
+          <>
+            <TweakSection label={lang === "th" ? "ข้อมูล (สำรอง)" : "Data (backup)"} />
+            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 6 }}>
+              <button onClick={handleExportJSON}
+                style={{ padding: "8px 10px", fontSize: 11, fontWeight: 500, borderRadius: 8, cursor: "pointer", background: "var(--bg-2)", color: "var(--ink)", border: "1px solid var(--line)" }}>
+                {lang === "th" ? "สำรอง JSON" : "Backup JSON"}
+              </button>
+              <button onClick={handleExportCSV}
+                style={{ padding: "8px 10px", fontSize: 11, fontWeight: 500, borderRadius: 8, cursor: "pointer", background: "var(--bg-2)", color: "var(--ink)", border: "1px solid var(--line)" }}>
+                {lang === "th" ? "ธุรกรรม CSV" : "Transactions CSV"}
+              </button>
+            </div>
           </>
         )}
 

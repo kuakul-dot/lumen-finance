@@ -493,6 +493,24 @@ export async function getCashAccounts(portfolioId) {
   return data || []
 }
 
+// Gather everything for a full backup (holdings, transactions, cash, goals).
+export async function exportData(portfolioId, userId) {
+  if (!portfolioId) return null
+  const [holdings, transactions, cash_accounts] = await Promise.all([
+    getHoldings(portfolioId),
+    getAllTransactions(portfolioId),
+    getCashAccounts(portfolioId),
+  ])
+  let goals = []
+  if (userId) { try { goals = await getGoals(userId) } catch {} }
+  return {
+    app: 'Lumen',
+    exported_at: new Date().toISOString(),
+    portfolio_id: portfolioId,
+    holdings, transactions, cash_accounts, goals,
+  }
+}
+
 export async function upsertCashAccount(portfolioId, acct) {
   const { data, error } = await supabase
     .from('cash_accounts')
