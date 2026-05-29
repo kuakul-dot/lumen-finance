@@ -1312,7 +1312,9 @@ function TransactionsTab({ transactions, holdings = [], loading, lang, ccy, fxRa
   const [showImport, setShowImport] = useState(false)
   const [fType, setFType] = useState("all")       // type filter
   const [fQuery, setFQuery] = useState("")        // ticker/name search
-  const [fPeriod, setFPeriod] = useState("all")   // time-range filter (preset or "y:YYYY")
+  const [fPeriod, setFPeriod] = useState("all")   // time-range filter (preset, "y:YYYY", or "custom")
+  const [customFrom, setCustomFrom] = useState("") // custom range start (YYYY-MM-DD)
+  const [customTo, setCustomTo] = useState("")     // custom range end
 
   const handleDelete = async (tx) => {
     if (!window.confirm(th ? `ลบรายการ ${tx.ticker || ''} ${tx.type} นี้?` : `Delete this ${tx.type} transaction for ${tx.ticker || ''}?`)) return
@@ -1385,12 +1387,19 @@ function TransactionsTab({ transactions, holdings = [], loading, lang, ccy, fxRa
     { k: "6m",  label: th ? "6 เดือนล่าสุด" : "Last 6 months" },
     { k: "ytd", label: th ? "ปีนี้ (YTD)" : "This year (YTD)" },
     { k: "12m", label: th ? "12 เดือนล่าสุด" : "Last 12 months" },
+    { k: "custom", label: th ? "กำหนดเอง…" : "Custom range…" },
   ]
   const inPeriod = (tx, k) => {
     if (k === "all") return true
     if (k.startsWith("y:")) return yearOf(tx) === k.slice(2)
     if (!tx.transacted_at) return false
-    return new Date(tx.transacted_at) >= periodStart[k]
+    const d = new Date(tx.transacted_at)
+    if (k === "custom") {
+      if (customFrom && d < new Date(customFrom)) return false
+      if (customTo && d > new Date(customTo + "T23:59:59")) return false
+      return true
+    }
+    return d >= periodStart[k]
   }
   const shown = filtered.filter(tx => inPeriod(tx, fPeriod))
 
@@ -1462,21 +1471,35 @@ function TransactionsTab({ transactions, holdings = [], loading, lang, ccy, fxRa
     <>
       {/* One clean toolbar: year (left) · search · type · import (right) */}
       <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 14, flexWrap: "wrap" }}>
-        <select value={fPeriod} onChange={e => setFPeriod(e.target.value)}
-          style={{ ...inputStyle, width: "auto", padding: "7px 28px 7px 12px", fontSize: 13, fontFamily: "var(--font-mono)", fontWeight: 400, marginRight: "auto" }}>
-          <optgroup label={th ? "ช่วงเวลา" : "Period"}>
-            {periodOptions.map(o => (
-              <option key={o.k} value={o.k}>{o.label} ({filtered.filter(tx => inPeriod(tx, o.k)).length})</option>
-            ))}
-          </optgroup>
-          {years.length > 0 && (
-            <optgroup label={th ? "รายปี" : "By year"}>
-              {years.map(y => (
-                <option key={y} value={"y:" + y}>{th ? `ปี ${y}` : `Year ${y}`} ({filtered.filter(tx => yearOf(tx) === y).length})</option>
+        <div style={{ display: "flex", alignItems: "center", gap: 8, marginRight: "auto", flexWrap: "wrap" }}>
+          <select value={fPeriod} onChange={e => setFPeriod(e.target.value)}
+            style={{ ...inputStyle, width: "auto", padding: "7px 28px 7px 12px", fontSize: 13, fontFamily: "var(--font-mono)", fontWeight: 400 }}>
+            <optgroup label={th ? "ช่วงเวลา" : "Period"}>
+              {periodOptions.map(o => (
+                <option key={o.k} value={o.k}>{o.label}{o.k === "custom" ? "" : ` (${filtered.filter(tx => inPeriod(tx, o.k)).length})`}</option>
               ))}
             </optgroup>
+            {years.length > 0 && (
+              <optgroup label={th ? "รายปี" : "By year"}>
+                {years.map(y => (
+                  <option key={y} value={"y:" + y}>{th ? `ปี ${y}` : `Year ${y}`} ({filtered.filter(tx => yearOf(tx) === y).length})</option>
+                ))}
+              </optgroup>
+            )}
+          </select>
+          {fPeriod === "custom" && (
+            <>
+              <input type="date" value={customFrom} max={customTo || undefined}
+                onChange={e => setCustomFrom(e.target.value)}
+                style={{ ...inputStyle, width: "auto", padding: "6px 10px", fontSize: 13, fontFamily: "var(--font-mono)" }} />
+              <span style={{ color: "var(--ink-3)", fontSize: 13 }}>–</span>
+              <input type="date" value={customTo} min={customFrom || undefined}
+                onChange={e => setCustomTo(e.target.value)}
+                style={{ ...inputStyle, width: "auto", padding: "6px 10px", fontSize: 13, fontFamily: "var(--font-mono)" }} />
+              <span style={{ color: "var(--ink-3)", fontSize: 12, fontFamily: "var(--font-mono)" }}>{shown.length}</span>
+            </>
           )}
-        </select>
+        </div>
         <input
           value={fQuery}
           onChange={e => setFQuery(e.target.value)}
