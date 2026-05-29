@@ -1312,7 +1312,7 @@ function TransactionsTab({ transactions, holdings = [], loading, lang, ccy, fxRa
   const [showImport, setShowImport] = useState(false)
   const [fType, setFType] = useState("all")       // type filter
   const [fQuery, setFQuery] = useState("")        // ticker/name search
-  const [selYear, setSelYear] = useState(null)    // selected year tab (null = latest)
+  const [fPeriod, setFPeriod] = useState("all")   // time-range filter (preset or "y:YYYY")
 
   const handleDelete = async (tx) => {
     if (!window.confirm(th ? `ลบรายการ ${tx.ticker || ''} ${tx.type} นี้?` : `Delete this ${tx.type} transaction for ${tx.ticker || ''}?`)) return
@@ -1365,11 +1365,34 @@ function TransactionsTab({ transactions, holdings = [], loading, lang, ccy, fxRa
     return true
   })
 
-  // Year tabs (newest-first) derived from the type/search-filtered set
+  // Years present (newest-first) for the "by year" group
   const yearOf = tx => tx.transacted_at ? String(new Date(tx.transacted_at).getFullYear()) : "—"
   const years = [...new Set(filtered.map(yearOf))].sort((a, b) => b.localeCompare(a))
-  const activeYear = (selYear && years.includes(selYear)) ? selYear : (years[0] || null)
-  const shown = filtered.filter(tx => yearOf(tx) === activeYear)
+
+  // Time-range presets — start date for each rolling window
+  const now = new Date()
+  const periodStart = {
+    "30d": new Date(now.getFullYear(), now.getMonth(), now.getDate() - 30),
+    "3m":  new Date(now.getFullYear(), now.getMonth() - 3, now.getDate()),
+    "6m":  new Date(now.getFullYear(), now.getMonth() - 6, now.getDate()),
+    "ytd": new Date(now.getFullYear(), 0, 1),
+    "12m": new Date(now.getFullYear() - 1, now.getMonth(), now.getDate()),
+  }
+  const periodOptions = [
+    { k: "all", label: th ? "ทั้งหมด" : "All time" },
+    { k: "30d", label: th ? "30 วันล่าสุด" : "Last 30 days" },
+    { k: "3m",  label: th ? "3 เดือนล่าสุด" : "Last 3 months" },
+    { k: "6m",  label: th ? "6 เดือนล่าสุด" : "Last 6 months" },
+    { k: "ytd", label: th ? "ปีนี้ (YTD)" : "This year (YTD)" },
+    { k: "12m", label: th ? "12 เดือนล่าสุด" : "Last 12 months" },
+  ]
+  const inPeriod = (tx, k) => {
+    if (k === "all") return true
+    if (k.startsWith("y:")) return yearOf(tx) === k.slice(2)
+    if (!tx.transacted_at) return false
+    return new Date(tx.transacted_at) >= periodStart[k]
+  }
+  const shown = filtered.filter(tx => inPeriod(tx, fPeriod))
 
   const renderRow = (tx) => {
     const type = tx.type || 'Buy'
@@ -1439,14 +1462,21 @@ function TransactionsTab({ transactions, holdings = [], loading, lang, ccy, fxRa
     <>
       {/* One clean toolbar: year (left) · search · type · import (right) */}
       <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 14, flexWrap: "wrap" }}>
-        {years.length > 0 && (
-          <select value={activeYear || ""} onChange={e => setSelYear(e.target.value)}
-            style={{ ...inputStyle, width: "auto", padding: "7px 28px 7px 12px", fontSize: 13, fontFamily: "var(--font-mono)", fontWeight: 400, marginRight: "auto" }}>
-            {years.map(y => (
-              <option key={y} value={y}>{th ? `ปี ${y}` : `Year ${y}`} ({filtered.filter(tx => yearOf(tx) === y).length})</option>
+        <select value={fPeriod} onChange={e => setFPeriod(e.target.value)}
+          style={{ ...inputStyle, width: "auto", padding: "7px 28px 7px 12px", fontSize: 13, fontFamily: "var(--font-mono)", fontWeight: 400, marginRight: "auto" }}>
+          <optgroup label={th ? "ช่วงเวลา" : "Period"}>
+            {periodOptions.map(o => (
+              <option key={o.k} value={o.k}>{o.label} ({filtered.filter(tx => inPeriod(tx, o.k)).length})</option>
             ))}
-          </select>
-        )}
+          </optgroup>
+          {years.length > 0 && (
+            <optgroup label={th ? "รายปี" : "By year"}>
+              {years.map(y => (
+                <option key={y} value={"y:" + y}>{th ? `ปี ${y}` : `Year ${y}`} ({filtered.filter(tx => yearOf(tx) === y).length})</option>
+              ))}
+            </optgroup>
+          )}
+        </select>
         <input
           value={fQuery}
           onChange={e => setFQuery(e.target.value)}
