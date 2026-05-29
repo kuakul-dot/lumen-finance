@@ -34,7 +34,7 @@ export function TickerLogo({ ticker = "", logoUrl, region, cls, size = 34 }) {
   }
   return (
     <img src={src} alt={base} width={size} height={size} loading="lazy" onError={() => setIdx(i => i + 1)}
-         style={{ width: size, height: size, borderRadius: 8, objectFit: "contain", background: "#fff", border: "1px solid var(--line)" }} />
+         className="ticker-logo" style={{ width: size, height: size }} />
   )
 }
 

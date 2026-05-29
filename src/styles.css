@@ -402,6 +402,21 @@ a { color: inherit; text-decoration: none; }
   font-family: var(--font-mono);
 }
 
+/* Image logo plate. Logos need a light backing to stay legible, but a bright
+   white box + bright border looks harsh on dark themes — soften both there. */
+.ticker-logo {
+  border-radius: 8px;
+  object-fit: contain;
+  background: #fff;
+  border: 1px solid rgba(0, 0, 0, 0.08);
+  box-sizing: border-box;
+}
+:root[data-theme="dark"] .ticker-logo {
+  background: #f1f2f4;                          /* soft off-white, less glare */
+  border-color: transparent;
+  box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.35);    /* dark ring blends the edge into the bg */
+}
+
 /* ─── Progress / bars ─── */
 .bar {
   height: 6px;
