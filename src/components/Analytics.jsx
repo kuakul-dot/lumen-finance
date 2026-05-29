@@ -1071,7 +1071,7 @@ function AnalyticsDiv2({ t, lang, ccy, rows, totalValue, dataState, liveHoldings
               const received = receivedData?.byTicker?.[p.ticker] || 0
               return (
                 <div key={p.ticker} style={{ display: "grid", gridTemplateColumns: "auto 1fr auto auto", gap: 10, alignItems: "center", padding: "8px 0", borderTop: "1px solid var(--line)" }}>
-                  <div className="ticker-mark">{p.ticker.slice(0, 2)}</div>
+                  <TickerLogo ticker={p.ticker} logoUrl={p.logo_url} region={p.region} cls={p.cls} size={30} />
                   <div>
                     <div style={{ fontWeight: 500, fontSize: 13 }}>{p.ticker}</div>
                     <div className="muted" style={{ fontSize: 11 }}>
