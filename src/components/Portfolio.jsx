@@ -2,7 +2,8 @@
 import { PageHead, Delta, Icon, TickerLogo } from './Nav'
 import { Sparkline } from './Charts'
 import { LUMEN_FMT, LUMEN_DERIVE } from '../data'
-import { addHolding, updateHolding, deleteHolding, deriveHoldings, addTransaction, syncHoldingsFromTransactions, rebuildHolding, rebuildAllHoldings, updateHoldingMeta, getTransactions, getAllTransactions, computeRealized, updateTransaction, deleteTransaction, deleteTransactionsByTicker } from '../lib/db'
+import { addHolding, updateHolding, deleteHolding, deriveHoldings, addTransaction, syncHoldingsFromTransactions, rebuildHolding, rebuildAllHoldings, updateHoldingMeta, getTransactions, getAllTransactions, computeRealized, updateTransaction, deleteTransaction, deleteTransactionsByTicker, applySplit } from '../lib/db'
+import { fetchSplits, toYahooSymbol } from '../lib/prices'
 
 export function PortfolioPage({ t, lang, ccy, setRoute, dataState, portfolio, liveHoldings = [], prices = {}, refreshHoldings, loadingData, dataError, retryLoad, fxRate = 36 }) {
   const [showAdd, setShowAdd] = useState(false)
@@ -80,6 +81,8 @@ function LivePortfolioPage({ t, lang, ccy, portfolio, liveHoldings, prices = {},
   const [txLoading, setTxLoading] = useState(false)
   const [realized, setRealized] = useState({ total: 0, byTicker: {}, byYear: {}, sales: [] })
   const [showRealized, setShowRealized] = useState(false)
+  const [splitModal, setSplitModal] = useState(null)   // null | 'loading' | suggestion[]
+  const [splitApplying, setSplitApplying] = useState(false)
 
   // Realized P/L — recompute from all transactions whenever holdings change
   useEffect(() => {
@@ -216,6 +219,66 @@ function LivePortfolioPage({ t, lang, ccy, portfolio, liveHoldings, prices = {},
     window.alert((r.error ? (th ? "มีข้อผิดพลาดบางส่วน: " : "Some errors: ") + r.error + "\n\n" : "") + summary + orphanNote)
   }
 
+  // ── Auto-detect stock splits from Yahoo and suggest restating old trades ──
+  const handleCheckSplits = async () => {
+    if (!portfolio?.id) return
+    setSplitModal('loading')
+    try {
+      const txs = await getAllTransactions(portfolio.id)
+      const earliestBuy = {}
+      txs.forEach(tx => {
+        if (tx.type === 'Buy' && tx.ticker && tx.transacted_at) {
+          const k = tx.ticker.toUpperCase(), t = new Date(tx.transacted_at).getTime()
+          if (!(k in earliestBuy) || t < earliestBuy[k]) earliestBuy[k] = t
+        }
+      })
+      const symByTicker = {}
+      liveHoldings.forEach(h => { symByTicker[h.ticker.toUpperCase()] = toYahooSymbol(h.ticker, h.region || 'TH', h.asset_class || 'Equity') })
+      const splitsData = await fetchSplits(Object.values(symByTicker))
+      const suggestions = []
+      liveHoldings.forEach(h => {
+        const tk = h.ticker.toUpperCase()
+        const firstBuy = earliestBuy[tk]
+        if (firstBuy == null) return
+        ;(splitsData[symByTicker[tk]] || []).forEach(ev => {
+          const evMs = ev.date * 1000
+          if (evMs <= firstBuy) return   // bought after split → Yahoo already adjusted
+          const affected = txs.filter(tx =>
+            (tx.ticker || '').toUpperCase() === tk &&
+            (tx.type === 'Buy' || tx.type === 'Sell') &&
+            tx.transacted_at && new Date(tx.transacted_at).getTime() < evMs).length
+          if (affected === 0) return
+          suggestions.push({
+            ticker: tk, region: h.region, cls: h.asset_class, logo_url: h.logo_url,
+            ratio: ev.ratio, numerator: ev.numerator, denominator: ev.denominator,
+            dateISO: new Date(evMs).toISOString().slice(0, 10), affected, checked: true,
+          })
+        })
+      })
+      suggestions.sort((a, b) => a.dateISO.localeCompare(b.dateISO))
+      setSplitModal(suggestions)
+    } catch (e) {
+      console.error('[Lumen] checkSplits:', e)
+      setSplitModal([])
+    }
+  }
+
+  const handleApplySplits = async (items) => {
+    setSplitApplying(true)
+    try {
+      for (const s of items.filter(x => x.checked)) {
+        await applySplit(portfolio.id, s.ticker, s.ratio, s.dateISO)
+      }
+      await refreshHoldings()
+      await loadTransactions()
+    } catch (e) {
+      console.error('[Lumen] applySplits:', e)
+    } finally {
+      setSplitApplying(false)
+      setSplitModal(null)
+    }
+  }
+
   if (loadingData) {
     return (
       <div className="shell fade-in">
@@ -234,6 +297,10 @@ function LivePortfolioPage({ t, lang, ccy, portfolio, liveHoldings, prices = {},
         sub={t.portfolio.sub}
         right={
           <div style={{ display: "flex", gap: 8 }}>
+            <button className="btn btn-sm btn-outline" onClick={handleCheckSplits} disabled={splitModal === 'loading'}
+                    title={th ? "ตรวจหาการแตกพาร์ (split) จาก Yahoo แล้วปรับธุรกรรมเก่า" : "Detect stock splits from Yahoo and restate old trades"}>
+              <Icon name="refresh" size={14} /> {splitModal === 'loading' ? (th ? "กำลังตรวจ…" : "Checking…") : (th ? "ตรวจ Split" : "Splits")}
+            </button>
             <button className="btn btn-sm btn-outline" onClick={handleSync} disabled={syncing}
                     title={th ? "สร้าง holdings ใหม่จากประวัติธุรกรรมทั้งหมด" : "Rebuild all holdings from transaction history"}>
               <Icon name="filter" size={14} /> {syncing ? (th ? "กำลังซิงค์…" : "Syncing…") : (th ? "ตรวจสอบ & ซิงค์" : "Reconcile")}
@@ -488,6 +555,69 @@ function LivePortfolioPage({ t, lang, ccy, portfolio, liveHoldings, prices = {},
       )}
       {showRealized && (
         <RealizedModal lang={lang} ccy={ccy} realized={realized} onClose={() => setShowRealized(false)} />
+      )}
+
+      {splitModal && (
+        <div style={{ position: "fixed", inset: 0, zIndex: 200, background: "rgba(0,0,0,0.45)", display: "flex", alignItems: "center", justifyContent: "center", padding: 16 }}
+          onClick={e => { if (e.target === e.currentTarget && !splitApplying) setSplitModal(null) }}>
+          <div style={{ background: "var(--bg)", borderRadius: 18, padding: 28, width: "100%", maxWidth: 540, maxHeight: "85vh", display: "flex", flexDirection: "column", gap: 18, boxShadow: "0 20px 60px rgba(0,0,0,0.2)" }}>
+            {splitModal === 'loading' ? (
+              <div style={{ padding: "48px 0", textAlign: "center", opacity: 0.5, fontSize: 14 }}>
+                {th ? "กำลังตรวจหาการแตกพาร์จาก Yahoo Finance…" : "Checking Yahoo Finance for splits…"}
+              </div>
+            ) : splitModal.length === 0 ? (
+              <>
+                <h3 style={{ margin: 0, fontSize: 16, fontWeight: 600 }}>{th ? "ไม่พบ split ที่ต้องปรับ" : "No splits to apply"}</h3>
+                <p className="muted" style={{ margin: 0, fontSize: 13 }}>
+                  {th ? "ไม่พบการแตกพาร์ที่เกิดหลังจากวันที่คุณซื้อ — ไม่ต้องปรับอะไร" : "No splits occurred after your purchase dates — nothing to restate."}
+                </p>
+                <div style={{ display: "flex", justifyContent: "flex-end" }}>
+                  <button className="btn btn-outline" onClick={() => setSplitModal(null)}>{th ? "ปิด" : "Close"}</button>
+                </div>
+              </>
+            ) : (
+              <>
+                <div>
+                  <h3 style={{ margin: 0, fontSize: 16, fontWeight: 600 }}>
+                    {th ? `พบการแตกพาร์ ${splitModal.length} รายการ` : `${splitModal.length} split${splitModal.length > 1 ? "s" : ""} found`}
+                  </h3>
+                  <p className="muted" style={{ margin: "4px 0 0", fontSize: 12, lineHeight: 1.5 }}>
+                    {th
+                      ? "ปรับธุรกรรมก่อนวัน split ให้เป็นหน่วยหลัง split (หุ้น×อัตรา, ราคา÷อัตรา) — ต้นทุนรวมไม่เปลี่ยน ⚠ ใช้เฉพาะถ้ายังไม่เคยปรับเอง"
+                      : "Restates pre-split trades to post-split units (shares×ratio, price÷ratio) — cost basis unchanged. ⚠ Only apply if you haven't adjusted these manually."}
+                  </p>
+                </div>
+                <div style={{ overflow: "auto", flex: 1, margin: "0 -4px", padding: "0 4px" }}>
+                  {splitModal.map((s, i) => (
+                    <div key={i} style={{ display: "grid", gridTemplateColumns: "20px 30px 1fr auto", gap: 10, alignItems: "center", padding: "10px 0", borderBottom: "1px solid var(--line)" }}>
+                      <input type="checkbox" checked={s.checked}
+                        onChange={e => setSplitModal(prev => prev.map((p, j) => j === i ? { ...p, checked: e.target.checked } : p))}
+                        style={{ width: 16, height: 16, cursor: "pointer", accentColor: "var(--accent)" }} />
+                      <TickerLogo ticker={s.ticker} logoUrl={s.logo_url} region={s.region} cls={s.cls} size={28} />
+                      <div>
+                        <div style={{ fontWeight: 500, fontSize: 13 }}>
+                          {s.ticker} · {s.numerator}:{s.denominator} {th ? "แตกพาร์" : "split"}
+                        </div>
+                        <div className="muted" style={{ fontSize: 11 }}>{s.dateISO}</div>
+                      </div>
+                      <div className="mono muted" style={{ fontSize: 11, textAlign: "right" }}>
+                        {s.affected} {th ? "รายการก่อนหน้า" : "trades"}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+                <div style={{ display: "flex", gap: 10, justifyContent: "flex-end", paddingTop: 12, borderTop: "1px solid var(--line)" }}>
+                  <button className="btn btn-outline" onClick={() => !splitApplying && setSplitModal(null)} disabled={splitApplying}>
+                    {th ? "ยกเลิก" : "Cancel"}
+                  </button>
+                  <button className="btn" disabled={splitApplying || splitModal.every(s => !s.checked)} onClick={() => handleApplySplits(splitModal)}>
+                    {splitApplying ? (th ? "กำลังปรับ…" : "Applying…") : (th ? `ปรับ ${splitModal.filter(s => s.checked).length} รายการ` : `Apply ${splitModal.filter(s => s.checked).length}`)}
+                  </button>
+                </div>
+              </>
+            )}
+          </div>
+        </div>
       )}
     </div>
   )

@@ -222,6 +222,32 @@ export async function rebuildHolding(portfolioId, ticker) {
   })
 }
 
+// Apply a stock split to a ticker: every Buy/Sell dated BEFORE the split is
+// restated into post-split terms (shares × ratio, price ÷ ratio). Cost basis
+// is preserved (shares × price unchanged); fees/taxes are flat cash, untouched.
+// Then the holding is rebuilt so its share count matches Yahoo's adjusted price.
+export async function applySplit(portfolioId, ticker, ratio, beforeDateISO) {
+  if (!portfolioId || !ticker || !(ratio > 0) || ratio === 1) return { adjusted: 0, error: null }
+  const key = ticker.toUpperCase()
+  const { data: txs, error } = await supabase
+    .from('transactions').select('*').eq('portfolio_id', portfolioId)
+  if (error) return { adjusted: 0, error: error.message }
+  const before = new Date(beforeDateISO).getTime()
+  let adjusted = 0
+  for (const tx of (txs || [])) {
+    if ((tx.ticker || '').toUpperCase() !== key) continue
+    if (tx.type !== 'Buy' && tx.type !== 'Sell') continue
+    if (!tx.transacted_at || new Date(tx.transacted_at).getTime() >= before) continue
+    const { error: e } = await updateTransaction(tx.id, {
+      shares: +((Number(tx.shares) || 0) * ratio).toFixed(8),
+      price:  +((Number(tx.price)  || 0) / ratio).toFixed(6),
+    })
+    if (!e) adjusted++
+  }
+  await rebuildHolding(portfolioId, key)
+  return { adjusted, error: null }
+}
+
 // Apply classification metadata (name/region/sector/asset_class/currency/...)
 // to a holding identified by ticker.  Used when editing a transaction so the
 // position is filed and priced correctly.  Only non-empty fields are written.

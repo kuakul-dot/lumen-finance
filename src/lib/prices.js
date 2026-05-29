@@ -28,6 +28,17 @@ export async function fetchHistory(symbol, range = '1y') {
   return cached || { ts: now, series: [], currency: 'USD' }
 }
 
+// Fetch split history for symbols → { "NVDA": [{ date, ratio }], ... }
+export async function fetchSplits(symbols) {
+  const list = [...new Set(symbols)].filter(Boolean)
+  if (list.length === 0) return {}
+  try {
+    const res = await fetch(`/api/splits?symbols=${encodeURIComponent(list.join(','))}`)
+    if (res.ok) return await res.json()
+  } catch { /* ignore */ }
+  return {}
+}
+
 // Fetch live USD → THB exchange rate (USDTHB=X via Yahoo Finance)
 export async function fetchFxRate() {
   const now = Date.now()
