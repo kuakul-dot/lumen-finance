@@ -9,15 +9,13 @@ export function Brand() {
   )
 }
 
-// Shared stock logo: custom logoUrl → ticker logo API → coloured initials.
-// Thai symbols are queried with the .BK suffix (exchange-specific, so they
-// don't collide with unrelated US tickers); on any miss it falls back to the
-// initials.  Used across all pages.
+// Shared stock logo: custom logoUrl → ticker logo API (non-Thai only, to avoid
+// SET/US ticker collisions) → coloured initials. Used across all pages.
 export function TickerLogo({ ticker = "", logoUrl, region, cls, size = 34 }) {
   const [failed, setFailed] = useState(false)
   const base = String(ticker).replace(/\.BK$/i, "").toUpperCase()
-  const symbolForLogo = region === "TH" ? `${base}.BK` : base
-  const apiSrc = base ? `https://assets.parqet.com/logos/symbol/${encodeURIComponent(symbolForLogo)}?format=png&size=64` : null
+  const isThai = region === "TH"
+  const apiSrc = (!isThai && base) ? `https://assets.parqet.com/logos/symbol/${encodeURIComponent(base)}?format=png&size=64` : null
   const src = logoUrl || apiSrc
   const initials = (base || "?").slice(0, 2)
   const bg = { Equity: "var(--bg-2)", ETF: "oklch(0.94 0.04 200)", Bond: "oklch(0.94 0.04 280)", Crypto: "oklch(0.94 0.05 65)", Commodity: "oklch(0.94 0.04 90)" }[cls] || "var(--bg-2)"
