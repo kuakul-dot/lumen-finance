@@ -26,11 +26,17 @@ function saveTargets(t) {
   try { localStorage.setItem(TARGET_STORAGE_KEY, JSON.stringify(t)) } catch {}
 }
 
+const BAND_STORAGE_KEY = "lumen_rebalance_band"
+function loadBand() {
+  try { const v = parseFloat(localStorage.getItem(BAND_STORAGE_KEY)); if (!isNaN(v)) return v } catch {}
+  return 5   // default ±5 percentage-point tolerance
+}
+
 // ── Helpers ──────────────────────────────────────────────────────────────────
 function buildCurrentByClass(rows, cash) {
   const map = { "TH Equity": 0, "US Equity": 0, "Bonds": 0, "Gold": 0, "Crypto": 0, "Cash": cash }
   rows.forEach(r => {
-    const k = r.cls === "Equity"    ? (r.region === "TH" ? "TH Equity" : "US Equity")
+    const k = (r.cls === "Equity" || r.cls === "ETF") ? (r.region === "TH" ? "TH Equity" : "US Equity")
             : r.cls === "Bond"      ? "Bonds"
             : r.cls === "Commodity" ? "Gold"
             : r.cls === "Crypto"    ? "Crypto" : "Cash"
@@ -38,6 +44,11 @@ function buildCurrentByClass(rows, cash) {
   })
   return map
 }
+
+// Estimated round-trip-ish fee rate by region (TH brokers ~0.157% + VAT;
+// many US brokers are commission-free).  Used to reserve cash for fees so a
+// suggested buy's total outlay fits the budget.
+const FEE_RATE = (region) => region === "TH" ? 0.0017 : 0
 
 export function ToolsPage({ t, lang, ccy, dataState, liveHoldings = [], prices = {}, portfolio, cashAccounts = [], fxRate = 36 }) {
   const FMT = LUMEN_FMT
@@ -49,10 +60,12 @@ export function ToolsPage({ t, lang, ccy, dataState, liveHoldings = [], prices =
   const [showResult, setShowResult] = useState(false)
   const [editTargets, setEditTargets] = useState(false)
   const [targets,    setTargets]    = useState(loadTargets)
+  const [band,       setBand]       = useState(loadBand)   // tolerance (percentage points)
   const [copied,     setCopied]     = useState(false)
 
-  // Persist targets to localStorage
+  // Persist to localStorage
   useEffect(() => { saveTargets(targets) }, [targets])
+  useEffect(() => { try { localStorage.setItem(BAND_STORAGE_KEY, String(band)) } catch {} }, [band])
 
   // ── Derive rows ──────────────────────────────────────────────────────────────
   const isLive = dataState === "live"
@@ -129,31 +142,37 @@ export function ToolsPage({ t, lang, ccy, dataState, liveHoldings = [], prices =
       if (s.name === "Cash") return
       const candidates = sample[s.name] || []
       if (candidates.length === 0) return
-      if (s.delta > 500) {
+      // Tolerance band: skip classes whose current weight is within `band`
+      // percentage points of target (avoids churn on already-balanced classes)
+      const driftPP = s.curPct - s.tgtPct
+      if (Math.abs(driftPP) < band) return
+
+      if (s.delta > 0) {
+        // Underweight → buy (reserve est. fees so the total outlay fits budget)
         const sorted = [...candidates].sort((a, b) => a.value - b.value)
         const split = Math.min(2, sorted.length)
         sorted.slice(0, split).forEach(c => {
           const amt = s.delta / split
-          const priceInDisplay = c.price  // always in THB (deriveHoldings returns THB values)
-          const sharesNeeded = sizeShares(amt, priceInDisplay, c.region)
+          const effPrice = c.price * (1 + FEE_RATE(c.region))   // price incl. fee reserve (THB)
+          const sharesNeeded = sizeShares(amt, effPrice, c.region)
           if (sharesNeeded > 0) {
-            out.push({ action: "Buy", ticker: c.ticker, name: c.name, shares: sharesNeeded, priceNative: c.priceNative, nativeCcy: c.nativeCcy, amount: sharesNeeded * priceInDisplay, cls: s.name, region: c.region, logoUrl: c.logo_url, assetClass: c.cls })
+            out.push({ action: "Buy", ticker: c.ticker, name: c.name, shares: sharesNeeded, priceNative: c.priceNative, nativeCcy: c.nativeCcy, amount: sharesNeeded * c.price, cls: s.name, region: c.region, logoUrl: c.logo_url, assetClass: c.cls })
           }
         })
-      } else if (allowSales && s.delta < -total * 0.005) {
+      } else if (allowSales) {
+        // Overweight → sell the largest lot
         const sorted = [...candidates].sort((a, b) => b.value - a.value)
         const c = sorted[0]
         if (c) {
-          const priceInDisplay = c.price
-          const sharesNeeded = sizeShares(Math.abs(s.delta), priceInDisplay, c.region)
+          const sharesNeeded = sizeShares(Math.abs(s.delta), c.price, c.region)
           if (sharesNeeded > 0) {
-            out.push({ action: "Sell", ticker: c.ticker, name: c.name, shares: sharesNeeded, priceNative: c.priceNative, nativeCcy: c.nativeCcy, amount: sharesNeeded * priceInDisplay, cls: s.name, region: c.region, logoUrl: c.logo_url, assetClass: c.cls })
+            out.push({ action: "Sell", ticker: c.ticker, name: c.name, shares: sharesNeeded, priceNative: c.priceNative, nativeCcy: c.nativeCcy, amount: sharesNeeded * c.price, cls: s.name, region: c.region, logoUrl: c.logo_url, assetClass: c.cls })
           }
         }
       }
     })
     return out
-  }, [suggestions, allowSales, rows, total, showResult])
+  }, [suggestions, allowSales, rows, total, showResult, band])
 
   // cashRemaining in THB (depInTHB minus buy/sell amounts which are also THB)
   const cashRemaining = Math.max(0, depInTHB - trades.filter(tr => tr.action === "Buy").reduce((a, b) => a + b.amount, 0)
@@ -300,6 +319,22 @@ export function ToolsPage({ t, lang, ccy, dataState, liveHoldings = [], prices =
               </div>
             </div>
           </label>
+
+          {/* Tolerance band */}
+          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12, marginTop: 20 }}>
+            <div>
+              <div style={{ fontSize: 13, fontWeight: 500 }}>{th ? "ช่วงคลาดเคลื่อนที่ยอมรับ" : "Tolerance band"}</div>
+              <div className="muted" style={{ fontSize: 11 }}>
+                {th ? "ไม่ปรับถ้าเบี่ยงจากเป้าน้อยกว่านี้ (0 = ปรับทุกครั้ง)" : "Skip classes within this drift from target (0 = always)"}
+              </div>
+            </div>
+            <div style={{ display: "flex", alignItems: "center", gap: 4, flexShrink: 0 }}>
+              <input type="number" min="0" max="50" step="1" value={band}
+                onChange={e => { setBand(Math.max(0, Math.min(50, parseFloat(e.target.value) || 0))); setShowResult(false) }}
+                style={{ width: 56, padding: "6px 8px", borderRadius: 8, border: "1px solid var(--line)", background: "var(--bg)", fontSize: 14, textAlign: "right" }} />
+              <span className="muted" style={{ fontSize: 13 }}>%</span>
+            </div>
+          </div>
 
           <div style={{ display: "flex", gap: 10, marginTop: 24 }}>
             <button className="btn" onClick={() => setShowResult(true)} style={{ flex: 1, padding: "12px 20px" }}>
