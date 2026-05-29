@@ -365,16 +365,17 @@ function parseAnchored(rows) {
     const price  = nums[1] ?? null
     const currency = /USD/i.test(ccyTok[0]) ? 'USD' : 'THB'
 
-    // Ticker: scan this row, then outward (prefer rows above), skipping brackets
-    let ticker = null
-    for (let d = 0; d <= 3 && !ticker; d++) {
-      const probes = d === 0 ? [i] : [i - d, i + d]
-      for (const j of probes) {
-        if (j < 0 || j >= rows.length) continue
-        const t = pickTicker(rows[j].map(c => c.text))
-        if (t) { ticker = t; break }
-      }
+    // Ticker association (Dime!): the symbol sits a row or two ABOVE the main
+    // row, so scan UP first; also accept single-letter tickers (e.g. "U", "F")
+    // which the shared pickTicker rejects.
+    const okT = (txt) => {
+      const c = txt.replace(/\[.*?\]/g, '').trim()
+      return /^[A-Z][A-Z0-9.\-]{0,7}$/.test(c) && !SKIP_TICKER.has(c)
     }
+    const tickerIn = (arr) => { const hit = arr.find(okT); return hit ? hit.replace(/\[.*?\]/g, '').trim() : null }
+    let ticker = tickerIn(texts)
+    for (let d = 1; d <= 4 && !ticker; d++) if (i - d >= 0) ticker = tickerIn(rows[i - d].map(c => c.text))
+    for (let d = 1; d <= 2 && !ticker; d++) if (i + d < rows.length) ticker = tickerIn(rows[i + d].map(c => c.text))
 
     // Gross amount = Units × Unit Price (in the transaction currency)
     const amount = (shares != null && price != null)
@@ -402,6 +403,11 @@ function parseAnchored(rows) {
       type: mapType(typeTok[0]),
       ticker, shares, price, amount, fee, tax, currency, note: null,
     })
+  }
+  // ── TEMP DEBUG (Dime! only): dump rows so we can see any dropped anchor ──
+  if (results.length) {
+    console.log('[dime] anchored', results.length, results.map(r => `${r.ticker}:${r.shares}@${r.price}`))
+    rows.forEach((r, i) => console.log('[dime row]', i, r.map(c => `"${c.text}"`).join(' | ')))
   }
   return results
 }
