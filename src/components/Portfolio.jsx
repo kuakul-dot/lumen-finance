@@ -130,11 +130,18 @@ function LivePortfolioPage({ t, lang, ccy, portfolio, liveHoldings, prices = {},
   const annualDiv      = viewRows.reduce((s, r) => s + r.value * (r.divYield || 0) / 100, 0)
   const largestPos     = viewRows.length > 0 ? [...viewRows].sort((a, b) => b.value - a.value)[0] : null
 
-  // Realized P/L for the current view (all sales when unfiltered)
+  // Realized P/L for the current view (all sales when unfiltered). Sum from the
+  // sales list — not from current holdings — so fully-sold positions still count.
   const realizedShown = useMemo(() => {
     if (filter === "all") return realized.total
+    const sales = realized.sales || []
+    if (filter === "US" || filter === "TH") {
+      const wantUSD = filter === "US"
+      return sales.reduce((s, x) => ((x.currency === "USD") === wantUSD ? s + x.gainTHB : s), 0)
+    }
+    // Class filters (ETF/Bond/Crypto): fall back to tickers in the current view.
     const set = new Set(viewRows.map(r => r.ticker.toUpperCase()))
-    return Object.entries(realized.byTicker || {}).reduce((s, [tk, v]) => set.has(tk) ? s + v : s, 0)
+    return sales.reduce((s, x) => (set.has(x.ticker) ? s + x.gainTHB : s), 0)
   }, [filter, viewRows, realized])
 
   // All positions merged — used for filter counts and footer total

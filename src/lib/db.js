@@ -377,6 +377,7 @@ export function computeRealized(transactions, fxRate = 36) {
       sales.push({
         date: (t.transacted_at || '').split('T')[0],
         ticker: tk,
+        currency: t.currency || 'THB',   // drives the TH/US filter on the summary card
         shares: s,
         price: pr,
         proceedsTHB: proceeds * fx,
