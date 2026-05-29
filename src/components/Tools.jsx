@@ -533,37 +533,48 @@ export function ToolsPage({ t, lang, ccy, dataState, liveHoldings = [], prices =
                 ? "ส่วนต่าง = น้ำหนักปัจจุบัน − เป้า · 🔴 + = เกินเป้า (ควรขาย/ลด) · 🟢 − = ต่ำกว่าเป้า (ควรซื้อเพิ่ม)"
                 : "Diff = current − target · 🔴 + = overweight (sell) · 🟢 − = underweight (buy)"}
             </p>
-            {/* Column headers */}
-            <div style={{ display: "grid", gridTemplateColumns: "150px 50px 1fr 70px 70px 60px", alignItems: "center", gap: 12, paddingBottom: 6 }}>
-              <div className="label-up">{th ? "หลักทรัพย์" : "Holding"}</div>
-              <div className="label-up" style={{ fontSize: 9 }}>{th ? "เป้า" : "Target"}</div>
-              <div />
-              <div className="label-up" style={{ textAlign: "right", fontSize: 9 }}>{th ? "ปัจจุบัน" : "Now"}</div>
-              <div className="label-up" style={{ textAlign: "right", fontSize: 9 }}>{th ? "หลังปรับ" : "After"}</div>
-              <div className="label-up" style={{ textAlign: "right", fontSize: 9 }}>{th ? "ส่วนต่าง" : "Diff"}</div>
+            {/* Legend: now → after / target */}
+            <div style={{ display: "flex", justifyContent: "flex-end", gap: 14, paddingBottom: 8, fontSize: 9 }}>
+              <span className="label-up" style={{ display: "inline-flex", alignItems: "center", gap: 4 }}>
+                <span style={{ width: 8, height: 8, borderRadius: 2, background: "var(--ink-4)", opacity: 0.5 }} />{th ? "ปัจจุบัน" : "Now"}
+              </span>
+              <span className="label-up" style={{ display: "inline-flex", alignItems: "center", gap: 4 }}>
+                <span style={{ width: 8, height: 8, borderRadius: 2, background: "var(--accent)" }} />{th ? "หลังปรับ" : "After"}
+              </span>
+              <span className="label-up" style={{ display: "inline-flex", alignItems: "center", gap: 4 }}>
+                <span style={{ width: 2, height: 10, background: "var(--ink-2)" }} />{th ? "เป้า" : "Target"}
+              </span>
             </div>
-            <div style={{ display: "grid", gap: 10 }}>
+            <div style={{ display: "grid", gap: 8 }}>
               {suggestions.map(s => {
                 const after = newTotal > 0 ? (s.target / newTotal) * 100 : 0
                 const before = s.curPct
                 const drift = before - s.tgtPct
                 return (
-                  <div key={s.name} style={{ display: "grid", gridTemplateColumns: "150px 50px 1fr 70px 70px 60px", alignItems: "center", gap: 12, padding: "10px 0", borderTop: "1px solid var(--line)" }}>
-                    <div style={{ fontSize: 13, fontWeight: 500, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}><ClassBadge name={s.name} /></div>
-                    <div className="mono muted" style={{ fontSize: 11 }}>→{s.tgtPct.toFixed(0)}%</div>
-                    <div style={{ position: "relative", height: 16 }}>
+                  <div key={s.name} style={{ display: "grid", gap: 6, padding: "9px 0", borderTop: "1px solid var(--line)" }}>
+                    {/* Line 1: name · now → after / target · diff */}
+                    <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8 }}>
+                      <div style={{ fontSize: 13, fontWeight: 500, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", minWidth: 0 }}><ClassBadge name={s.name} /></div>
+                      <div style={{ display: "flex", alignItems: "center", gap: 8, flexShrink: 0 }}>
+                        <span className="mono" style={{ fontSize: 11.5 }}>
+                          <span className="muted">{before.toFixed(1)}%</span>
+                          <span className="muted" style={{ margin: "0 3px" }}>→</span>
+                          {after.toFixed(1)}%
+                        </span>
+                        <span className="mono muted" style={{ fontSize: 10 }}>/ {s.tgtPct.toFixed(0)}%</span>
+                        {Math.abs(drift) > 1 && (
+                          <span className={"chip " + (drift > 0 ? "chip-loss" : "chip-gain")} style={{ fontSize: 10, minWidth: 46, justifyContent: "center" }}>
+                            {drift > 0 ? "+" : ""}{drift.toFixed(1)}%
+                          </span>
+                        )}
+                      </div>
+                    </div>
+                    {/* Line 2: slim bar (now underlay, after fill, target marker) */}
+                    <div style={{ position: "relative", height: 8 }}>
                       <div style={{ position: "absolute", inset: 0, background: "var(--bg-2)", borderRadius: 999 }} />
                       <div style={{ position: "absolute", height: "100%", background: "var(--ink-4)", width: Math.min(100, before) + "%", opacity: 0.5, borderRadius: 999 }} />
                       <div style={{ position: "absolute", height: "100%", background: "var(--accent)", width: Math.min(100, after) + "%", borderRadius: 999 }} />
-                    </div>
-                    <div className="mono muted" style={{ fontSize: 11, textAlign: "right" }}>{before.toFixed(1)}%</div>
-                    <div className="mono" style={{ fontSize: 11, textAlign: "right" }}>→ {after.toFixed(1)}%</div>
-                    <div style={{ textAlign: "right" }}>
-                      {Math.abs(drift) > 1 && (
-                        <span className={"chip " + (drift > 0 ? "chip-loss" : "chip-gain")} style={{ fontSize: 10 }}>
-                          {drift > 0 ? "+" : ""}{drift.toFixed(1)}%
-                        </span>
-                      )}
+                      <div style={{ position: "absolute", top: -2, height: 12, width: 2, background: "var(--ink-2)", left: "calc(" + Math.min(100, s.tgtPct) + "% - 1px)" }} />
                     </div>
                   </div>
                 )
