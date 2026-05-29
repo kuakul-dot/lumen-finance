@@ -443,7 +443,10 @@ function LiveDashboardPage({ t, lang, ccy, setRoute, liveHoldings, prices = {}, 
   const [showCashModal, setShowCashModal] = useState(null)
   const [goals, setGoals] = useState([])
   const [allTx, setAllTx] = useState([])
-  const recentTx = useMemo(() => allTx.slice(0, 5), [allTx])
+  const recentTx = useMemo(
+    () => [...allTx].sort((a, b) => new Date(b.transacted_at) - new Date(a.transacted_at)).slice(0, 5),
+    [allTx]
+  )
 
   useEffect(() => {
     if (!portfolio) return
