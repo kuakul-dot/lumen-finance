@@ -78,7 +78,8 @@ function LivePortfolioPage({ t, lang, ccy, portfolio, liveHoldings, prices = {},
   const [filter, setFilter] = useState("all")
   const [transactions, setTransactions] = useState([])
   const [txLoading, setTxLoading] = useState(false)
-  const [realized, setRealized] = useState({ total: 0, byTicker: {} })
+  const [realized, setRealized] = useState({ total: 0, byTicker: {}, byYear: {}, sales: [] })
+  const [showRealized, setShowRealized] = useState(false)
 
   // Realized P/L — recompute from all transactions whenever holdings change
   useEffect(() => {
@@ -285,7 +286,8 @@ function LivePortfolioPage({ t, lang, ccy, portfolio, liveHoldings, prices = {},
                 <PortMetric
                   label={th ? "กำไร/ขาดทุนที่รับรู้" : "Realized P/L"}
                   value={(realizedShown >= 0 ? "+" : "") + LUMEN_FMT.money(realizedShown, ccy, { compact: true })}
-                  sub={<span className="muted" style={{ fontSize: 11 }}>{th ? "จากการขาย" : "from sales"}</span>}
+                  sub={<span className="muted" style={{ fontSize: 11 }}>{th ? "จากการขาย · ดูรายงาน" : "from sales · view report"}</span>}
+                  onClick={() => setShowRealized(true)}
                 />
               )}
               <PortMetric
@@ -476,6 +478,9 @@ function LivePortfolioPage({ t, lang, ccy, portfolio, liveHoldings, prices = {},
           onClose={() => setSellHolding(null)}
           onSaved={async () => { setSellHolding(null); await refreshHoldings() }}
         />
+      )}
+      {showRealized && (
+        <RealizedModal lang={lang} ccy={ccy} realized={realized} onClose={() => setShowRealized(false)} />
       )}
     </div>
   )
@@ -1029,6 +1034,84 @@ function SellModal({ lang, ccy, holding, portfolioId, onClose, onSaved }) {
             </button>
           </div>
         </form>
+      </div>
+    </div>
+  )
+}
+
+// ─── Realized P/L report ──────────────────────────────────────────────────────
+function RealizedModal({ lang, ccy, realized, onClose }) {
+  const th = lang === "th"
+  const years = Object.entries(realized.byYear || {}).sort((a, b) => b[0].localeCompare(a[0]))
+  const sales = realized.sales || []
+  return (
+    <div style={{
+      position: "fixed", inset: 0, background: "rgba(0,0,0,0.45)", backdropFilter: "blur(4px)",
+      display: "flex", alignItems: "center", justifyContent: "center", zIndex: 1000,
+      overflowY: "auto", padding: "24px 16px",
+    }} onClick={e => e.target === e.currentTarget && onClose()}>
+      <div style={{
+        background: "var(--bg)", borderRadius: 20, padding: "28px 26px 32px",
+        width: "100%", maxWidth: 620, margin: "auto",
+        boxShadow: "0 8px 48px rgba(0,0,0,0.18)", maxHeight: "calc(100dvh - 48px)", overflowY: "auto",
+        animation: "fadeIn 0.18s ease",
+      }}>
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 6 }}>
+          <h3 style={{ margin: 0, fontSize: 20, fontFamily: "var(--font-display)" }}>
+            {th ? "กำไร/ขาดทุนที่รับรู้" : "Realized P/L"}
+          </h3>
+          <button onClick={onClose} style={{ background: "none", border: "none", cursor: "pointer", fontSize: 20, color: "var(--ink-3)", lineHeight: 1 }}>×</button>
+        </div>
+        <p className="muted" style={{ fontSize: 12, margin: "0 0 18px" }}>
+          {th ? "กำไรจากการขายจริง = เงินที่ได้รับสุทธิ − ต้นทุนเฉลี่ยของหุ้นที่ขาย (หัก fee/tax)" : "Net proceeds − average cost of shares sold (fees/taxes deducted)"}
+        </p>
+
+        {/* Per-year summary */}
+        <div style={{ display: "flex", gap: 10, flexWrap: "wrap", marginBottom: 18 }}>
+          <div style={{ padding: "10px 14px", borderRadius: 10, background: "var(--bg-2)", flex: "1 1 120px" }}>
+            <div className="label-up" style={{ marginBottom: 4 }}>{th ? "รวมทั้งหมด" : "Total"}</div>
+            <div style={{ fontSize: 20, fontWeight: 600, fontFamily: "var(--font-display)", color: realized.total >= 0 ? "var(--gain)" : "var(--loss)" }}>
+              {realized.total >= 0 ? "+" : ""}{LUMEN_FMT.money(realized.total, ccy)}
+            </div>
+          </div>
+          {years.map(([y, g]) => (
+            <div key={y} style={{ padding: "10px 14px", borderRadius: 10, background: "var(--bg-2)", flex: "1 1 100px" }}>
+              <div className="label-up" style={{ marginBottom: 4 }}>{y}</div>
+              <div style={{ fontSize: 16, fontWeight: 600, fontFamily: "var(--font-display)", color: g >= 0 ? "var(--gain)" : "var(--loss)" }}>
+                {g >= 0 ? "+" : ""}{LUMEN_FMT.money(g, ccy, { compact: true })}
+              </div>
+            </div>
+          ))}
+        </div>
+
+        {/* Per-sale list */}
+        {sales.length === 0 ? (
+          <p className="muted" style={{ fontSize: 13 }}>{th ? "ยังไม่มีการขาย" : "No sales yet"}</p>
+        ) : (
+          <table className="table">
+            <thead>
+              <tr>
+                <th>{th ? "วันที่" : "Date"}</th>
+                <th>{th ? "หลักทรัพย์" : "Holding"}</th>
+                <th className="num">{th ? "จำนวน" : "Shares"}</th>
+                <th className="num">{th ? "กำไร/ขาดทุน" : "Gain/Loss"}</th>
+              </tr>
+            </thead>
+            <tbody>
+              {sales.map((s, i) => (
+                <tr key={i}>
+                  <td className="mono muted" style={{ fontSize: 12 }}>{s.date}</td>
+                  <td style={{ fontWeight: 500, fontSize: 13 }}>{s.ticker}</td>
+                  <td className="num">{Number(s.shares).toLocaleString(undefined, { maximumFractionDigits: 4 })}</td>
+                  <td className="num" style={{ color: s.gainTHB >= 0 ? "var(--gain)" : "var(--loss)", fontWeight: 500 }}>
+                    {s.gainTHB >= 0 ? "+" : ""}{LUMEN_FMT.money(s.gainTHB, ccy, { compact: true })}
+                    <div className="muted" style={{ fontSize: 10 }}>{s.gainPct >= 0 ? "+" : ""}{s.gainPct.toFixed(1)}%</div>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        )}
       </div>
     </div>
   )
@@ -2281,10 +2364,10 @@ function SortHeader({ id, label, sortKey, sortDir, onSort, align = "left" }) {
   )
 }
 
-function PortMetric({ label, value, sub }) {
+function PortMetric({ label, value, sub, onClick }) {
   return (
-    <div>
-      <div className="label-up" style={{ marginBottom: 6 }}>{label}</div>
+    <div onClick={onClick} style={onClick ? { cursor: "pointer" } : undefined} title={onClick ? "ดูรายละเอียด" : undefined}>
+      <div className="label-up" style={{ marginBottom: 6 }}>{label}{onClick && <span style={{ marginLeft: 4, color: "var(--ink-4)" }}>›</span>}</div>
       <div style={{ fontFamily: "var(--font-display)", fontSize: 26, lineHeight: 1, letterSpacing: "-0.02em" }}>{value}</div>
       <div style={{ fontSize: 11, color: "var(--ink-3)", marginTop: 4 }}>{sub}</div>
     </div>

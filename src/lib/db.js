@@ -348,6 +348,8 @@ export function computeRealized(transactions, fxRate = 36) {
     String(a.transacted_at).localeCompare(String(b.transacted_at)))
   const pos = {}                 // ticker → { shares, cost (native ccy) }
   const byTicker = {}
+  const byYear = {}
+  const sales = []
   let total = 0
 
   for (const t of sorted) {
@@ -370,11 +372,24 @@ export function computeRealized(transactions, fxRate = 36) {
       const gainTHB  = (proceeds - costBasis) * fx
       total += gainTHB
       byTicker[tk] = (byTicker[tk] || 0) + gainTHB
+      const year = String(t.transacted_at || '').slice(0, 4) || '—'
+      byYear[year] = (byYear[year] || 0) + gainTHB
+      sales.push({
+        date: (t.transacted_at || '').split('T')[0],
+        ticker: tk,
+        shares: s,
+        price: pr,
+        proceedsTHB: proceeds * fx,
+        costTHB: costBasis * fx,
+        gainTHB,
+        gainPct: costBasis > 0 ? ((proceeds - costBasis) / costBasis) * 100 : 0,
+      })
       pos[tk].shares = Math.max(0, pos[tk].shares - s)
       pos[tk].cost   = Math.max(0, pos[tk].cost - costBasis)
     }
   }
-  return { total, byTicker }
+  sales.reverse()   // newest first
+  return { total, byTicker, byYear, sales }
 }
 
 export async function getAllTransactions(portfolioId) {
