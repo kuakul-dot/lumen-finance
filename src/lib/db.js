@@ -143,9 +143,14 @@ export async function syncHoldingsFromTransactions(portfolioId, txs) {
   const errors = []
   for (const h of byTicker.values()) {
     if (!h._dirty) continue
+    const flat = (Number(h.shares) || 0) <= 1e-9   // position sold to zero
     if (h._new) {
+      if (flat) continue                           // never create an empty position
       const { _new, _dirty, ...payload } = h
       const { error } = await addHolding(portfolioId, payload)
+      if (error) errors.push(`${h.ticker}: ${error.message}`)
+    } else if (flat) {
+      const { error } = await deleteHolding(h.id)  // fully sold → drop the row
       if (error) errors.push(`${h.ticker}: ${error.message}`)
     } else {
       const patch = { shares: h.shares, cost_price: h.cost_price }
