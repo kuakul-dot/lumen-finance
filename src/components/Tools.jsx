@@ -50,6 +50,10 @@ function buildCurrentByClass(rows, cash) {
 // suggested buy's total outlay fits the budget.
 const FEE_RATE = (region) => region === "TH" ? 0.0017 : 0
 
+// Map a holding to its asset-class bucket
+const CLASS_OF = (r) => (r.cls === "Equity" || r.cls === "ETF") ? (r.region === "TH" ? "TH Equity" : "US Equity")
+  : r.cls === "Bond" ? "Bonds" : r.cls === "Commodity" ? "Gold" : r.cls === "Crypto" ? "Crypto" : "Cash"
+
 export function ToolsPage({ t, lang, ccy, dataState, liveHoldings = [], prices = {}, portfolio, cashAccounts = [], fxRate = 36 }) {
   const FMT = LUMEN_FMT
   const th = lang === "th"
@@ -64,12 +68,14 @@ export function ToolsPage({ t, lang, ccy, dataState, liveHoldings = [], prices =
   const [copied,     setCopied]     = useState(false)
   const [targetMode, setTargetMode] = useState(() => { try { return localStorage.getItem("lumen_rebalance_mode") || "class" } catch { return "class" } })
   const [tickerTargets, setTickerTargets] = useState(() => { try { return JSON.parse(localStorage.getItem("lumen_rebalance_ticker_targets") || "{}") } catch { return {} } })
+  const [tickerWeights, setTickerWeights] = useState(() => { try { return JSON.parse(localStorage.getItem("lumen_rebalance_ticker_weights") || "{}") } catch { return {} } })
 
   // Persist to localStorage
   useEffect(() => { saveTargets(targets) }, [targets])
   useEffect(() => { try { localStorage.setItem(BAND_STORAGE_KEY, String(band)) } catch {} }, [band])
   useEffect(() => { try { localStorage.setItem("lumen_rebalance_mode", targetMode) } catch {} }, [targetMode])
   useEffect(() => { try { localStorage.setItem("lumen_rebalance_ticker_targets", JSON.stringify(tickerTargets)) } catch {} }, [tickerTargets])
+  useEffect(() => { try { localStorage.setItem("lumen_rebalance_ticker_weights", JSON.stringify(tickerWeights)) } catch {} }, [tickerWeights])
 
   // ── Derive rows ──────────────────────────────────────────────────────────────
   const isLive = dataState === "live"
@@ -106,7 +112,7 @@ export function ToolsPage({ t, lang, ccy, dataState, liveHoldings = [], prices =
     return Object.values(m).sort((a, b) => b.value - a.value)
   }, [rows])
 
-  // Effective ticker targets — unset tickers default to their current weight
+  // Effective ticker targets (pure ticker mode) — unset → current weight
   const effTickerTargets = useMemo(() => {
     const out = {}
     tickerRows.forEach(tr => {
@@ -115,12 +121,41 @@ export function ToolsPage({ t, lang, ccy, dataState, liveHoldings = [], prices =
     return out
   }, [tickerRows, tickerTargets, total])
 
+  // Tickers grouped by class (for hybrid mode)
+  const tickersByClass = useMemo(() => {
+    const g = {}
+    tickerRows.forEach(tr => { const c = CLASS_OF(tr); (g[c] ||= []).push(tr) })
+    return g
+  }, [tickerRows])
+
+  // Hybrid: within-class weight % per ticker (unset → current share of class)
+  const hybridWeightPct = (tr) => {
+    if (tickerWeights[tr.ticker] != null) return tickerWeights[tr.ticker]
+    const list = tickersByClass[CLASS_OF(tr)] || []
+    const classVal = list.reduce((s, x) => s + x.value, 0)
+    return classVal > 0 ? (tr.value / classVal) * 100 : 0
+  }
+
+  // Hybrid effective target fraction of total = classTarget × (weight ÷ classWeightSum)
+  const effHybrid = useMemo(() => {
+    const out = {}
+    Object.entries(tickersByClass).forEach(([cls, list]) => {
+      const ws = list.map(tr => ({ tr, w: hybridWeightPct(tr) }))
+      const sum = ws.reduce((s, x) => s + x.w, 0)
+      ws.forEach(({ tr, w }) => { out[tr.ticker] = (targets[cls] || 0) * (sum > 0 ? w / sum : 0) })
+    })
+    return out
+  }, [tickersByClass, tickerWeights, targets])
+
   const setTargetPct = (key, pctStr) => {
     const v = Math.max(0, Math.min(100, parseFloat(pctStr) || 0)) / 100
     if (targetMode === "ticker") setTickerTargets(prev => ({ ...prev, [key]: v }))
-    else setTargets(prev => ({ ...prev, [key]: v }))
+    else setTargets(prev => ({ ...prev, [key]: v }))   // class + hybrid edit class targets
   }
+  const setTickerWeight = (tk, pctStr) =>
+    setTickerWeights(prev => ({ ...prev, [tk]: Math.max(0, Math.min(100, parseFloat(pctStr) || 0)) }))
 
+  // Sum to validate (ticker mode → ticker targets; class/hybrid → class targets)
   const activeSum = targetMode === "ticker"
     ? Object.values(effTickerTargets).reduce((s, v) => s + v, 0)
     : Object.values(targets).reduce((s, v) => s + v, 0)
@@ -136,10 +171,13 @@ export function ToolsPage({ t, lang, ccy, dataState, liveHoldings = [], prices =
     }
   }
 
-  // ── Rebalance units (class buckets or individual tickers) ───────────────────
+  // ── Rebalance units (class buckets / individual tickers / hybrid) ───────────
   const units = useMemo(() => {
     if (targetMode === "ticker") {
       return tickerRows.map(tr => ({ key: tr.ticker, current: tr.value, candidates: [tr], tgt: effTickerTargets[tr.ticker] ?? 0 }))
+    }
+    if (targetMode === "hybrid") {
+      return tickerRows.map(tr => ({ key: tr.ticker, current: tr.value, candidates: [tr], tgt: effHybrid[tr.ticker] ?? 0 }))
     }
     const sample = {
       "TH Equity": rows.filter(r => r.region === "TH" && (r.cls === "Equity" || r.cls === "ETF")),
@@ -150,7 +188,7 @@ export function ToolsPage({ t, lang, ccy, dataState, liveHoldings = [], prices =
       "Cash":      [],
     }
     return Object.entries(targets).map(([k, tgt]) => ({ key: k, current: currentByClass[k] || 0, candidates: sample[k] || [], tgt }))
-  }, [targetMode, tickerRows, effTickerTargets, targets, currentByClass, rows])
+  }, [targetMode, tickerRows, effTickerTargets, effHybrid, targets, currentByClass, rows])
 
   // ── Suggestions ─────────────────────────────────────────────────────────────
   const suggestions = useMemo(() => units.map(u => {
@@ -383,9 +421,12 @@ export function ToolsPage({ t, lang, ccy, dataState, liveHoldings = [], prices =
           {editTargets && (
             <div className="card" style={{ border: "1.5px solid var(--accent)" }}>
               <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 14, gap: 8, flexWrap: "wrap" }}>
-                <div className="segmented">
+                <div className="segmented" style={{ flexWrap: "wrap" }}>
                   <button className={targetMode === "class" ? "on" : ""} onClick={() => setTargetMode("class")} style={{ fontSize: 12 }}>
                     {th ? "ตามกลุ่ม" : "By class"}
+                  </button>
+                  <button className={targetMode === "hybrid" ? "on" : ""} onClick={() => setTargetMode("hybrid")} style={{ fontSize: 12 }}>
+                    {th ? "กลุ่ม+รายตัว" : "Class + holding"}
                   </button>
                   <button className={targetMode === "ticker" ? "on" : ""} onClick={() => setTargetMode("ticker")} style={{ fontSize: 12 }}>
                     {th ? "รายหลักทรัพย์" : "Per holding"}
@@ -399,13 +440,57 @@ export function ToolsPage({ t, lang, ccy, dataState, liveHoldings = [], prices =
                     {th ? "ปรับให้รวม 100%" : "Normalize"}
                   </button>
                   <button className="btn btn-outline btn-sm" onClick={() => {
-                    if (targetMode === "ticker") setTickerTargets({})   // back to current weights
+                    if (targetMode === "ticker") setTickerTargets({})
+                    else if (targetMode === "hybrid") { setTickerWeights({}); setTargets(DEFAULT_TARGETS); saveTargets(DEFAULT_TARGETS) }
                     else { setTargets(DEFAULT_TARGETS); saveTargets(DEFAULT_TARGETS) }
                   }}>
                     {th ? "รีเซ็ต" : "Reset"}
                   </button>
                 </div>
               </div>
+              {targetMode === "hybrid" ? (
+                <div style={{ display: "grid", gap: 16, maxHeight: 380, overflowY: "auto" }}>
+                  <div style={{ display: "grid", gap: 8 }}>
+                    <div className="label-up">{th ? "สัดส่วนกลุ่ม" : "Class weights"}</div>
+                    {Object.entries(targets).map(([k, v]) => (
+                      <div key={k} style={{ display: "grid", gridTemplateColumns: "120px 1fr 80px", gap: 12, alignItems: "center" }}>
+                        <div style={{ fontSize: 13, fontWeight: 500 }}>{k}</div>
+                        <input type="range" min="0" max="100" step="1" value={(v * 100).toFixed(0)}
+                          onChange={e => setTargetPct(k, e.target.value)} style={{ width: "100%", accentColor: "var(--accent)" }} />
+                        <div style={{ display: "flex", alignItems: "center", gap: 4 }}>
+                          <input type="number" min="0" max="100" step="1" value={(v * 100).toFixed(0)}
+                            onChange={e => setTargetPct(k, e.target.value)}
+                            style={{ width: 50, padding: "4px 6px", borderRadius: 6, border: "1px solid var(--line)", background: "var(--bg)", fontSize: 13, textAlign: "right" }} />
+                          <span className="muted" style={{ fontSize: 12 }}>%</span>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                  {Object.entries(tickersByClass).filter(([cls]) => cls !== "Cash").map(([cls, list]) => (
+                    <div key={cls} style={{ display: "grid", gap: 6 }}>
+                      <div className="label-up">{cls} · {th ? "สัดส่วนในกลุ่ม" : "within class"} ({((targets[cls] || 0) * 100).toFixed(0)}%)</div>
+                      {list.map(tr => {
+                        const w = hybridWeightPct(tr)
+                        const eff = (effHybrid[tr.ticker] || 0) * 100
+                        return (
+                          <div key={tr.ticker} style={{ display: "grid", gridTemplateColumns: "100px 1fr 70px 60px", gap: 10, alignItems: "center" }}>
+                            <div style={{ fontSize: 13, fontWeight: 500, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{tr.ticker}</div>
+                            <input type="range" min="0" max="100" step="1" value={w.toFixed(0)}
+                              onChange={e => setTickerWeight(tr.ticker, e.target.value)} style={{ width: "100%", accentColor: "var(--accent)" }} />
+                            <div style={{ display: "flex", alignItems: "center", gap: 4 }}>
+                              <input type="number" min="0" max="100" step="1" value={w.toFixed(0)}
+                                onChange={e => setTickerWeight(tr.ticker, e.target.value)}
+                                style={{ width: 46, padding: "4px 6px", borderRadius: 6, border: "1px solid var(--line)", background: "var(--bg)", fontSize: 13, textAlign: "right" }} />
+                              <span className="muted" style={{ fontSize: 12 }}>%</span>
+                            </div>
+                            <div className="mono muted" style={{ fontSize: 11, textAlign: "right" }} title={th ? "% ของพอร์ตรวม" : "% of total"}>={eff.toFixed(1)}%</div>
+                          </div>
+                        )
+                      })}
+                    </div>
+                  ))}
+                </div>
+              ) : (
               <div style={{ display: "grid", gap: 10, maxHeight: targetMode === "ticker" ? 320 : "none", overflowY: targetMode === "ticker" ? "auto" : "visible" }}>
                 {(targetMode === "ticker"
                   ? tickerRows.map(tr => [tr.ticker, effTickerTargets[tr.ticker] ?? 0])
@@ -427,6 +512,7 @@ export function ToolsPage({ t, lang, ccy, dataState, liveHoldings = [], prices =
                   </div>
                 ))}
               </div>
+              )}
               {targetError && (
                 <div style={{ marginTop: 12, padding: "8px 12px", borderRadius: 8, background: "oklch(0.97 0.03 60)", fontSize: 12, color: "oklch(0.45 0.10 60)" }}>
                   {th ? "⚠ เป้าหมายรวมไม่ครบ 100% — กด Normalize เพื่อปรับอัตโนมัติ" : "⚠ Targets don't sum to 100% — click Normalize to fix automatically"}
