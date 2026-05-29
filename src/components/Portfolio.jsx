@@ -1434,7 +1434,7 @@ function TransactionsTab({ transactions, holdings = [], loading, lang, ccy, fxRa
       <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 14, flexWrap: "wrap" }}>
         {years.length > 0 && (
           <select value={activeYear || ""} onChange={e => setSelYear(e.target.value)}
-            style={{ ...inputStyle, width: "auto", padding: "7px 28px 7px 12px", fontSize: 13, fontFamily: "var(--font-mono)", fontWeight: 600, marginRight: "auto" }}>
+            style={{ ...inputStyle, width: "auto", padding: "7px 28px 7px 12px", fontSize: 13, fontFamily: "var(--font-mono)", fontWeight: 400, marginRight: "auto" }}>
             {years.map(y => (
               <option key={y} value={y}>{th ? `ปี ${y}` : `Year ${y}`} ({filtered.filter(tx => yearOf(tx) === y).length})</option>
             ))}
