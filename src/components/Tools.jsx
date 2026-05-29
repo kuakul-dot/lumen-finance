@@ -62,10 +62,14 @@ export function ToolsPage({ t, lang, ccy, dataState, liveHoldings = [], prices =
   const [targets,    setTargets]    = useState(loadTargets)
   const [band,       setBand]       = useState(loadBand)   // tolerance (percentage points)
   const [copied,     setCopied]     = useState(false)
+  const [targetMode, setTargetMode] = useState(() => { try { return localStorage.getItem("lumen_rebalance_mode") || "class" } catch { return "class" } })
+  const [tickerTargets, setTickerTargets] = useState(() => { try { return JSON.parse(localStorage.getItem("lumen_rebalance_ticker_targets") || "{}") } catch { return {} } })
 
   // Persist to localStorage
   useEffect(() => { saveTargets(targets) }, [targets])
   useEffect(() => { try { localStorage.setItem(BAND_STORAGE_KEY, String(band)) } catch {} }, [band])
+  useEffect(() => { try { localStorage.setItem("lumen_rebalance_mode", targetMode) } catch {} }, [targetMode])
+  useEffect(() => { try { localStorage.setItem("lumen_rebalance_ticker_targets", JSON.stringify(tickerTargets)) } catch {} }, [tickerTargets])
 
   // ── Derive rows ──────────────────────────────────────────────────────────────
   const isLive = dataState === "live"
@@ -95,29 +99,65 @@ export function ToolsPage({ t, lang, ccy, dataState, liveHoldings = [], prices =
   const newTotal = mode === "deposit" ? total + depInTHB : Math.max(0, total - depInTHB)
 
   // ── Target editing helpers ───────────────────────────────────────────────────
-  const totalTargetPct = Object.values(targets).reduce((s, v) => s + v, 0)
-  const targetError = Math.abs(totalTargetPct - 1) > 0.001
+  // Per-ticker positions (value aggregated across lots)
+  const tickerRows = useMemo(() => {
+    const m = {}
+    rows.forEach(r => { if (!m[r.ticker]) m[r.ticker] = { ...r, value: 0 }; m[r.ticker].value += r.value })
+    return Object.values(m).sort((a, b) => b.value - a.value)
+  }, [rows])
+
+  // Effective ticker targets — unset tickers default to their current weight
+  const effTickerTargets = useMemo(() => {
+    const out = {}
+    tickerRows.forEach(tr => {
+      out[tr.ticker] = tickerTargets[tr.ticker] != null ? tickerTargets[tr.ticker] : (total > 0 ? tr.value / total : 0)
+    })
+    return out
+  }, [tickerRows, tickerTargets, total])
 
   const setTargetPct = (key, pctStr) => {
     const v = Math.max(0, Math.min(100, parseFloat(pctStr) || 0)) / 100
-    setTargets(prev => ({ ...prev, [key]: v }))
+    if (targetMode === "ticker") setTickerTargets(prev => ({ ...prev, [key]: v }))
+    else setTargets(prev => ({ ...prev, [key]: v }))
   }
+
+  const activeSum = targetMode === "ticker"
+    ? Object.values(effTickerTargets).reduce((s, v) => s + v, 0)
+    : Object.values(targets).reduce((s, v) => s + v, 0)
+  const targetError = Math.abs(activeSum - 1) > 0.001
 
   const normalizeTargets = () => {
-    const sum = Object.values(targets).reduce((s, v) => s + v, 0)
-    if (sum === 0) return
-    setTargets(prev => Object.fromEntries(Object.entries(prev).map(([k, v]) => [k, v / sum])))
+    if (targetMode === "ticker") {
+      const sum = Object.values(effTickerTargets).reduce((s, v) => s + v, 0); if (!sum) return
+      setTickerTargets(Object.fromEntries(Object.entries(effTickerTargets).map(([k, v]) => [k, v / sum])))
+    } else {
+      const sum = Object.values(targets).reduce((s, v) => s + v, 0); if (!sum) return
+      setTargets(prev => Object.fromEntries(Object.entries(prev).map(([k, v]) => [k, v / sum])))
+    }
   }
 
+  // ── Rebalance units (class buckets or individual tickers) ───────────────────
+  const units = useMemo(() => {
+    if (targetMode === "ticker") {
+      return tickerRows.map(tr => ({ key: tr.ticker, current: tr.value, candidates: [tr], tgt: effTickerTargets[tr.ticker] ?? 0 }))
+    }
+    const sample = {
+      "TH Equity": rows.filter(r => r.region === "TH" && (r.cls === "Equity" || r.cls === "ETF")),
+      "US Equity": rows.filter(r => r.region === "US" && (r.cls === "Equity" || r.cls === "ETF")),
+      "Bonds":     rows.filter(r => r.cls === "Bond"),
+      "Gold":      rows.filter(r => r.cls === "Commodity"),
+      "Crypto":    rows.filter(r => r.cls === "Crypto"),
+      "Cash":      [],
+    }
+    return Object.entries(targets).map(([k, tgt]) => ({ key: k, current: currentByClass[k] || 0, candidates: sample[k] || [], tgt }))
+  }, [targetMode, tickerRows, effTickerTargets, targets, currentByClass, rows])
+
   // ── Suggestions ─────────────────────────────────────────────────────────────
-  const suggestions = useMemo(() => {
-    return Object.entries(targets).map(([k, tgt]) => {
-      const cur = currentByClass[k] || 0
-      const targetValue = newTotal * tgt
-      const delta = targetValue - cur
-      return { name: k, current: cur, target: targetValue, delta, curPct: total > 0 ? (cur / total) * 100 : 0, tgtPct: tgt * 100 }
-    })
-  }, [currentByClass, newTotal, total, targets])
+  const suggestions = useMemo(() => units.map(u => {
+    const targetValue = newTotal * u.tgt
+    const delta = targetValue - u.current
+    return { name: u.key, current: u.current, target: targetValue, delta, curPct: total > 0 ? (u.current / total) * 100 : 0, tgtPct: u.tgt * 100, candidates: u.candidates }
+  }), [units, newTotal, total])
 
   // ── Suggested trades ─────────────────────────────────────────────────────────
   // Share sizing: US holdings (e.g. Dime) support fractional shares → keep 4
@@ -131,16 +171,9 @@ export function ToolsPage({ t, lang, ccy, dataState, liveHoldings = [], prices =
   const trades = useMemo(() => {
     if (!showResult) return []
     const out = []
-    const sample = {
-      "TH Equity": rows.filter(r => r.region === "TH" && (r.cls === "Equity" || r.cls === "ETF")),
-      "US Equity": rows.filter(r => r.region === "US" && (r.cls === "Equity" || r.cls === "ETF")),
-      "Bonds":     rows.filter(r => r.cls === "Bond"),
-      "Gold":      rows.filter(r => r.cls === "Commodity"),
-      "Crypto":    rows.filter(r => r.cls === "Crypto"),
-    }
     suggestions.forEach(s => {
       if (s.name === "Cash") return
-      const candidates = sample[s.name] || []
+      const candidates = s.candidates || []
       if (candidates.length === 0) return
       // Tolerance band: skip classes whose current weight is within `band`
       // percentage points of target (avoids churn on already-balanced classes)
@@ -349,24 +382,37 @@ export function ToolsPage({ t, lang, ccy, dataState, liveHoldings = [], prices =
           {/* Target editor */}
           {editTargets && (
             <div className="card" style={{ border: "1.5px solid var(--accent)" }}>
-              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 16 }}>
-                <h3 className="section-title">{th ? "ปรับเป้าหมาย" : "Edit target allocations"}</h3>
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 14, gap: 8, flexWrap: "wrap" }}>
+                <div className="segmented">
+                  <button className={targetMode === "class" ? "on" : ""} onClick={() => setTargetMode("class")} style={{ fontSize: 12 }}>
+                    {th ? "ตามกลุ่ม" : "By class"}
+                  </button>
+                  <button className={targetMode === "ticker" ? "on" : ""} onClick={() => setTargetMode("ticker")} style={{ fontSize: 12 }}>
+                    {th ? "รายหลักทรัพย์" : "Per holding"}
+                  </button>
+                </div>
                 <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
                   <span className={"chip " + (targetError ? "chip-loss" : "chip-gain")} style={{ fontSize: 11 }}>
-                    {th ? "รวม " : "Sum "}{(totalTargetPct * 100).toFixed(1)}%
+                    {th ? "รวม " : "Sum "}{(activeSum * 100).toFixed(1)}%
                   </span>
                   <button className="btn btn-outline btn-sm" onClick={normalizeTargets}>
-                    {th ? "ปรับให้รวม 100%" : "Normalize to 100%"}
+                    {th ? "ปรับให้รวม 100%" : "Normalize"}
                   </button>
-                  <button className="btn btn-outline btn-sm" onClick={() => { setTargets(DEFAULT_TARGETS); saveTargets(DEFAULT_TARGETS) }}>
+                  <button className="btn btn-outline btn-sm" onClick={() => {
+                    if (targetMode === "ticker") setTickerTargets({})   // back to current weights
+                    else { setTargets(DEFAULT_TARGETS); saveTargets(DEFAULT_TARGETS) }
+                  }}>
                     {th ? "รีเซ็ต" : "Reset"}
                   </button>
                 </div>
               </div>
-              <div style={{ display: "grid", gap: 10 }}>
-                {Object.entries(targets).map(([k, v]) => (
+              <div style={{ display: "grid", gap: 10, maxHeight: targetMode === "ticker" ? 320 : "none", overflowY: targetMode === "ticker" ? "auto" : "visible" }}>
+                {(targetMode === "ticker"
+                  ? tickerRows.map(tr => [tr.ticker, effTickerTargets[tr.ticker] ?? 0])
+                  : Object.entries(targets)
+                ).map(([k, v]) => (
                   <div key={k} style={{ display: "grid", gridTemplateColumns: "120px 1fr 80px", gap: 12, alignItems: "center" }}>
-                    <div style={{ fontSize: 13, fontWeight: 500 }}>{k}</div>
+                    <div style={{ fontSize: 13, fontWeight: 500, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{k}</div>
                     <input type="range" min="0" max="100" step="1" value={(v * 100).toFixed(0)}
                       onChange={e => setTargetPct(k, e.target.value)}
                       style={{ width: "100%", accentColor: "var(--accent)" }}
@@ -422,7 +468,7 @@ export function ToolsPage({ t, lang, ccy, dataState, liveHoldings = [], prices =
           </div>
 
           {/* Missing-class warning */}
-          {missingClasses.length > 0 && (
+          {targetMode === "class" && missingClasses.length > 0 && (
             <div className="card" style={{ padding: "12px 16px", background: "oklch(0.97 0.03 60)", border: "1px solid oklch(0.85 0.08 60)" }}>
               <div style={{ fontSize: 12.5, color: "oklch(0.42 0.10 60)", lineHeight: 1.5 }}>
                 ⚠ {th
