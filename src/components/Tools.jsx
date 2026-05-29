@@ -137,7 +137,7 @@ export function ToolsPage({ t, lang, ccy, dataState, liveHoldings = [], prices =
           const priceInDisplay = c.price  // always in THB (deriveHoldings returns THB values)
           const sharesNeeded = sizeShares(amt, priceInDisplay, c.region)
           if (sharesNeeded > 0) {
-            out.push({ action: "Buy", ticker: c.ticker, name: c.name, shares: sharesNeeded, priceNative: c.priceNative, nativeCcy: c.nativeCcy, amount: sharesNeeded * priceInDisplay, cls: s.name })
+            out.push({ action: "Buy", ticker: c.ticker, name: c.name, shares: sharesNeeded, priceNative: c.priceNative, nativeCcy: c.nativeCcy, amount: sharesNeeded * priceInDisplay, cls: s.name, region: c.region, logoUrl: c.logo_url, assetClass: c.cls })
           }
         })
       } else if (allowSales && s.delta < -total * 0.005) {
@@ -147,7 +147,7 @@ export function ToolsPage({ t, lang, ccy, dataState, liveHoldings = [], prices =
           const priceInDisplay = c.price
           const sharesNeeded = sizeShares(Math.abs(s.delta), priceInDisplay, c.region)
           if (sharesNeeded > 0) {
-            out.push({ action: "Sell", ticker: c.ticker, name: c.name, shares: sharesNeeded, priceNative: c.priceNative, nativeCcy: c.nativeCcy, amount: sharesNeeded * priceInDisplay, cls: s.name })
+            out.push({ action: "Sell", ticker: c.ticker, name: c.name, shares: sharesNeeded, priceNative: c.priceNative, nativeCcy: c.nativeCcy, amount: sharesNeeded * priceInDisplay, cls: s.name, region: c.region, logoUrl: c.logo_url, assetClass: c.cls })
           }
         }
       }
@@ -438,7 +438,7 @@ export function ToolsPage({ t, lang, ccy, dataState, liveHoldings = [], prices =
                       </td>
                       <td>
                         <div className="ticker">
-                          <TickerLogo ticker={tr.ticker} region={tr.nativeCcy === "USD" ? "US" : "TH"} size={30} />
+                          <TickerLogo ticker={tr.ticker} region={tr.region} logoUrl={tr.logoUrl} cls={tr.assetClass} size={30} />
                           <div>
                             <div style={{ fontWeight: 500, fontSize: 13 }}>{tr.ticker}</div>
                             <div className="muted" style={{ fontSize: 11 }}>{tr.cls}</div>
