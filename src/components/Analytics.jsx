@@ -812,11 +812,14 @@ function AnalyticsDiv2({ t, lang, ccy, rows, totalValue, dataState, liveHoldings
   const [editSaving, setEditSaving] = useState(false)
 
   function openEditModal() {
+    const meta = {}
+    liveHoldings.forEach(h => { meta[h.ticker] = { region: h.region, cls: h.asset_class, logo_url: h.logo_url } })
     const divTxs = transactions
       .filter(tx => tx.type === 'Dividend')
       .sort((a, b) => new Date(b.transacted_at) - new Date(a.transacted_at))
       .map(tx => ({
         ...tx,
+        ...(meta[tx.ticker] || {}),
         editedAmount: tx.amount ?? 0,
         editedDate: tx.transacted_at ?? '',
         markedDelete: false,
@@ -900,6 +903,7 @@ function AnalyticsDiv2({ t, lang, ccy, rows, totalValue, dataState, liveHoldings
             const net     = +(gross * (1 - taxRate)).toFixed(2)
             suggestions.push({
               ticker: h.ticker,
+              region, cls: h.asset_class || 'Equity', logo_url: h.logo_url || null,
               date:      d.toISOString().slice(0, 10),
               dateLabel: d.toLocaleDateString(th ? 'th-TH' : 'en-US', { day: 'numeric', month: 'short', year: '2-digit' }),
               pricePerShare: e.amount,
@@ -1199,7 +1203,7 @@ function AnalyticsDiv2({ t, lang, ccy, rows, totalValue, dataState, liveHoldings
                     alignItems: "center", padding: "10px 0", borderBottom: "1px solid var(--line)",
                     opacity: row.markedDelete ? 0.35 : 1, transition: "opacity 0.15s"
                   }}>
-                    <div className="ticker-mark" style={{ fontSize: 11 }}>{(row.ticker || '?').slice(0, 2)}</div>
+                    <TickerLogo ticker={row.ticker || '?'} logoUrl={row.logo_url} region={row.region} cls={row.cls} size={30} />
                     <div>
                       <div style={{ fontWeight: 500, fontSize: 13 }}>{row.ticker || '—'}</div>
                       {row.note && <div className="muted" style={{ fontSize: 10 }}>{row.note}</div>}
@@ -1247,7 +1251,7 @@ function SyncRow({ s, th, FMT, ccy, onChange }) {
     <div style={{ display: "grid", gridTemplateColumns: "20px 36px 1fr auto 88px", gap: 10, alignItems: "center", padding: "10px 0", borderBottom: "1px solid var(--line)" }}>
       <input type="checkbox" checked={s.checked} onChange={e => onChange({ checked: e.target.checked })}
         style={{ width: 16, height: 16, cursor: "pointer", accentColor: "var(--accent)" }} />
-      <div className="ticker-mark" style={{ fontSize: 11 }}>{s.ticker.slice(0, 2)}</div>
+      <TickerLogo ticker={s.ticker} logoUrl={s.logo_url} region={s.region} cls={s.cls} size={30} />
       <div>
         <div style={{ fontWeight: 500, fontSize: 13 }}>{s.ticker} · {s.dateLabel}</div>
         <div className="muted" style={{ fontSize: 11 }}>
