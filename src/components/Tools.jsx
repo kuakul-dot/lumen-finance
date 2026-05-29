@@ -86,7 +86,9 @@ export function ToolsPage({ t, lang, ccy, dataState, liveHoldings = [], prices =
   const [targets,    setTargets]    = useState(loadTargets)
   const [band,       setBand]       = useState(loadBand)   // tolerance (percentage points)
   const [copied,     setCopied]     = useState(false)
-  const [targetMode, setTargetMode] = useState(() => { try { return localStorage.getItem("lumen_rebalance_mode") || "class" } catch { return "class" } })
+  const [targetMode, setTargetMode] = useState(() => {
+    try { const m = localStorage.getItem("lumen_rebalance_mode"); return m === "hybrid" ? "hybrid" : "class" } catch { return "class" }
+  })
   const [tickerTargets, setTickerTargets] = useState(() => { try { return JSON.parse(localStorage.getItem("lumen_rebalance_ticker_targets") || "{}") } catch { return {} } })
   const [tickerWeights, setTickerWeights] = useState(() => { try { return JSON.parse(localStorage.getItem("lumen_rebalance_ticker_weights") || "{}") } catch { return {} } })
 
@@ -447,9 +449,6 @@ export function ToolsPage({ t, lang, ccy, dataState, liveHoldings = [], prices =
                   </button>
                   <button className={targetMode === "hybrid" ? "on" : ""} onClick={() => setTargetMode("hybrid")} style={{ fontSize: 12 }}>
                     {th ? "กลุ่ม+รายตัว" : "Class + holding"}
-                  </button>
-                  <button className={targetMode === "ticker" ? "on" : ""} onClick={() => setTargetMode("ticker")} style={{ fontSize: 12 }}>
-                    {th ? "รายหลักทรัพย์" : "Per holding"}
                   </button>
                 </div>
                 <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
