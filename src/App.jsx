@@ -19,6 +19,7 @@ const TWEAK_DEFAULTS = {
   type:    "editorial",
   lang:    "th",
   ccy:     "THB",
+  theme:   "light",
 }
 
 const ACCENT_SOFT = (c) => {
@@ -30,6 +31,17 @@ const ACCENT_INK = (c) => {
   const m = c.match(/oklch\(([\d.]+)\s+([\d.]+)\s+([\d.]+)\)/)
   if (!m) return c
   return `oklch(0.36 ${m[2]} ${m[3]})`
+}
+// Dark-theme variants of the accent's soft background + ink text
+const ACCENT_SOFT_DARK = (c) => {
+  const m = c.match(/oklch\(([\d.]+)\s+([\d.]+)\s+([\d.]+)\)/)
+  if (!m) return c
+  return `oklch(0.32 ${(parseFloat(m[2]) * 0.6).toFixed(2)} ${m[3]})`
+}
+const ACCENT_INK_DARK = (c) => {
+  const m = c.match(/oklch\(([\d.]+)\s+([\d.]+)\s+([\d.]+)\)/)
+  if (!m) return c
+  return `oklch(0.80 ${m[2]} ${m[3]})`
 }
 
 const DENSITY_MAP = {
@@ -151,9 +163,11 @@ export default function App() {
 
   useEffect(() => {
     const root = document.documentElement
+    const dark = t.theme === "dark"
+    root.setAttribute("data-theme", dark ? "dark" : "light")
     root.style.setProperty("--accent", t.accent)
-    root.style.setProperty("--accent-soft", ACCENT_SOFT(t.accent))
-    root.style.setProperty("--accent-ink", ACCENT_INK(t.accent))
+    root.style.setProperty("--accent-soft", dark ? ACCENT_SOFT_DARK(t.accent) : ACCENT_SOFT(t.accent))
+    root.style.setProperty("--accent-ink", dark ? ACCENT_INK_DARK(t.accent) : ACCENT_INK(t.accent))
     const d = DENSITY_MAP[t.density] || DENSITY_MAP.cozy
     root.style.setProperty("--pad-card", d.pad)
     root.style.setProperty("--gap", d.gap)
@@ -163,7 +177,7 @@ export default function App() {
     } else {
       root.style.setProperty("--font-display", '"Instrument Serif", "Noto Serif Thai", Georgia, serif')
     }
-  }, [t.accent, t.density, t.type])
+  }, [t.accent, t.density, t.type, t.theme])
 
   const signOut = () => supabase.auth.signOut()
 
@@ -292,6 +306,17 @@ export default function App() {
       )}
 
       <TweaksPanel title={i18n.tweaks.title}>
+        <TweakSection label={lang === "th" ? "ธีม" : "Theme"} />
+        <TweakRadio
+          label={lang === "th" ? "โหมดสี" : "Appearance"}
+          value={t.theme}
+          options={[
+            { value: "light", label: lang === "th" ? "สว่าง" : "Light" },
+            { value: "dark",  label: lang === "th" ? "มืด" : "Dark" },
+          ]}
+          onChange={(v) => setTweak("theme", v)}
+        />
+
         <TweakSection label={i18n.tweaks.accent} />
         <TweakColor
           label={i18n.tweaks.accent}
