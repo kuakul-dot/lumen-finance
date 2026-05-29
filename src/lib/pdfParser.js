@@ -346,24 +346,36 @@ function parseAnchored(rows) {
     const texts = cells.map(c => c.text)
     const line  = texts.join(' ')
 
-    // Anchor signature: a date + a buy/sell word + a currency code, all in one row
+    // Anchor signature: a row carrying a date AND a buy/sell word. The trade
+    // detail (units, unit price, currency) is normally in the same row, but
+    // Dime! occasionally splits it onto the neighbouring row (a different PDF
+    // text baseline), so fall back to the row above/below when the currency
+    // code isn't on the anchor row itself.
     if (!DATE_RE.test(line)) continue
     const typeTok = line.match(/\bBUY\b|\bSELL\b|ซื้อ|ขาย/i)
-    const ccyTok  = line.match(/\b(USD|THB)\b/i)
-    if (!typeTok || !ccyTok) continue
+    if (!typeTok) continue
 
     const dateCell = cells.find(c => DATE_RE.test(c.text))
     const date     = parseDate(dateCell?.text)
     if (!date) continue
 
-    // Numeric cells to the right of the date = Units, Unit Price (in order)
-    const nums = cells
-      .filter(c => c.x > dateCell.x && ISNUM_RE.test(c.text.trim()))
-      .sort((a, b) => a.x - b.x)
-      .map(c => toNum(c.text))
-    const shares = nums[0] ?? null
-    const price  = nums[1] ?? null
-    const currency = /USD/i.test(ccyTok[0]) ? 'USD' : 'THB'
+    // Pull [units, unit price, currency] from a row that has a USD/THB token.
+    // On the anchor row, only count numbers to the right of the date (the
+    // order id sits to the left); on a fallback row, count every number.
+    const detailFrom = (arr, afterX = -Infinity) => {
+      const ccy = arr.find(c => /^(USD|THB)$/i.test(c.text.trim()))
+      if (!ccy) return null
+      const ns = arr
+        .filter(c => c.x > afterX && ISNUM_RE.test(c.text.trim()))
+        .sort((a, b) => a.x - b.x)
+        .map(c => toNum(c.text))
+      return { shares: ns[0] ?? null, price: ns[1] ?? null, currency: /USD/i.test(ccy.text) ? 'USD' : 'THB' }
+    }
+    let detail = detailFrom(cells, dateCell.x)
+    if (!detail && i - 1 >= 0)           detail = detailFrom(rows[i - 1])
+    if (!detail && i + 1 < rows.length)  detail = detailFrom(rows[i + 1])
+    if (!detail) continue
+    const { shares, price, currency } = detail
 
     // Ticker association (Dime!): the symbol sits a row or two ABOVE the main
     // row, so scan UP first; also accept single-letter tickers (e.g. "U", "F")
@@ -403,11 +415,6 @@ function parseAnchored(rows) {
       type: mapType(typeTok[0]),
       ticker, shares, price, amount, fee, tax, currency, note: null,
     })
-  }
-  // ── TEMP DEBUG (Dime! only): dump rows so we can see any dropped anchor ──
-  if (results.length) {
-    console.log('[dime] anchored', results.length, results.map(r => `${r.ticker}:${r.shares}@${r.price}`))
-    rows.forEach((r, i) => console.log('[dime row]', i, r.map(c => `"${c.text}"`).join(' | ')))
   }
   return results
 }
