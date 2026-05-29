@@ -119,7 +119,7 @@ export function AnalyticsPage({ t, lang, ccy, dataState, liveHoldings = [], pric
       {tab === "common"          && <AnalyticsCommon t={t} lang={lang} ccy={ccy} rows={rows} totalValue={totalValue} totalPL={totalPL} totalPlPct={totalPlPct} totalCost={totalCost} hasLivePrices={hasLivePrices} demoData={demoData} dataState={dataState} earliestHoldingDate={earliestHoldingDate} liveHoldings={liveHoldings} transactions={transactions} fxRate={fxRate} portfolio={portfolio} />}
       {tab === "diversification" && <AnalyticsDiv t={t} lang={lang} ccy={ccy} rows={rows} totalValue={totalValue} demoData={demoData} dataState={dataState} />}
       {tab === "dividends"       && <AnalyticsDiv2 t={t} lang={lang} ccy={ccy} rows={rows} totalValue={totalValue} dataState={dataState} liveHoldings={liveHoldings} fxRate={fxRate} transactions={transactions} portfolio={portfolio} onTransactionAdded={handleTransactionAdded} onTransactionUpdated={handleTransactionUpdated} onTransactionDeleted={handleTransactionDeleted} />}
-      {tab === "growth"          && <AnalyticsGrowth t={t} lang={lang} ccy={ccy} rows={rows} fxRate={fxRate} totalValue={totalValue} totalCost={totalCost} totalPL={totalPL} totalPlPct={totalPlPct} dataState={dataState} earliestHoldingDate={earliestHoldingDate} />}
+      {tab === "growth"          && <AnalyticsGrowth t={t} lang={lang} ccy={ccy} rows={rows} fxRate={fxRate} totalValue={totalValue} totalCost={totalCost} totalPL={totalPL} totalPlPct={totalPlPct} dataState={dataState} earliestHoldingDate={earliestHoldingDate} portfolio={portfolio} />}
       {tab === "metrics"         && <AnalyticsMetrics t={t} lang={lang} ccy={ccy} rows={rows} totalValue={totalValue} totalPL={totalPL} totalPlPct={totalPlPct} dataState={dataState} portfolio={portfolio} fxRate={fxRate} />}
     </div>
   )
@@ -1280,9 +1280,56 @@ function SyncRow({ s, th, FMT, ccy, onChange }) {
 }
 
 /* ─── Growth tab ─────────────────────────────────────────────────────────────── */
-function AnalyticsGrowth({ t, lang, ccy, rows = [], fxRate = 36, totalValue, totalCost, totalPL, totalPlPct, dataState, earliestHoldingDate }) {
+function AnalyticsGrowth({ t, lang, ccy, rows = [], fxRate = 36, totalValue, totalCost, totalPL, totalPlPct, dataState, earliestHoldingDate, portfolio }) {
   const FMT = LUMEN_FMT
   const th = lang === "th"
+  const isLive = dataState === "live"
+
+  // ── Real daily NAV history — load snapshots; if none, auto-reconstruct them
+  // once from historical prices + the transaction ledger, then render the real
+  // path. Falls back to the estimated curve while building / if unavailable.
+  const [snaps, setSnaps] = useState([])
+  const [building, setBuilding] = useState(false)
+
+  useEffect(() => {
+    if (!isLive || !portfolio?.id) { setSnaps([]); return }
+    let cancelled = false
+    ;(async () => {
+      let d = await getSnapshots(portfolio.id).catch(() => [])
+      if (cancelled) return
+      if (d.length >= 2) { setSnaps(d); return }
+      // No stored history yet — build it from Yahoo price history once.
+      setBuilding(true)
+      try {
+        const txs = await getAllTransactions(portfolio.id)
+        if (txs.length) {
+          const ccyByTicker = {}
+          for (const tx of txs) {
+            const tk = (tx.ticker || "").toUpperCase()
+            if (tk && !ccyByTicker[tk]) ccyByTicker[tk] = tx.currency || "THB"
+          }
+          const tickers = Object.keys(ccyByTicker)
+          const spanDays = (Date.now() - new Date(txs[0].transacted_at)) / 86400000
+          const range = spanDays > 365 * 2 ? "5y" : spanDays > 365 ? "2y" : spanDays > 180 ? "1y"
+                      : spanDays > 90 ? "6mo" : spanDays > 30 ? "3mo" : "1mo"
+          const seriesByTicker = {}
+          await Promise.all(tickers.map(async tk => {
+            const region = ccyByTicker[tk] === "USD" ? "US" : "TH"
+            const sym = toYahooSymbol(tk, region, "Equity")
+            const h = await fetchHistory(sym, range).catch(() => ({ series: [] }))
+            seriesByTicker[tk] = (h?.series || []).map(p => ({ d: new Date(p.t * 1000).toISOString().split("T")[0], c: p.c }))
+          }))
+          const series = buildSnapshotSeries(txs, seriesByTicker, ccyByTicker, fxRate)
+          if (series.length) {
+            await upsertSnapshots(portfolio.id, series)
+            d = await getSnapshots(portfolio.id).catch(() => d)
+          }
+        }
+      } catch { /* keep estimated path on failure */ }
+      if (!cancelled) { setSnaps(d || []); setBuilding(false) }
+    })()
+    return () => { cancelled = true }
+  }, [isLive, portfolio?.id, fxRate])
 
   // ── How many calendar days since first purchase ────────────────────────────
   const daysSinceFirst = useMemo(() => {
@@ -1344,23 +1391,51 @@ function AnalyticsGrowth({ t, lang, ccy, rows = [], fxRate = 36, totalValue, tot
     }]
   }, [dataState, totalCost, totalValue, totalPlPct, th, chartPeriod, daysSinceFirst])
 
+  // ── Real cumulative-return path from stored daily snapshots ────────────────
+  // Each day's return = total_value / total_cost − 1 (handles contributions),
+  // windowed to the selected period.
+  const realSeries = useMemo(() => {
+    if (!isLive || snaps.length < 2) return null
+    const days = growthPeriodDaysMap[chartPeriod] || 365
+    const fromTs = Date.now() - days * 86400000
+    let w = snaps.filter(s => new Date(s.date).getTime() >= fromTs)
+    if (w.length < 2) w = snaps
+    const locale = th ? "th-TH" : "en-US"
+    const span = (new Date(w[w.length - 1].date) - new Date(w[0].date)) / 86400000
+    const mkLabel = dt => span < 60 ? dt.toLocaleString(locale, { month: "short", day: "numeric" })
+      : span < 730 ? dt.toLocaleString(locale, { month: "short" }) + " '" + String(dt.getFullYear()).slice(2)
+      : "'" + String(dt.getFullYear()).slice(2)
+    return [{
+      name: th ? "พอร์ตของคุณ" : "Your portfolio",
+      color: "var(--ink)", fill: true,
+      data: w.map((s, i) => {
+        const c = Number(s.total_cost), v = Number(s.total_value)
+        return { x: i, y: c > 0 ? (v / c - 1) * 100 : 0, label: mkLabel(new Date(s.date)) }
+      }),
+    }]
+  }, [isLive, snaps, chartPeriod, th])
+
+  // Prefer real history; fall back to the estimated curve until snapshots exist.
+  const chartSeries = realSeries || liveSeries
+  const usingReal = !!realSeries
+
   // ── CAGR using actual holding period ─────────────────────────────────────
   // Formula: (market_value / cost_basis) ^ (1 / years) - 1
   const cagr = dataState === "live" && totalCost > 0 && totalValue > 0 && holdingYears >= 0.08
     ? (Math.pow(totalValue / totalCost, 1 / holdingYears) - 1) * 100
     : null
 
-  // ── Max drawdown from simulated curve ────────────────────────────────────
+  // ── Max drawdown from the active curve (real snapshots when available) ─────
   const drawdown = useMemo(() => {
-    if (!liveSeries?.[0]?.data?.length) return null
+    if (!chartSeries?.[0]?.data?.length) return null
     let peak = -Infinity, maxDd = 0
-    liveSeries[0].data.forEach(p => {
+    chartSeries[0].data.forEach(p => {
       if (p.y > peak) peak = p.y
       const dd = p.y - peak
       if (dd < maxDd) maxDd = dd
     })
     return maxDd
-  }, [liveSeries])
+  }, [chartSeries])
 
   // ── Per-ticker performance (aggregated from multi-lot rows) ───────────────
   // cost (THB) = value - pl  (both are already in THB from deriveHoldings)
@@ -1428,13 +1503,13 @@ function AnalyticsGrowth({ t, lang, ccy, rows = [], fxRate = 36, totalValue, tot
                 : `mkt value − cost basis`}
               tone={totalPL >= 0 ? "gain" : "loss"} />
 
-            {/* Max drawdown from simulated path */}
+            {/* Max drawdown — real when snapshots exist, else estimated */}
             <BigKpi className="col-span-3"
-              label={th ? "Max Drawdown (ประมาณ)" : "Max Drawdown (est.)"}
+              label={usingReal ? "Max Drawdown" : (th ? "Max Drawdown (ประมาณ)" : "Max Drawdown (est.)")}
               value={drawdown != null ? drawdown.toFixed(1) + "%" : "—"}
-              sub={th
-                ? "ลดลงสูงสุดจากจุดสูงสุด (เส้นโค้งประมาณ)"
-                : "peak-to-trough on estimated path"}
+              sub={usingReal
+                ? (th ? "ลดลงสูงสุดจากจุดสูงสุด (ข้อมูลจริง)" : "peak-to-trough · real daily NAV")
+                : (th ? "ลดลงสูงสุดจากจุดสูงสุด (เส้นโค้งประมาณ)" : "peak-to-trough on estimated path")}
               tone={drawdown != null && drawdown < -5 ? "loss" : undefined} />
           </>
         ) : (
@@ -1449,7 +1524,7 @@ function AnalyticsGrowth({ t, lang, ccy, rows = [], fxRate = 36, totalValue, tot
 
       {/* ── Growth chart ── */}
       {dataState === "live" ? (
-        liveSeries ? (
+        chartSeries ? (
           <div className="card" style={{ marginBottom: 16 }}>
             <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-end", marginBottom: 16 }}>
               <div>
@@ -1457,9 +1532,15 @@ function AnalyticsGrowth({ t, lang, ccy, rows = [], fxRate = 36, totalValue, tot
                   {th ? "เส้นทางผลตอบแทนสะสม" : "Cumulative return path"}
                 </h3>
                 <div className="muted" style={{ fontSize: 11, marginTop: 4 }}>
-                  {th
-                    ? "จุดเริ่ม = 0% (ต้นทุน) · จุดสิ้นสุด = มูลค่าปัจจุบัน · เส้นทางประมาณการ (ยังไม่มีประวัติราคารายวัน)"
-                    : "Start = 0% (cost) · End = current return · Estimated path — no daily NAV history yet"}
+                  {usingReal
+                    ? (th
+                        ? "ผลตอบแทนสะสมรายวันจากราคาจริง (มูลค่า ÷ ต้นทุน − 1)"
+                        : "Real daily cumulative return from market prices (value ÷ cost − 1)")
+                    : building
+                      ? (th ? "กำลังสร้างประวัติรายวันจากราคาย้อนหลัง…" : "Building daily history from price data…")
+                      : (th
+                          ? "จุดเริ่ม = 0% (ต้นทุน) · จุดสิ้นสุด = มูลค่าปัจจุบัน · เส้นทางประมาณการ (ยังไม่มีประวัติราคารายวัน)"
+                          : "Start = 0% (cost) · End = current return · Estimated path — no daily NAV history yet")}
                 </div>
               </div>
               <div className="segmented">
@@ -1475,7 +1556,7 @@ function AnalyticsGrowth({ t, lang, ccy, rows = [], fxRate = 36, totalValue, tot
                 })}
               </div>
             </div>
-            <LineChart series={liveSeries} height={300} fmt={v => (v >= 0 ? "+" : "") + v.toFixed(1) + "%"} />
+            <LineChart series={chartSeries} height={300} fmt={v => (v >= 0 ? "+" : "") + v.toFixed(1) + "%"} />
           </div>
         ) : (
           <div className="card" style={{ marginBottom: 16, padding: "36px 48px", display: "flex", alignItems: "center", gap: 24 }}>
