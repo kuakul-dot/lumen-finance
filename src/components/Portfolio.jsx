@@ -266,7 +266,7 @@ function LivePortfolioPage({ t, lang, ccy, portfolio, liveHoldings, prices = {},
         <>
           {/* ── Summary card — 5-column PortMetric layout matching demo ── */}
           <section className="card" style={{ padding: "24px 28px", marginBottom: 16 }}>
-            <div style={{ display: "grid", gridTemplateColumns: realizedShown !== 0 ? "1.5fr 1fr 1fr 1fr 1fr 1fr" : "1.5fr 1fr 1fr 1fr 1fr", gap: 24, alignItems: "center" }}>
+            <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(140px, 1fr))", gap: 24, alignItems: "center" }}>
               <div>
                 <div className="label-up" style={{ marginBottom: 6 }}>
                   {t.portfolio.total}
@@ -332,7 +332,7 @@ function LivePortfolioPage({ t, lang, ccy, portfolio, liveHoldings, prices = {},
           </section>
 
           {/* ── Table ── */}
-          <section className="card" style={{ padding: 0, overflow: "hidden" }}>
+          <section className="card tbl-card" style={{ padding: 0, overflow: "hidden" }}>
             <table className="table">
               <thead>
                 <tr>
@@ -1458,7 +1458,7 @@ function TransactionsTab({ transactions, holdings = [], loading, lang, ccy, fxRa
         </button>
       </div>
 
-      <section className="card" style={{ padding: 0, overflow: "hidden" }}>
+      <section className="card tbl-card" style={{ padding: 0, overflow: "hidden" }}>
         <table className="table">
           <thead>
             <tr>
@@ -2268,7 +2268,7 @@ function DemoPortfolioPage({ t, lang, ccy, setRoute }) {
         </div>
       </section>
 
-      <section className="card" style={{ padding: 0, overflow: "hidden" }}>
+      <section className="card tbl-card" style={{ padding: 0, overflow: "hidden" }}>
         <table className="table">
           <thead>
             <tr>

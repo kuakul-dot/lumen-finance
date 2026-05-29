@@ -588,6 +588,10 @@ hr.rule { border: 0; border-top: 1px solid var(--line); margin: 24px 0; }
   /* Scrollable tables */
   .table-wrap { overflow-x: auto; -webkit-overflow-scrolling: touch; }
   .table-wrap .table { min-width: 560px; }
+  /* Table cards scroll horizontally instead of clipping/cramming on mobile.
+     !important overrides the inline overflow:hidden (kept for desktop corners). */
+  .tbl-card { overflow-x: auto !important; -webkit-overflow-scrolling: touch; }
+  .tbl-card .table { min-width: 600px; }
 
   /* Hide less-important table columns on mobile */
   .hide-mob { display: none !important; }
