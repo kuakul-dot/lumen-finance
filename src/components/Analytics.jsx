@@ -1031,7 +1031,8 @@ function AnalyticsDiv2({ t, lang, ccy, rows, totalValue, dataState, liveHoldings
             {th ? "ปันผลที่ได้รับจริง รายปี" : "Dividends received by year"}
           </h3>
           <BarChart data={histBarData} height={200} color="var(--gain)"
-            fmt={v => FMT.money(v, ccy, { compact: true })} />
+            fmt={v => FMT.money(v, ccy, { compact: true })}
+            labelFmt={v => FMT.money(v, ccy)} />
         </div>
       )}
 
@@ -1042,7 +1043,8 @@ function AnalyticsDiv2({ t, lang, ccy, rows, totalValue, dataState, liveHoldings
         </h3>
         {annual > 0 ? (
           <BarChart data={monthlyData} height={220} color="var(--accent-ink)"
-            fmt={v => FMT.money(v, ccy, { compact: true })} />
+            fmt={v => FMT.money(v, ccy, { compact: true })}
+            labelFmt={v => FMT.money(v, ccy)} />
         ) : (
           <div style={{ padding: "48px 0", textAlign: "center", color: "var(--ink-3)", fontSize: 13 }}>
             {th

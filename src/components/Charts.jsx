@@ -165,15 +165,19 @@ export function StackBar({ data, height = 12 }) {
   )
 }
 
-export function BarChart({ data, height = 180, color = "var(--ink)", fmt }) {
+export function BarChart({ data, height = 180, color = "var(--ink)", fmt, labelFmt }) {
   const wrapRef = useRef(null)
   const [w, setW] = useState(540)
+  const [pinned, setPinned] = useState(null)   // bar tapped/clicked (sticky)
+  const [hover, setHover] = useState(null)      // bar hovered
   useEffect(() => {
     if (!wrapRef.current) return
     const ro = new ResizeObserver(es => setW(Math.max(240, es[0].contentRect.width)))
     ro.observe(wrapRef.current)
     return () => ro.disconnect()
   }, [])
+  const active = hover ?? pinned
+  const valueFmt = labelFmt || fmt || (v => String(v))
   const max = Math.max(...data.map(d => d.value)) || 1
   const padL = 36, padR = 8, padT = 8, padB = 24
   const innerW = w - padL - padR
@@ -202,12 +206,26 @@ export function BarChart({ data, height = 180, color = "var(--ink)", fmt }) {
           const x = xBase + i * slotW + slotW * 0.15
           const y = padT + innerH - bh
           const bw = slotW * 0.70
+          const cx = xBase + i * slotW + slotW / 2
+          const isActive = active === i
           return (
-            <g key={i}>
-              <rect x={x} y={y} width={bw} height={bh} fill={color} rx="3" />
-              <text x={xBase + i * slotW + slotW / 2} y={height - 6} textAnchor="middle" fontSize="10" fill="var(--ink-3)">
+            <g key={i}
+              style={{ cursor: "pointer" }}
+              onMouseEnter={() => setHover(i)}
+              onMouseLeave={() => setHover(null)}
+              onClick={() => setPinned(p => (p === i ? null : i))}>
+              {/* full-height hit area so taps land even on tiny bars */}
+              <rect x={xBase + i * slotW} y={padT} width={slotW} height={innerH} fill="transparent" />
+              <rect x={x} y={y} width={bw} height={bh} fill={color} rx="3" opacity={active != null && !isActive ? 0.45 : 1} />
+              <text x={cx} y={height - 6} textAnchor="middle" fontSize="10" fill={isActive ? "var(--ink)" : "var(--ink-3)"}>
                 {d.label}
               </text>
+              {isActive && (
+                <text x={cx} y={Math.max(y - 6, 11)} textAnchor="middle" fontSize="11" fontWeight="600"
+                  fill="var(--ink)" fontFamily="var(--font-mono)">
+                  {valueFmt(d.value)}
+                </text>
+              )}
             </g>
           )
         })}
