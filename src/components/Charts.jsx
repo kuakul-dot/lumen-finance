@@ -179,7 +179,12 @@ export function BarChart({ data, height = 180, color = "var(--ink)", fmt, labelF
   const active = hover ?? pinned
   const valueFmt = labelFmt || fmt || (v => String(v))
   const max = Math.max(...data.map(d => d.value)) || 1
-  const padL = 36, padR = 8, padT = 8, padB = 24
+  // Y-axis tick labels — measure them so wide amounts (e.g. "฿2,786.32") aren't
+  // clipped on the left edge, which used to drop the ฿ and leading digits.
+  const axisLabels = [0, 0.5, 1].map(p => (fmt ? fmt(max * p) : (max * p).toFixed(0)))
+  const maxLabelLen = Math.max(...axisLabels.map(s => s.length))
+  const padL = Math.max(36, Math.round(maxLabelLen * 6.5) + 10)
+  const padR = 8, padT = 8, padB = 24
   const innerW = w - padL - padR
   const innerH = height - padT - padB
   // Cap slot width so few bars don't stretch across the whole chart
