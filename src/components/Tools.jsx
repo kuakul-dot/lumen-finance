@@ -54,6 +54,26 @@ const FEE_RATE = (region) => region === "TH" ? 0.0017 : 0
 const CLASS_OF = (r) => (r.cls === "Equity" || r.cls === "ETF") ? (r.region === "TH" ? "TH Equity" : "US Equity")
   : r.cls === "Bond" ? "Bonds" : r.cls === "Commodity" ? "Gold" : r.cls === "Crypto" ? "Crypto" : "Cash"
 
+// Icon + colour per asset class (for the rebalance editor)
+const CLASS_META = {
+  "TH Equity": { icon: "🇹🇭", c: "oklch(0.94 0.04 200)" },
+  "US Equity": { icon: "🇺🇸", c: "oklch(0.94 0.04 250)" },
+  "Bonds":     { icon: "📜", c: "oklch(0.94 0.04 280)" },
+  "Gold":      { icon: "🥇", c: "oklch(0.94 0.06 90)" },
+  "Crypto":    { icon: "🪙", c: "oklch(0.94 0.06 65)" },
+  "Cash":      { icon: "💵", c: "oklch(0.94 0.04 150)" },
+}
+function ClassBadge({ name }) {
+  const m = CLASS_META[name]
+  if (!m) return name
+  return (
+    <span style={{ display: "inline-flex", alignItems: "center", gap: 8 }}>
+      <span style={{ width: 22, height: 22, borderRadius: 6, background: m.c, display: "grid", placeItems: "center", fontSize: 12, flexShrink: 0 }}>{m.icon}</span>
+      {name}
+    </span>
+  )
+}
+
 export function ToolsPage({ t, lang, ccy, dataState, liveHoldings = [], prices = {}, portfolio, cashAccounts = [], fxRate = 36 }) {
   const FMT = LUMEN_FMT
   const th = lang === "th"
@@ -453,8 +473,8 @@ export function ToolsPage({ t, lang, ccy, dataState, liveHoldings = [], prices =
                   <div style={{ display: "grid", gap: 8 }}>
                     <div className="label-up">{th ? "สัดส่วนกลุ่ม" : "Class weights"}</div>
                     {Object.entries(targets).map(([k, v]) => (
-                      <div key={k} style={{ display: "grid", gridTemplateColumns: "120px 1fr 80px", gap: 12, alignItems: "center" }}>
-                        <div style={{ fontSize: 13, fontWeight: 500 }}>{k}</div>
+                      <div key={k} style={{ display: "grid", gridTemplateColumns: "150px 1fr 80px", gap: 12, alignItems: "center" }}>
+                        <div style={{ fontSize: 13, fontWeight: 500 }}><ClassBadge name={k} /></div>
                         <input type="range" min="0" max="100" step="1" value={(v * 100).toFixed(0)}
                           onChange={e => setTargetPct(k, e.target.value)} style={{ width: "100%", accentColor: "var(--accent)" }} />
                         <div style={{ display: "flex", alignItems: "center", gap: 4 }}>
@@ -468,7 +488,10 @@ export function ToolsPage({ t, lang, ccy, dataState, liveHoldings = [], prices =
                   </div>
                   {Object.entries(tickersByClass).filter(([cls]) => cls !== "Cash").map(([cls, list]) => (
                     <div key={cls} style={{ display: "grid", gap: 6 }}>
-                      <div className="label-up">{cls} · {th ? "สัดส่วนในกลุ่ม" : "within class"} ({((targets[cls] || 0) * 100).toFixed(0)}%)</div>
+                      <div className="label-up" style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                        <span style={{ fontSize: 14 }}>{CLASS_META[cls]?.icon}</span>
+                        {cls} · {th ? "สัดส่วนในกลุ่ม" : "within class"} ({((targets[cls] || 0) * 100).toFixed(0)}%)
+                      </div>
                       {list.map(tr => {
                         const w = hybridWeightPct(tr)
                         const eff = (effHybrid[tr.ticker] || 0) * 100
@@ -512,8 +535,8 @@ export function ToolsPage({ t, lang, ccy, dataState, liveHoldings = [], prices =
                       )
                     })
                   : Object.entries(targets).map(([k, v]) => (
-                  <div key={k} style={{ display: "grid", gridTemplateColumns: "120px 1fr 80px", gap: 12, alignItems: "center" }}>
-                    <div style={{ fontSize: 13, fontWeight: 500, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{k}</div>
+                  <div key={k} style={{ display: "grid", gridTemplateColumns: "150px 1fr 80px", gap: 12, alignItems: "center" }}>
+                    <div style={{ fontSize: 13, fontWeight: 500, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}><ClassBadge name={k} /></div>
                     <input type="range" min="0" max="100" step="1" value={(v * 100).toFixed(0)}
                       onChange={e => setTargetPct(k, e.target.value)}
                       style={{ width: "100%", accentColor: "var(--accent)" }}
@@ -554,8 +577,8 @@ export function ToolsPage({ t, lang, ccy, dataState, liveHoldings = [], prices =
                 const before = s.curPct
                 const drift = before - s.tgtPct
                 return (
-                  <div key={s.name} style={{ display: "grid", gridTemplateColumns: "120px 50px 1fr 70px 70px 60px", alignItems: "center", gap: 12, padding: "10px 0", borderTop: "1px solid var(--line)" }}>
-                    <div style={{ fontSize: 13, fontWeight: 500 }}>{s.name}</div>
+                  <div key={s.name} style={{ display: "grid", gridTemplateColumns: "150px 50px 1fr 70px 70px 60px", alignItems: "center", gap: 12, padding: "10px 0", borderTop: "1px solid var(--line)" }}>
+                    <div style={{ fontSize: 13, fontWeight: 500, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}><ClassBadge name={s.name} /></div>
                     <div className="mono muted" style={{ fontSize: 11 }}>→{s.tgtPct.toFixed(0)}%</div>
                     <div style={{ position: "relative", height: 16 }}>
                       <div style={{ position: "absolute", inset: 0, background: "var(--bg-2)", borderRadius: 999 }} />
