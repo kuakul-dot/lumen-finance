@@ -883,15 +883,21 @@ function LiveDashboardPage({ t, lang, ccy, setRoute, liveHoldings, prices = {}, 
         const j = await r.json().catch(() => ({}))
         throw new Error(j.error || `HTTP ${r.status}`)
       }
-      const j = await r.json()
-      setAiText(j.text || '')
-      setAiHistory([{ role: 'assistant', content: j.text || '' }])
+      const provider = r.headers.get('X-Provider')
+      if (provider) setAiProvider(provider)
       setAiPayload(payload)
-      if (j.provider) setAiProvider(j.provider)
+      // Stream the response — each chunk gets appended to the live message
+      // so the user sees text appear progressively (also dodges Vercel's
+      // edge timeout because data keeps flowing).
+      setAiLoading(false)
+      setAiHistory([{ role: 'assistant', content: '' }])
+      const acc = await consumeStream(r, (chunk, full) => {
+        setAiHistory([{ role: 'assistant', content: full }])
+      })
+      setAiText(acc)
       localStorage.setItem(dayKey, String(used + 1))
     } catch (e) {
       setAiError(e?.message || 'failed')
-    } finally {
       setAiLoading(false)
     }
   }
@@ -922,15 +928,17 @@ function LiveDashboardPage({ t, lang, ccy, setRoute, liveHoldings, prices = {}, 
         const j = await r.json().catch(() => ({}))
         throw new Error(j.error || `HTTP ${r.status}`)
       }
-      const j = await r.json()
-      setAiHistory([...next, { role: 'assistant', content: j.text || '' }])
-      if (j.provider) setAiProvider(j.provider)
+      const provider = r.headers.get('X-Provider')
+      if (provider) setAiProvider(provider)
+      setChatLoading(false)
+      setAiHistory([...next, { role: 'assistant', content: '' }])
+      await consumeStream(r, (chunk, full) => {
+        setAiHistory([...next, { role: 'assistant', content: full }])
+      })
       localStorage.setItem(dayKey, String(used + 1))
     } catch (e) {
       setAiError(e?.message || 'failed')
-      // Roll back the optimistic user message so they can retry
       setAiHistory(aiHistory)
-    } finally {
       setChatLoading(false)
     }
   }
@@ -1415,6 +1423,22 @@ function LiveDashboardPage({ t, lang, ccy, setRoute, liveHoldings, prices = {}, 
 }
 
 // ─── AI analysis modal — minimal markdown renderer for ##, bullets, **bold** ──
+// Read a Response.body stream chunk by chunk, passing each chunk + the
+// cumulative text to onChunk. Returns the full text when the stream ends.
+async function consumeStream(response, onChunk) {
+  const reader = response.body.getReader()
+  const decoder = new TextDecoder()
+  let acc = ''
+  while (true) {
+    const { done, value } = await reader.read()
+    if (done) break
+    const chunk = decoder.decode(value, { stream: true })
+    acc += chunk
+    onChunk(chunk, acc)
+  }
+  return acc
+}
+
 function AiAnalysisModal({ th, loading, error, provider, history = [], chatInput, chatLoading, canChat, onChatInput, onSend, onClose, onRetry }) {
   const providerLabel = { gemini: 'Google Gemini', claude: 'Anthropic Claude', openai: 'OpenAI' }[provider] || 'AI'
   const scrollRef = useRef(null)

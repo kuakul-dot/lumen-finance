@@ -67,9 +67,21 @@ export default async function handler(request) {
     claudeOverride = 'claude-haiku-4-5'
   }
 
+  // Stream the provider response back to the client as it arrives. The TTFB
+  // is the only thing Vercel times against, so streaming bypasses the 25 s
+  // edge cap even for slower models like Sonnet.
   try {
-    const text = await callProvider(PROVIDER, messages, maxOut, claudeOverride)
-    return ok({ text, provider: PROVIDER })
+    const stream = await streamProvider(PROVIDER, messages, maxOut, claudeOverride)
+    return new Response(stream, {
+      headers: {
+        'Content-Type': 'text/plain; charset=utf-8',
+        'X-Provider': PROVIDER,
+        'X-Accel-Buffering': 'no',           // hint reverse-proxies not to buffer
+        'Cache-Control': 'no-store',
+        'Access-Control-Allow-Origin': '*',
+        'Access-Control-Expose-Headers': 'X-Provider',
+      },
+    })
   } catch (e) {
     return err(502, `provider error: ${e.message || String(e)}`)
   }
@@ -164,12 +176,95 @@ End with: "This is an AI-generated analysis for education only — not investmen
   return intro
 }
 
-// ── Provider adapters (all receive a normalised messages array now) ────────
-async function callProvider(provider, messages, maxOut = 4096, modelOverride = null) {
-  if (provider === 'gemini') return callGemini(messages, maxOut)
-  if (provider === 'claude') return callClaude(messages, maxOut, modelOverride)
-  if (provider === 'openai') return callOpenAI(messages, maxOut)
-  throw new Error(`unknown provider: ${provider}`)
+// ── Streaming adapters — each returns a ReadableStream<Uint8Array> of plain
+// text chunks (no SSE envelope; the client just concatenates). ─────────────
+async function streamProvider(provider, messages, maxOut = 4096, modelOverride = null) {
+  if (provider === 'claude') return streamClaude(messages, maxOut, modelOverride)
+  if (provider === 'gemini') return streamGemini(messages, maxOut)
+  // OpenAI streaming would go here; for now fall back to non-stream wrapping.
+  const text = await callOpenAI(messages, maxOut)
+  return new Response(text).body
+}
+
+async function streamClaude(messages, maxOut, modelOverride) {
+  const requested = modelOverride || process.env.ANTHROPIC_MODEL || 'claude-haiku-4-5'
+  const wantSonnet = /sonnet/i.test(requested)
+  const sonnetChain = ['claude-sonnet-4-5', 'claude-3-5-sonnet-20241022', 'claude-3-5-sonnet-latest']
+  const haikuChain  = ['claude-haiku-4-5',  'claude-3-5-haiku-20241022',  'claude-3-5-haiku-latest', 'claude-3-haiku-20240307']
+  const fallbacks = wantSonnet ? [requested, ...sonnetChain, ...haikuChain] : [requested, ...haikuChain]
+  let lastErr = null
+  for (const model of [...new Set(fallbacks)]) {
+    try { return await openClaudeStream(model, messages, maxOut) }
+    catch (e) {
+      lastErr = e
+      if (!/404|not_found_error/i.test(e.message || '')) throw e
+    }
+  }
+  throw lastErr || new Error('no claude model worked')
+}
+
+async function openClaudeStream(model, messages, maxOut) {
+  const r = await fetch('https://api.anthropic.com/v1/messages', {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      'x-api-key': process.env.ANTHROPIC_API_KEY,
+      'anthropic-version': '2023-06-01',
+    },
+    body: JSON.stringify({ model, max_tokens: maxOut, messages, stream: true }),
+    signal: AbortSignal.timeout(120000),
+  })
+  if (!r.ok) {
+    let detail = ''
+    try { const e = await r.json(); detail = e?.error?.type ? ` ${e.error.type}: ${e.error.message || ''}` : '' } catch {}
+    throw new Error(`claude ${r.status}${detail}`)
+  }
+  // Parse Anthropic SSE — extract text deltas from content_block_delta events.
+  return decodeAnthropicStream(r.body)
+}
+
+function decodeAnthropicStream(body) {
+  const decoder = new TextDecoder()
+  const encoder = new TextEncoder()
+  let buffer = ''
+  return new ReadableStream({
+    async start(controller) {
+      const reader = body.getReader()
+      try {
+        while (true) {
+          const { done, value } = await reader.read()
+          if (done) break
+          buffer += decoder.decode(value, { stream: true })
+          let idx
+          while ((idx = buffer.indexOf('\n\n')) >= 0) {
+            const block = buffer.slice(0, idx)
+            buffer = buffer.slice(idx + 2)
+            const dataLine = block.split('\n').find(l => l.startsWith('data: '))
+            if (!dataLine) continue
+            const json = dataLine.slice(6).trim()
+            if (json === '[DONE]') continue
+            try {
+              const ev = JSON.parse(json)
+              if (ev.type === 'content_block_delta' && ev.delta?.type === 'text_delta' && ev.delta.text) {
+                controller.enqueue(encoder.encode(ev.delta.text))
+              }
+            } catch { /* ignore malformed line */ }
+          }
+        }
+        controller.close()
+      } catch (e) {
+        controller.error(e)
+      }
+    },
+  })
+}
+
+async function streamGemini(messages, maxOut) {
+  // Simple non-stream fallback for Gemini — most users on Gemini are free-tier
+  // and responses fit in the budget. (Adding full streamGenerateContent SSE
+  // is straightforward but not required for the 504 fix.)
+  const text = await callGemini(messages, maxOut)
+  return new Response(text).body
 }
 
 async function callGemini(messages, maxOut = 4096) {
