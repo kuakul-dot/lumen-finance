@@ -114,9 +114,9 @@ async function callProvider(provider, prompt) {
 
 async function callGemini(prompt) {
   // Try the requested model first, then fall back through progressively more
-  // permissive ones on 404 (renamed/retired model) or 429 (rate-limited).
-  const requested = process.env.GEMINI_MODEL || 'gemini-2.0-flash'
-  const fallbacks = [requested, 'gemini-2.0-flash', 'gemini-1.5-flash', 'gemini-1.5-flash-8b']
+  // permissive ones on 404 (renamed/retired/region-locked) or 429 (rate-limited).
+  const requested = process.env.GEMINI_MODEL || 'gemini-1.5-flash'
+  const fallbacks = [requested, 'gemini-1.5-flash', 'gemini-1.5-flash-8b', 'gemini-2.0-flash', 'gemini-2.5-flash']
   const tried = []
   let lastErr = null
   for (const model of [...new Set(fallbacks)]) {
@@ -126,12 +126,27 @@ async function callGemini(prompt) {
     } catch (e) {
       lastErr = e
       const m = e.message || ''
-      // Only fall back on retriable problems; surface real errors immediately
       if (!/404|not\s*found|429|quota|rate/i.test(m)) throw e
     }
   }
-  // Bubble up the most useful tail of the last error
-  throw new Error(lastErr?.message || `no gemini model worked (tried ${tried.join(', ')})`)
+  // All fallbacks failed — fetch which models the key CAN use, so the UI can show a hint.
+  let hint = ''
+  try {
+    const r = await fetch(`https://generativelanguage.googleapis.com/v1beta/models?key=${process.env.GEMINI_API_KEY}`, { signal: AbortSignal.timeout(8000) })
+    if (r.ok) {
+      const j = await r.json()
+      const supported = (j?.models || [])
+        .filter(m => (m.supportedGenerationMethods || []).includes('generateContent'))
+        .map(m => m.name?.replace(/^models\//, ''))
+        .filter(Boolean).slice(0, 8)
+      hint = supported.length ? ` · key supports: ${supported.join(', ')}` : ' · key returned 0 models — Generative Language API may not be enabled in your Google Cloud project'
+    } else if (r.status === 403) {
+      hint = ' · key forbidden (403) — Generative Language API not enabled, or key restricted'
+    } else if (r.status === 400) {
+      hint = ' · key invalid (400) — double-check the value in Vercel env'
+    }
+  } catch { /* ignore */ }
+  throw new Error(`gemini: no model accepted the request (tried ${tried.join(', ')})${hint}`)
 }
 
 async function callGeminiModel(model, prompt) {
