@@ -93,6 +93,7 @@ export function TopNav({ route, setRoute, lang, setLang, ccy, setCcy, t, session
   const name     = email ? email.split('@')[0] : (lang === "th" ? "ผู้ใช้งาน" : "User")
 
   return (
+    <>
     <header className="topnav">
       <div className="topnav-inner">
         <button onClick={() => setRoute("dashboard")} style={{ display: "contents" }}>
@@ -256,16 +257,19 @@ export function TopNav({ route, setRoute, lang, setLang, ccy, setCcy, t, session
           </div>
         </div>
       </div>
-      {showNewPf && (
-        <NewPortfolioModal th={th} onClose={() => setShowNewPf(false)}
-          onCreate={async (name) => { await onCreatePortfolio?.(name); setShowNewPf(false) }} />
-      )}
-      {showManagePf && (
-        <ManagePortfoliosModal th={th} portfolios={portfolios} activeId={activePortfolio?.id}
-          onClose={() => setShowManagePf(false)}
-          onRename={onRenamePortfolio} onDelete={onDeletePortfolio} />
-      )}
     </header>
+    {/* Portfolio modals rendered as siblings of <header> so position:fixed
+        anchors to the viewport, not to a header containing-block ancestor. */}
+    {showNewPf && (
+      <NewPortfolioModal th={th} onClose={() => setShowNewPf(false)}
+        onCreate={async (name) => { await onCreatePortfolio?.(name); setShowNewPf(false) }} />
+    )}
+    {showManagePf && (
+      <ManagePortfoliosModal th={th} portfolios={portfolios} activeId={activePortfolio?.id}
+        onClose={() => setShowManagePf(false)}
+        onRename={onRenamePortfolio} onDelete={onDeletePortfolio} />
+    )}
+    </>
   )
 }
 
