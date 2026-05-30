@@ -957,6 +957,37 @@ function LiveDashboardPage({ t, lang, ccy, setRoute, liveHoldings, prices = {}, 
               ))}
             </div>
           </div>
+          {/* ── Footer stats: positions · largest slice · currency exposure ── */}
+          {(() => {
+            const denom = hasCash ? netWorth : totalValue
+            if (denom <= 0) return null
+            const positionCount = new Set(rows.map(r => r.ticker)).size
+            const largest = allocClass[0]
+            const usdValue =
+              rows.filter(r => r.currency === 'USD').reduce((s, r) => s + r.value, 0) +
+              cashAccounts.filter(a => a.currency === 'USD').reduce((s, a) => s + (Number(a.balance) || 0) * fxRate, 0)
+            const usdPct = (usdValue / denom) * 100
+            const thbPct = Math.max(0, 100 - usdPct)
+            const Stat = ({ label, value, sub }) => (
+              <div style={{ display: "flex", flexDirection: "column", gap: 2, minWidth: 0 }}>
+                <span className="label-up" style={{ fontSize: 9 }}>{label}</span>
+                <span style={{ fontSize: 14, fontWeight: 500, fontFamily: "var(--font-display)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{value}</span>
+                {sub && <span className="muted" style={{ fontSize: 10.5, fontFamily: "var(--font-mono)" }}>{sub}</span>}
+              </div>
+            )
+            return (
+              <div style={{ marginTop: 20, paddingTop: 16, borderTop: "1px solid var(--line)", display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 12 }}>
+                <Stat label={th ? "หลักทรัพย์" : "Positions"}
+                      value={positionCount}
+                      sub={hasCash ? `+ ${cashAccounts.length} ${th ? "บัญชีเงินสด" : "cash"}` : null} />
+                <Stat label={th ? "ใหญ่สุด" : "Largest"}
+                      value={largest ? largest.name : "—"}
+                      sub={largest ? `${(largest.value / denom * 100).toFixed(1)}%` : null} />
+                <Stat label={th ? "สกุล" : "Currency"}
+                      value={`THB ${thbPct.toFixed(0)}% · USD ${usdPct.toFixed(0)}%`} />
+              </div>
+            )
+          })()}
         </div>
 
         <div className="card col-span-7">
