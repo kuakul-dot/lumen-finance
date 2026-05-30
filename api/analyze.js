@@ -113,7 +113,24 @@ async function callProvider(provider, prompt) {
 }
 
 async function callGemini(prompt) {
-  const model = process.env.GEMINI_MODEL || 'gemini-2.0-flash-exp'
+  // Try the requested model, then fall back to widely-available ones.
+  const requested = process.env.GEMINI_MODEL || 'gemini-2.0-flash'
+  const fallbacks = [requested, 'gemini-2.0-flash', 'gemini-1.5-flash']
+  const tried = []
+  let lastErr = null
+  for (const model of [...new Set(fallbacks)]) {
+    try {
+      tried.push(model)
+      return await callGeminiModel(model, prompt)
+    } catch (e) {
+      lastErr = e
+      if (!/404|not\s*found/i.test(e.message || '')) throw e
+    }
+  }
+  throw new Error(`gemini: no model worked (tried ${tried.join(', ')}) — ${lastErr?.message || ''}`)
+}
+
+async function callGeminiModel(model, prompt) {
   const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${process.env.GEMINI_API_KEY}`
   const r = await fetch(url, {
     method: 'POST',
