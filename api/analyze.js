@@ -184,10 +184,35 @@ async function callGeminiModel(model, prompt) {
 }
 
 async function callClaude(prompt) {
-  // Default to a model name that's been live and stable since Oct 2024.
-  // Override via ANTHROPIC_MODEL env if you want a newer one (e.g.
-  // claude-haiku-4-5 once it's available on your account).
-  const model = process.env.ANTHROPIC_MODEL || 'claude-3-5-haiku-latest'
+  // Try requested model first, then fall back through known-good names.
+  // Anthropic occasionally retires aliases (e.g. *-latest) and rolls in new
+  // versions (e.g. haiku-4-5) — try several so the feature doesn't break.
+  const requested = process.env.ANTHROPIC_MODEL || 'claude-haiku-4-5'
+  const fallbacks = [
+    requested,
+    'claude-haiku-4-5',
+    'claude-3-5-haiku-20241022',
+    'claude-3-5-haiku-latest',
+    'claude-3-haiku-20240307',
+  ]
+  const tried = []
+  let lastErr = null
+  for (const model of [...new Set(fallbacks)]) {
+    try {
+      tried.push(model)
+      return await callClaudeModel(model, prompt)
+    } catch (e) {
+      lastErr = e
+      const m = e.message || ''
+      // Only fall back on model-not-found (404). Anything else (auth, rate
+      // limit, billing) means the next model won't help either.
+      if (!/404|not_found_error/i.test(m)) throw e
+    }
+  }
+  throw new Error(`claude: no model worked (tried ${tried.join(', ')}) — ${lastErr?.message || ''}`)
+}
+
+async function callClaudeModel(model, prompt) {
   const r = await fetch('https://api.anthropic.com/v1/messages', {
     method: 'POST',
     headers: {
@@ -197,14 +222,12 @@ async function callClaude(prompt) {
     },
     body: JSON.stringify({
       model,
-      max_tokens: 4096,                   // headroom for long Thai answers
+      max_tokens: 4096,
       messages: [{ role: 'user', content: prompt }],
     }),
     signal: AbortSignal.timeout(45000),
   })
   if (!r.ok) {
-    // Anthropic returns rich JSON errors; surface the type and message so the
-    // UI can tell rate-limit from billing from invalid-model.
     let detail = ''
     try {
       const e = await r.json()
