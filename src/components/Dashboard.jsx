@@ -441,6 +441,15 @@ function groupRowsByTicker(rows) {
 function LiveDashboardPage({ t, lang, ccy, setRoute, liveHoldings, prices = {}, cashAccounts = [], portfolio, refreshCashAccounts, displayName = '', fxRate = 36 }) {
   const th = lang === "th"
   const [showCashModal, setShowCashModal] = useState(null)
+  // ── AI analysis (optional feature — auto-hides when /api/analyze 503s) ──
+  const [aiAvailable, setAiAvailable] = useState(false)
+  const [aiOpen, setAiOpen]     = useState(false)
+  const [aiText, setAiText]     = useState('')
+  const [aiLoading, setAiLoading] = useState(false)
+  const [aiError, setAiError]   = useState(null)
+  useEffect(() => {
+    fetch('/api/analyze').then(r => r.json()).then(j => setAiAvailable(!!j?.available)).catch(() => setAiAvailable(false))
+  }, [])
   const [goals, setGoals] = useState([])
   const [allTx, setAllTx] = useState([])
   const recentTx = useMemo(
@@ -808,6 +817,61 @@ function LiveDashboardPage({ t, lang, ccy, setRoute, liveHoldings, prices = {}, 
 
   const today = new Date().toLocaleDateString(th ? "th-TH" : "en-US", { weekday: "long", day: "numeric", month: "long" })
 
+  // Run an AI portfolio analysis with a privacy-conscious payload
+  // (no names / labels / account IDs — just structured ticker/weight/return).
+  const runAi = async () => {
+    setAiOpen(true); setAiLoading(true); setAiError(null); setAiText('')
+    const dayKey = `lumen.aiCount.${new Date().toISOString().slice(0,10)}`
+    const used = Number(localStorage.getItem(dayKey) || 0)
+    if (used >= 5) {
+      setAiLoading(false)
+      setAiError(th ? 'ใช้ครบ 5 ครั้งวันนี้แล้ว · กลับมาพรุ่งนี้' : 'Daily quota reached (5 / day) · try again tomorrow')
+      return
+    }
+    const payload = {
+      lang,
+      portfolio: {
+        totals: {
+          netWorthTHB: Math.round(netWorth),
+          stocksTHB:   Math.round(totalValue),
+          cashTHB:     Math.round(cashTotal),
+          annualDivTHB: Math.round(annualDiv),
+        },
+        stocks: groupRowsByTicker(rows).map(r => ({
+          ticker:   r.ticker,
+          region:   r.region,
+          cls:      r.cls,
+          valueTHB: Math.round(r.value),
+          weight:   +Number(r.weight || 0).toFixed(1),
+          plPct:    Number.isFinite(r.plPct) ? +r.plPct.toFixed(1) : null,
+          divYield: +Number(r.divYield || 0).toFixed(2),
+        })),
+        cash: cashAccounts.map(a => ({
+          currency: a.currency || 'THB',
+          balanceTHB: Math.round((a.currency === 'USD' ? (Number(a.balance) || 0) * fxRate : (Number(a.balance) || 0))),
+        })),
+      },
+    }
+    try {
+      const r = await fetch('/api/analyze', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+      })
+      if (!r.ok) {
+        const j = await r.json().catch(() => ({}))
+        throw new Error(j.error || `HTTP ${r.status}`)
+      }
+      const j = await r.json()
+      setAiText(j.text || '')
+      localStorage.setItem(dayKey, String(used + 1))
+    } catch (e) {
+      setAiError(e?.message || 'failed')
+    } finally {
+      setAiLoading(false)
+    }
+  }
+
   if (rows.length === 0) {
     return (
       <div className="shell fade-in">
@@ -836,6 +900,12 @@ function LiveDashboardPage({ t, lang, ccy, setRoute, liveHoldings, prices = {}, 
         sub={makeGreetingSub(lang)}
         right={
           <div style={{ display: "flex", gap: 8 }}>
+            {aiAvailable && (
+              <button className="btn btn-outline btn-sm" onClick={runAi} disabled={aiLoading}
+                title={th ? "วิเคราะห์พอร์ตด้วย AI" : "Analyse portfolio with AI"}>
+                <Icon name="spark" size={14} /> {aiLoading ? (th ? "กำลังวิเคราะห์…" : "Analysing…") : (th ? "วิเคราะห์ด้วย AI" : "AI analysis")}
+              </button>
+            )}
             <button className="btn btn-outline btn-sm" onClick={() => setShowCashModal('add')}>
               <Icon name="deposit" size={14} /> {th ? "เพิ่มบัญชีเงินสด" : "Add cash account"}
             </button>
@@ -1270,7 +1340,90 @@ function LiveDashboardPage({ t, lang, ccy, setRoute, liveHoldings, prices = {}, 
         onSaved={async () => { setShowCashModal(null); await refreshCashAccounts() }}
       />
     )}
+    {aiOpen && (
+      <AiAnalysisModal th={th} loading={aiLoading} text={aiText} error={aiError}
+        onClose={() => setAiOpen(false)} onRetry={runAi} />
+    )}
   </>
+  )
+}
+
+// ─── AI analysis modal — minimal markdown renderer for ##, bullets, **bold** ──
+function AiAnalysisModal({ th, loading, text, error, onClose, onRetry }) {
+  return (
+    <div onClick={e => e.target === e.currentTarget && onClose()}
+      style={{ position: "fixed", inset: 0, zIndex: 1000, background: "rgba(0,0,0,0.45)", display: "flex", alignItems: "center", justifyContent: "center", padding: 16 }}>
+      <div style={{ background: "var(--bg)", borderRadius: 18, padding: 26, width: "100%", maxWidth: 560, maxHeight: "85vh", display: "flex", flexDirection: "column", gap: 12, boxShadow: "0 20px 60px rgba(0,0,0,0.2)" }}>
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+          <h3 style={{ margin: 0, fontSize: 16, fontWeight: 600, display: "flex", alignItems: "center", gap: 8 }}>
+            <Icon name="spark" size={15} /> {th ? "วิเคราะห์พอร์ตด้วย AI" : "AI portfolio analysis"}
+          </h3>
+          <button onClick={onClose} style={{ background: "none", border: "none", cursor: "pointer", fontSize: 20, color: "var(--ink-3)", padding: 4 }}>✕</button>
+        </div>
+        <div style={{ overflow: "auto", flex: 1, fontSize: 13, lineHeight: 1.6 }}>
+          {loading && (
+            <div style={{ padding: "32px 0", textAlign: "center", color: "var(--ink-3)", fontSize: 13 }}>
+              {th ? "กำลังให้ AI วิเคราะห์… ใช้เวลาประมาณ 5-15 วินาที" : "AI is analysing… (5-15 sec)"}
+            </div>
+          )}
+          {error && (
+            <div style={{ padding: 14, borderRadius: 10, background: "var(--loss-soft)", color: "var(--loss)", fontSize: 13 }}>
+              ⚠ {error}
+            </div>
+          )}
+          {!loading && !error && text && <Markdownish text={text} />}
+        </div>
+        <div style={{ display: "flex", gap: 10, paddingTop: 8, borderTop: "1px solid var(--line)" }}>
+          {error && <button className="btn btn-outline" style={{ flex: 1 }} onClick={onRetry}>{th ? "ลองอีกครั้ง" : "Retry"}</button>}
+          <button className="btn" style={{ flex: error ? 1 : 1 }} onClick={onClose}>{th ? "ปิด" : "Close"}</button>
+        </div>
+        <p className="muted" style={{ margin: 0, fontSize: 10, textAlign: "center" }}>
+          {th ? "ข้อมูลพอร์ตถูกส่งไปยังผู้ให้บริการ AI · ไม่มีชื่อ/อีเมล/เลขบัญชี" : "Portfolio data is sent to the AI provider · no names/emails/account IDs"}
+        </p>
+      </div>
+    </div>
+  )
+}
+
+function Markdownish({ text }) {
+  // Minimal renderer: ## heading, * / - bullets, **bold**, blank line = paragraph
+  const blocks = []
+  let listBuf = null
+  text.split('\n').forEach((raw, i) => {
+    const line = raw.trimEnd()
+    if (/^\s*$/.test(line)) {
+      if (listBuf) { blocks.push({ t: 'list', items: listBuf }); listBuf = null }
+      return
+    }
+    if (/^##\s+/.test(line)) {
+      if (listBuf) { blocks.push({ t: 'list', items: listBuf }); listBuf = null }
+      blocks.push({ t: 'h', text: line.replace(/^##\s+/, '') })
+      return
+    }
+    if (/^\s*[-*]\s+/.test(line)) {
+      ;(listBuf = listBuf || []).push(line.replace(/^\s*[-*]\s+/, ''))
+      return
+    }
+    if (listBuf) { blocks.push({ t: 'list', items: listBuf }); listBuf = null }
+    blocks.push({ t: 'p', text: line })
+  })
+  if (listBuf) blocks.push({ t: 'list', items: listBuf })
+  const inline = (s) => {
+    const parts = s.split(/(\*\*[^*]+\*\*)/g)
+    return parts.map((p, i) => p.startsWith('**') ? <strong key={i}>{p.slice(2, -2)}</strong> : <span key={i}>{p}</span>)
+  }
+  return (
+    <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+      {blocks.map((b, i) => {
+        if (b.t === 'h') return <h4 key={i} style={{ margin: "8px 0 2px", fontSize: 14, fontWeight: 600, color: "var(--ink)" }}>{inline(b.text)}</h4>
+        if (b.t === 'list') return (
+          <ul key={i} style={{ margin: 0, paddingLeft: 18, display: "flex", flexDirection: "column", gap: 4 }}>
+            {b.items.map((it, j) => <li key={j}>{inline(it)}</li>)}
+          </ul>
+        )
+        return <p key={i} style={{ margin: 0 }}>{inline(b.text)}</p>
+      })}
+    </div>
   )
 }
 
