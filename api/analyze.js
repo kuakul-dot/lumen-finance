@@ -56,9 +56,19 @@ export default async function handler(request) {
   // Cap output too — follow-ups are answers to single questions, not the
   // 4-section structured analysis the initial call asks for.
   const maxOut = isFollowUp ? 1500 : 4096
+  // Hybrid model strategy for Claude: the initial structured response is
+  // deterministic and benefits more from Haiku's speed (avoids Vercel Hobby's
+  // ~25 s edge timeout), while follow-ups gain from Sonnet's reasoning.
+  // Auto-downgrade Sonnet → Haiku for the initial call when ANTHROPIC_MODEL
+  // requests Sonnet, unless ANTHROPIC_FORCE_INITIAL=1 overrides.
+  let claudeOverride = null
+  const requested = process.env.ANTHROPIC_MODEL || ''
+  if (PROVIDER === 'claude' && !isFollowUp && /sonnet/i.test(requested) && process.env.ANTHROPIC_FORCE_INITIAL !== '1') {
+    claudeOverride = 'claude-haiku-4-5'
+  }
 
   try {
-    const text = await callProvider(PROVIDER, messages, maxOut)
+    const text = await callProvider(PROVIDER, messages, maxOut, claudeOverride)
     return ok({ text, provider: PROVIDER })
   } catch (e) {
     return err(502, `provider error: ${e.message || String(e)}`)
@@ -155,9 +165,9 @@ End with: "This is an AI-generated analysis for education only — not investmen
 }
 
 // ── Provider adapters (all receive a normalised messages array now) ────────
-async function callProvider(provider, messages, maxOut = 4096) {
+async function callProvider(provider, messages, maxOut = 4096, modelOverride = null) {
   if (provider === 'gemini') return callGemini(messages, maxOut)
-  if (provider === 'claude') return callClaude(messages, maxOut)
+  if (provider === 'claude') return callClaude(messages, maxOut, modelOverride)
   if (provider === 'openai') return callOpenAI(messages, maxOut)
   throw new Error(`unknown provider: ${provider}`)
 }
@@ -227,8 +237,8 @@ async function callGeminiModel(model, messages, maxOut = 4096) {
   return text
 }
 
-async function callClaude(messages, maxOut = 4096) {
-  const requested = process.env.ANTHROPIC_MODEL || 'claude-haiku-4-5'
+async function callClaude(messages, maxOut = 4096, modelOverride = null) {
+  const requested = modelOverride || process.env.ANTHROPIC_MODEL || 'claude-haiku-4-5'
   const wantSonnet = /sonnet/i.test(requested)
   // Build a fallback chain that tries the requested family first, then
   // gracefully degrades. Sonnet-requested falls through to Haiku as a last
