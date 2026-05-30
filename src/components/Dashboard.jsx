@@ -1467,10 +1467,16 @@ function AiAnalysisModal({ th, loading, error, provider, history = [], chatInput
           )}
           {error && (() => {
             const rateLimited = /429|rate_limit/i.test(error)
+            const timedOut    = /504|timeout|timed out/i.test(error)
             return (
               <div style={{ padding: 14, borderRadius: 10, background: "var(--loss-soft)", color: "var(--loss)", fontSize: 13, display: "flex", flexDirection: "column", gap: 6 }}>
                 <div>⚠ {error}</div>
-                {rateLimited && (
+                {timedOut && (
+                  <div style={{ fontSize: 11, opacity: 0.85 }}>
+                    💡 {th ? "AI ตอบช้าเกินเวลา · ลองส่งคำถามที่สั้นลง หรือกดส่งใหม่อีกครั้ง" : "AI took too long · try a shorter question or send again"}
+                  </div>
+                )}
+                {rateLimited && !timedOut && (
                   <div style={{ fontSize: 11, opacity: 0.85 }}>
                     💡 {th ? "ถ้าเป็น rate limit จริง รอ 30-60 วินาทีแล้วลองใหม่" : "If it's a real rate limit, wait 30-60 seconds and retry"}
                   </div>

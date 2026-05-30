@@ -5,6 +5,7 @@
 // matching API key auto-disables the feature — /api/analyze just returns 503
 // and the UI hides the button.
 export const config = { runtime: 'edge' }
+export const maxDuration = 60   // give Claude room to think on long conversations
 
 const PROVIDER = (process.env.AI_PROVIDER || 'gemini').toLowerCase()
 
@@ -40,14 +41,18 @@ export default async function handler(request) {
 
   const lang = body?.lang === 'en' ? 'en' : 'th'
   const portfolio = body?.portfolio || {}
-  const history = Array.isArray(body?.history) ? body.history : []
-  // The initial prompt (system instructions + portfolio data) is always the
-  // first user message; the client only stores the conversation after it.
+  // Limit chat history to the last 6 messages (≈3 Q&A pairs). Keeps each
+  // follow-up call fast enough to finish within Vercel's edge budget and
+  // caps the token cost as the chat lengthens.
+  const HISTORY_TAIL = 6
+  const rawHistory = Array.isArray(body?.history) ? body.history : []
+  const history = rawHistory.filter(m => m && m.role && m.content).slice(-HISTORY_TAIL)
+  // After slicing we may land on a 'user' as the first kept item — but our
+  // injected initial prompt is already a user message, and Claude requires
+  // alternating roles, so drop any leading 'user' to start cleanly on 'assistant'.
+  while (history.length && history[0].role === 'user') history.shift()
   const prompt = buildPrompt(portfolio, lang)
-  const messages = [
-    { role: 'user', content: prompt },
-    ...history.filter(m => m && m.role && m.content),
-  ]
+  const messages = [{ role: 'user', content: prompt }, ...history]
 
   try {
     const text = await callProvider(PROVIDER, messages)
