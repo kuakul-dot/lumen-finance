@@ -121,11 +121,16 @@ export function LineChart({ series, height = 280, fmt, labelFmt }) {
   )
 }
 
-export function Donut({ data, size = 220, thickness = 28, centerLabel, centerValue }) {
+export function Donut({ data, size = 220, thickness = 28, centerLabel, centerValue, valueFmt }) {
   const total = data.reduce((a, b) => a + b.value, 0) || 1
   const r = (size - thickness) / 2
   const c = size / 2
   const circ = 2 * Math.PI * r
+  const [pinned, setPinned] = useState(null)   // slice tapped (sticky)
+  const [hover, setHover] = useState(null)
+  const active = hover ?? pinned
+  const aSlice = active != null ? data[active] : null
+  const aPct   = aSlice ? (aSlice.value / total) * 100 : null
   let offset = 0
   return (
     <div style={{ position: "relative", width: size, height: size }}>
@@ -136,15 +141,27 @@ export function Donut({ data, size = 220, thickness = 28, centerLabel, centerVal
           const dasharray = `${len} ${circ - len}`
           const dashoffset = -offset
           offset += len
+          const isActive = active === i
           return (
             <circle key={i} cx={c} cy={c} r={r} fill="none" stroke={s.color} strokeWidth={thickness}
                     strokeDasharray={dasharray} strokeDashoffset={dashoffset}
-                    transform={`rotate(-90 ${c} ${c})`} />
+                    transform={`rotate(-90 ${c} ${c})`}
+                    opacity={active != null && !isActive ? 0.35 : 1}
+                    style={{ cursor: "pointer", transition: "opacity 0.15s" }}
+                    onMouseEnter={() => setHover(i)}
+                    onMouseLeave={() => setHover(null)}
+                    onClick={() => setPinned(p => (p === i ? null : i))} />
           )
         })}
       </svg>
-      {centerValue && (
-        <div style={{ position: "absolute", inset: 0, display: "grid", placeContent: "center", textAlign: "center" }}>
+      {aSlice ? (
+        <div style={{ position: "absolute", inset: 0, display: "grid", placeContent: "center", textAlign: "center", pointerEvents: "none", padding: "0 8px" }}>
+          <div className="label-up" style={{ fontSize: 10, color: aSlice.color }}>{aSlice.name}</div>
+          <div className="display" style={{ fontSize: 18, marginTop: 4 }}>{valueFmt ? valueFmt(aSlice.value) : aSlice.value}</div>
+          <div className="muted" style={{ fontSize: 11, marginTop: 2, fontFamily: "var(--font-mono)" }}>{aPct.toFixed(1)}%</div>
+        </div>
+      ) : centerValue && (
+        <div style={{ position: "absolute", inset: 0, display: "grid", placeContent: "center", textAlign: "center", pointerEvents: "none" }}>
           <div className="label-up" style={{ fontSize: 10 }}>{centerLabel}</div>
           <div className="display" style={{ fontSize: 22, marginTop: 4 }}>{centerValue}</div>
         </div>

@@ -945,7 +945,8 @@ function LiveDashboardPage({ t, lang, ccy, setRoute, liveHoldings, prices = {}, 
           <div style={{ display: "flex", alignItems: "center", gap: 24 }}>
             <Donut data={allocClass} size={180} thickness={26}
                    centerLabel={hasCash ? (th ? "มูลค่าสุทธิ" : "Net Worth") : t.common.total}
-                   centerValue={LUMEN_FMT.money(hasCash ? netWorth : totalValue, ccy, { compact: true })} />
+                   centerValue={LUMEN_FMT.money(hasCash ? netWorth : totalValue, ccy, { compact: true })}
+                   valueFmt={v => LUMEN_FMT.money(v, ccy, { compact: true })} />
             <div style={{ flex: 1, display: "grid", gap: 10 }}>
               {allocClass.map((s, i) => (
                 <div key={i} style={{ display: "grid", gridTemplateColumns: "auto 1fr auto", gap: 10, alignItems: "center", fontSize: 13 }}>
