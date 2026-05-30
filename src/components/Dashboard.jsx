@@ -825,11 +825,12 @@ function LiveDashboardPage({ t, lang, ccy, setRoute, liveHoldings, prices = {}, 
   // (no names / labels / account IDs — just structured ticker/weight/return).
   const runAi = async () => {
     setAiOpen(true); setAiLoading(true); setAiError(null); setAiText('')
+    const DAILY_CAP = 20   // sanity cap — Anthropic spend limit is the real safety net
     const dayKey = `lumen.aiCount.${new Date().toISOString().slice(0,10)}`
     const used = Number(localStorage.getItem(dayKey) || 0)
-    if (used >= 5) {
+    if (used >= DAILY_CAP) {
       setAiLoading(false)
-      setAiError(th ? 'ใช้ครบ 5 ครั้งวันนี้แล้ว · กลับมาพรุ่งนี้' : 'Daily quota reached (5 / day) · try again tomorrow')
+      setAiError(th ? `ใช้ครบ ${DAILY_CAP} ครั้งวันนี้แล้ว · กลับมาพรุ่งนี้` : `Daily quota reached (${DAILY_CAP} / day) · try again tomorrow`)
       return
     }
     const payload = {
