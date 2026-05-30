@@ -64,6 +64,12 @@ function buildPrompt(portfolio, lang) {
 ข้อมูลพอร์ตของผู้ใช้ (สกุล THB ทั้งหมด ค่า value/balance ถูกแปลงเป็นบาทแล้ว):
 ${JSON.stringify(portfolio, null, 2)}
 
+⚠️ คำเตือนสำคัญเรื่องการคิดสัดส่วน:
+- **เมื่อพูดถึง "% ของพอร์ต" ให้ใช้ \`pctOfNetWorth\` เสมอ** (คิดจาก net worth = หุ้น + เงินสด)
+- \`pctOfStocks\` คือสัดส่วนใน "หุ้นทั้งหมด" เท่านั้น — ห้ามเอามาเรียกว่า "ของพอร์ต"
+- ตัวเลข weight/% ใน totals ของ allocation ต้องคิดจาก net worth ทั้งหมด ไม่ใช่จากแค่หุ้น
+- คำนวณ FX exposure (USD%) จาก: (sum valueTHB ของหุ้น US + sum balanceTHB ของ cash USD) / netWorthTHB × 100
+
 โปรดวิเคราะห์เป็นภาษาไทย โดยตอบสั้นกระชับใน 4 หัวข้อ (markdown headings ##):
 
 ## จุดเด่น (Strengths)
