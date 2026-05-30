@@ -229,13 +229,15 @@ async function callGeminiModel(model, messages, maxOut = 4096) {
 
 async function callClaude(messages, maxOut = 4096) {
   const requested = process.env.ANTHROPIC_MODEL || 'claude-haiku-4-5'
-  const fallbacks = [
-    requested,
-    'claude-haiku-4-5',
-    'claude-3-5-haiku-20241022',
-    'claude-3-5-haiku-latest',
-    'claude-3-haiku-20240307',
-  ]
+  const wantSonnet = /sonnet/i.test(requested)
+  // Build a fallback chain that tries the requested family first, then
+  // gracefully degrades. Sonnet-requested falls through to Haiku as a last
+  // resort so the feature keeps working even if Sonnet is unavailable.
+  const sonnetChain = ['claude-sonnet-4-5', 'claude-3-5-sonnet-20241022', 'claude-3-5-sonnet-latest']
+  const haikuChain  = ['claude-haiku-4-5',  'claude-3-5-haiku-20241022',  'claude-3-5-haiku-latest', 'claude-3-haiku-20240307']
+  const fallbacks = wantSonnet
+    ? [requested, ...sonnetChain, ...haikuChain]
+    : [requested, ...haikuChain]
   const tried = []
   let lastErr = null
   for (const model of [...new Set(fallbacks)]) {
