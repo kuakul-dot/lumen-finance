@@ -184,7 +184,10 @@ async function callGeminiModel(model, prompt) {
 }
 
 async function callClaude(prompt) {
-  const model = process.env.ANTHROPIC_MODEL || 'claude-haiku-4-5'
+  // Default to a model name that's been live and stable since Oct 2024.
+  // Override via ANTHROPIC_MODEL env if you want a newer one (e.g.
+  // claude-haiku-4-5 once it's available on your account).
+  const model = process.env.ANTHROPIC_MODEL || 'claude-3-5-haiku-latest'
   const r = await fetch('https://api.anthropic.com/v1/messages', {
     method: 'POST',
     headers: {
