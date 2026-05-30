@@ -41,25 +41,53 @@ export default async function handler(request) {
 
   const lang = body?.lang === 'en' ? 'en' : 'th'
   const portfolio = body?.portfolio || {}
-  // Limit chat history to the last 6 messages (≈3 Q&A pairs). Keeps each
-  // follow-up call fast enough to finish within Vercel's edge budget and
-  // caps the token cost as the chat lengthens.
+  // Limit chat history to the last 6 messages (≈3 Q&A pairs).
   const HISTORY_TAIL = 6
   const rawHistory = Array.isArray(body?.history) ? body.history : []
   const history = rawHistory.filter(m => m && m.role && m.content).slice(-HISTORY_TAIL)
-  // After slicing we may land on a 'user' as the first kept item — but our
-  // injected initial prompt is already a user message, and Claude requires
-  // alternating roles, so drop any leading 'user' to start cleanly on 'assistant'.
   while (history.length && history[0].role === 'user') history.shift()
-  const prompt = buildPrompt(portfolio, lang)
+  // For follow-ups, the initial analysis already lives in the chat history —
+  // re-sending the full portfolio JSON + structured-reply instructions wastes
+  // tokens and pushes the request over Vercel's edge timeout. Use a compact
+  // continuation prompt instead.
+  const isFollowUp = history.length > 0
+  const prompt = isFollowUp ? buildFollowUpPrompt(portfolio, lang) : buildPrompt(portfolio, lang)
   const messages = [{ role: 'user', content: prompt }, ...history]
+  // Cap output too — follow-ups are answers to single questions, not the
+  // 4-section structured analysis the initial call asks for.
+  const maxOut = isFollowUp ? 1500 : 4096
 
   try {
-    const text = await callProvider(PROVIDER, messages)
+    const text = await callProvider(PROVIDER, messages, maxOut)
     return ok({ text, provider: PROVIDER })
   } catch (e) {
     return err(502, `provider error: ${e.message || String(e)}`)
   }
+}
+
+// Compact prompt for follow-up turns — the AI already saw the full data on
+// the initial call (in the assistant message in history), so we only re-state
+// the bare essentials and let the conversation flow.
+function buildFollowUpPrompt(portfolio, lang) {
+  const totals = portfolio?.totals || {}
+  const counts = portfolio?.counts || {}
+  const cashList = portfolio?.cash || []
+  const cashSummary = cashList.length
+    ? cashList.map(c => `${c.currency} ${c.balanceTHB.toLocaleString()}`).join(', ')
+    : 'none'
+  const summary = `Net worth ฿${(totals.netWorthTHB || 0).toLocaleString()} ` +
+    `(stocks ฿${(totals.stocksTHB || 0).toLocaleString()}, cash ฿${(totals.cashTHB || 0).toLocaleString()}). ` +
+    `${counts.stocksTotal || 0} holdings (${counts.stocksTH || 0} TH, ${counts.stocksUS || 0} US). ` +
+    `Cash accounts: ${cashSummary}.`
+  return lang === 'th'
+    ? `คุณกำลังต่อยอดบทสนทนาเดิม ตอบคำถามผู้ใช้ตรงประเด็น กระชับ เป็นไทยลื่นๆ
+ห้ามแนะนำซื้อ-ขายหุ้นรายตัว ใช้คำว่า "อาจ/ควรพิจารณา" ไม่ใช่ "ต้อง"
+
+ภาพรวมพอร์ตปัจจุบัน: ${summary}`
+    : `Continue the prior conversation. Answer the user's question concisely.
+Never recommend buying or selling specific stocks; use "might/consider" not "should".
+
+Current portfolio: ${summary}`
 }
 
 function hasKeyFor(p) {
@@ -127,14 +155,14 @@ End with: "This is an AI-generated analysis for education only — not investmen
 }
 
 // ── Provider adapters (all receive a normalised messages array now) ────────
-async function callProvider(provider, messages) {
-  if (provider === 'gemini') return callGemini(messages)
-  if (provider === 'claude') return callClaude(messages)
-  if (provider === 'openai') return callOpenAI(messages)
+async function callProvider(provider, messages, maxOut = 4096) {
+  if (provider === 'gemini') return callGemini(messages, maxOut)
+  if (provider === 'claude') return callClaude(messages, maxOut)
+  if (provider === 'openai') return callOpenAI(messages, maxOut)
   throw new Error(`unknown provider: ${provider}`)
 }
 
-async function callGemini(messages) {
+async function callGemini(messages, maxOut = 4096) {
   // Try the requested model first, then fall back through progressively more
   // permissive ones on 404 (renamed/retired/region-locked) or 429 (rate-limited).
   const requested = process.env.GEMINI_MODEL || 'gemini-1.5-flash'
@@ -144,7 +172,7 @@ async function callGemini(messages) {
   for (const model of [...new Set(fallbacks)]) {
     try {
       tried.push(model)
-      return await callGeminiModel(model, messages)
+      return await callGeminiModel(model, messages, maxOut)
     } catch (e) {
       lastErr = e
       const m = e.message || ''
@@ -171,7 +199,7 @@ async function callGemini(messages) {
   throw new Error(`gemini: no model accepted the request (tried ${tried.join(', ')})${hint}`)
 }
 
-async function callGeminiModel(model, messages) {
+async function callGeminiModel(model, messages, maxOut = 4096) {
   const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${process.env.GEMINI_API_KEY}`
   const contents = messages.map(m => ({
     role: m.role === 'assistant' ? 'model' : 'user',
@@ -182,7 +210,7 @@ async function callGeminiModel(model, messages) {
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({
       contents,
-      generationConfig: { temperature: 0.4, maxOutputTokens: 8192 },
+      generationConfig: { temperature: 0.4, maxOutputTokens: maxOut },
     }),
     signal: AbortSignal.timeout(45000),
   })
@@ -199,7 +227,7 @@ async function callGeminiModel(model, messages) {
   return text
 }
 
-async function callClaude(messages) {
+async function callClaude(messages, maxOut = 4096) {
   const requested = process.env.ANTHROPIC_MODEL || 'claude-haiku-4-5'
   const fallbacks = [
     requested,
@@ -213,7 +241,7 @@ async function callClaude(messages) {
   for (const model of [...new Set(fallbacks)]) {
     try {
       tried.push(model)
-      return await callClaudeModel(model, messages)
+      return await callClaudeModel(model, messages, maxOut)
     } catch (e) {
       lastErr = e
       const m = e.message || ''
@@ -225,7 +253,7 @@ async function callClaude(messages) {
   throw new Error(`claude: no model worked (tried ${tried.join(', ')}) — ${lastErr?.message || ''}`)
 }
 
-async function callClaudeModel(model, messages) {
+async function callClaudeModel(model, messages, maxOut = 4096) {
   const r = await fetch('https://api.anthropic.com/v1/messages', {
     method: 'POST',
     headers: {
@@ -235,7 +263,7 @@ async function callClaudeModel(model, messages) {
     },
     body: JSON.stringify({
       model,
-      max_tokens: 4096,
+      max_tokens: maxOut,
       messages,
     }),
     signal: AbortSignal.timeout(45000),
@@ -254,7 +282,7 @@ async function callClaudeModel(model, messages) {
   return j?.content?.[0]?.text || ''
 }
 
-async function callOpenAI(messages) {
+async function callOpenAI(messages, maxOut = 4096) {
   const model = process.env.OPENAI_MODEL || 'gpt-4o-mini'
   const r = await fetch('https://api.openai.com/v1/chat/completions', {
     method: 'POST',
@@ -264,7 +292,7 @@ async function callOpenAI(messages) {
     },
     body: JSON.stringify({
       model,
-      max_tokens: 4096,
+      max_tokens: maxOut,
       temperature: 0.4,
       messages,
     }),
