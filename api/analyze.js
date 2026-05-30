@@ -162,10 +162,11 @@ async function callGeminiModel(model, prompt) {
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({
       contents: [{ role: 'user', parts: [{ text: prompt }] }],
-      // Thai text uses ~2x more tokens per character than English, so the
-      // earlier 1200-cap truncated answers mid-section. 4096 fits a full
-      // 4-section reply with headroom.
-      generationConfig: { temperature: 0.4, maxOutputTokens: 4096 },
+      // Thai text uses ~2x more tokens per character than English. Headroom
+      // is more useful than a tight cap, so use the per-call ceiling that
+      // gemini-1.5/2.0-flash supports (8192). The 5-per-day client cap
+      // already bounds total spend.
+      generationConfig: { temperature: 0.4, maxOutputTokens: 8192 },
     }),
     signal: AbortSignal.timeout(45000),
   })
