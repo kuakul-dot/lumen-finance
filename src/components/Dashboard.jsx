@@ -1255,12 +1255,11 @@ function CashAccountModal({ lang, ccy, portfolioId, account, onClose, onSaved })
   return (
     <div style={{
       position: "fixed", inset: 0, background: "rgba(0,0,0,0.45)", backdropFilter: "blur(4px)",
-      display: "flex", alignItems: "flex-end", justifyContent: "center", zIndex: 1000,
+      display: "flex", alignItems: "center", justifyContent: "center", zIndex: 1000, padding: 16,
     }} onClick={e => e.target === e.currentTarget && onClose()}>
       <div style={{
-        background: "var(--bg)", borderRadius: "20px 20px 0 0", padding: "32px 28px 40px",
-        width: "100%", maxWidth: 480, boxShadow: "0 -8px 40px rgba(0,0,0,0.12)",
-        animation: "slideUp 0.2s ease",
+        background: "var(--bg)", borderRadius: 18, padding: 28,
+        width: "100%", maxWidth: 480, boxShadow: "0 20px 60px rgba(0,0,0,0.2)",
       }}>
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 24 }}>
           <h3 style={{ margin: 0, fontSize: 20, fontFamily: "var(--font-display)" }}>
