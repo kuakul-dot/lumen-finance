@@ -230,14 +230,19 @@ export function ToolsPage({ t, lang, ccy, dataState, liveHoldings = [], prices =
           }
         })
       } else if (allowSales) {
-        // Overweight → sell the largest lot
+        // Overweight → sell the largest lot, capping each candidate at the
+        // shares actually held so we never suggest selling more than we own.
         const sorted = [...candidates].sort((a, b) => b.value - a.value)
-        const c = sorted[0]
-        if (c) {
-          const sharesNeeded = sizeShares(Math.abs(s.delta), c.price, c.region)
-          if (sharesNeeded > 0) {
-            out.push({ action: "Sell", ticker: c.ticker, name: c.name, shares: sharesNeeded, priceNative: c.priceNative, nativeCcy: c.nativeCcy, amount: sharesNeeded * c.price, cls: s.name, region: c.region, logoUrl: c.logo_url, assetClass: c.cls })
-          }
+        let remaining = Math.abs(s.delta)
+        for (const c of sorted) {
+          if (remaining <= 0) break
+          const wanted = sizeShares(remaining, c.price, c.region)
+          const held   = Math.max(0, Number(c.shares) || 0)
+          const shares = Math.min(wanted, held)
+          if (shares <= 0) continue
+          const amount = shares * c.price
+          out.push({ action: "Sell", ticker: c.ticker, name: c.name, shares, priceNative: c.priceNative, nativeCcy: c.nativeCcy, amount, cls: s.name, region: c.region, logoUrl: c.logo_url, assetClass: c.cls })
+          remaining -= amount
         }
       }
     })
