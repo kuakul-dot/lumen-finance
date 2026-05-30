@@ -968,23 +968,42 @@ function LiveDashboardPage({ t, lang, ccy, setRoute, liveHoldings, prices = {}, 
               cashAccounts.filter(a => a.currency === 'USD').reduce((s, a) => s + (Number(a.balance) || 0) * fxRate, 0)
             const usdPct = (usdValue / denom) * 100
             const thbPct = Math.max(0, 100 - usdPct)
-            const Stat = ({ label, value, sub }) => (
-              <div style={{ display: "flex", flexDirection: "column", gap: 2, minWidth: 0 }}>
-                <span className="label-up" style={{ fontSize: 9 }}>{label}</span>
-                <span style={{ fontSize: 14, fontWeight: 500, fontFamily: "var(--font-display)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{value}</span>
-                {sub && <span className="muted" style={{ fontSize: 10.5, fontFamily: "var(--font-mono)" }}>{sub}</span>}
-              </div>
-            )
+            const tileStyle = { padding: "14px 16px", borderRadius: 12, background: "var(--bg-2)", display: "flex", flexDirection: "column", gap: 6, minWidth: 0 }
             return (
-              <div style={{ marginTop: 20, paddingTop: 16, borderTop: "1px solid var(--line)", display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 12 }}>
-                <Stat label={th ? "หลักทรัพย์" : "Positions"}
-                      value={positionCount}
-                      sub={hasCash ? `+ ${cashAccounts.length} ${th ? "บัญชีเงินสด" : "cash"}` : null} />
-                <Stat label={th ? "ใหญ่สุด" : "Largest"}
-                      value={largest ? largest.name : "—"}
-                      sub={largest ? `${(largest.value / denom * 100).toFixed(1)}%` : null} />
-                <Stat label={th ? "สกุล" : "Currency"}
-                      value={`THB ${thbPct.toFixed(0)}% · USD ${usdPct.toFixed(0)}%`} />
+              <div style={{ marginTop: 18, display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 10 }}>
+                {/* Positions */}
+                <div style={tileStyle}>
+                  <span className="label-up" style={{ fontSize: 9 }}>{th ? "หลักทรัพย์" : "Positions"}</span>
+                  <div style={{ display: "flex", alignItems: "baseline", gap: 6 }}>
+                    <span style={{ fontSize: 22, fontWeight: 600, fontFamily: "var(--font-display)", lineHeight: 1 }}>{positionCount}</span>
+                    {hasCash && <span className="muted" style={{ fontSize: 10.5, fontFamily: "var(--font-mono)" }}>+{cashAccounts.length} {th ? "เงินสด" : "cash"}</span>}
+                  </div>
+                </div>
+                {/* Largest slice */}
+                <div style={tileStyle}>
+                  <span className="label-up" style={{ fontSize: 9 }}>{th ? "ใหญ่สุด" : "Largest"}</span>
+                  {largest ? (
+                    <div style={{ display: "flex", alignItems: "center", gap: 8, minWidth: 0 }}>
+                      <span style={{ width: 10, height: 10, borderRadius: 3, background: largest.color, flexShrink: 0 }} />
+                      <div style={{ minWidth: 0, flex: 1 }}>
+                        <div style={{ fontSize: 13, fontWeight: 500, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{largest.name}</div>
+                        <div className="muted" style={{ fontSize: 10.5, fontFamily: "var(--font-mono)" }}>{(largest.value / denom * 100).toFixed(1)}%</div>
+                      </div>
+                    </div>
+                  ) : <span className="muted" style={{ fontSize: 13 }}>—</span>}
+                </div>
+                {/* Currency exposure with a mini stack bar */}
+                <div style={tileStyle}>
+                  <span className="label-up" style={{ fontSize: 9 }}>{th ? "สกุลเงิน" : "Currency"}</span>
+                  <div style={{ display: "flex", height: 8, borderRadius: 999, overflow: "hidden", background: "var(--bg)" }}>
+                    <div style={{ width: thbPct + "%", background: "var(--c1)" }} title={`THB ${thbPct.toFixed(0)}%`} />
+                    <div style={{ width: usdPct + "%", background: "var(--c2)" }} title={`USD ${usdPct.toFixed(0)}%`} />
+                  </div>
+                  <div style={{ display: "flex", justifyContent: "space-between", fontSize: 10.5, fontFamily: "var(--font-mono)", color: "var(--ink-3)" }}>
+                    <span><span style={{ color: "var(--c1)" }}>●</span> THB {thbPct.toFixed(0)}%</span>
+                    <span><span style={{ color: "var(--c2)" }}>●</span> USD {usdPct.toFixed(0)}%</span>
+                  </div>
+                </div>
               </div>
             )
           })()}
