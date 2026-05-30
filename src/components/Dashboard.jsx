@@ -1381,12 +1381,15 @@ function AiAnalysisModal({ th, loading, text, error, provider, onClose, onRetry 
             </div>
           )}
           {error && (() => {
-            const rateLimited = /429|rate|quota/i.test(error)
+            const rateLimited = /429|rate_limit/i.test(error)
             return (
-              <div style={{ padding: 14, borderRadius: 10, background: "var(--loss-soft)", color: "var(--loss)", fontSize: 13 }}>
-                ⚠ {rateLimited
-                  ? (th ? "ถูกจำกัดอัตราการเรียก · รอสัก 30-60 วินาทีแล้วลองใหม่" : "Rate limited · wait 30-60 seconds and retry")
-                  : error}
+              <div style={{ padding: 14, borderRadius: 10, background: "var(--loss-soft)", color: "var(--loss)", fontSize: 13, display: "flex", flexDirection: "column", gap: 6 }}>
+                <div>⚠ {error}</div>
+                {rateLimited && (
+                  <div style={{ fontSize: 11, opacity: 0.85 }}>
+                    💡 {th ? "ถ้าเป็น rate limit จริง รอ 30-60 วินาทีแล้วลองใหม่" : "If it's a real rate limit, wait 30-60 seconds and retry"}
+                  </div>
+                )}
               </div>
             )
           })()}
