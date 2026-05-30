@@ -194,12 +194,23 @@ async function callClaude(prompt) {
     },
     body: JSON.stringify({
       model,
-      max_tokens: 1200,
+      max_tokens: 4096,                   // headroom for long Thai answers
       messages: [{ role: 'user', content: prompt }],
     }),
-    signal: AbortSignal.timeout(30000),
+    signal: AbortSignal.timeout(45000),
   })
-  if (!r.ok) throw new Error(`claude ${r.status}`)
+  if (!r.ok) {
+    // Anthropic returns rich JSON errors; surface the type and message so the
+    // UI can tell rate-limit from billing from invalid-model.
+    let detail = ''
+    try {
+      const e = await r.json()
+      detail = e?.error?.type
+        ? ` ${e.error.type}: ${e.error.message || ''}`.trim()
+        : ''
+    } catch { /* ignore */ }
+    throw new Error(`claude ${r.status}${detail}`)
+  }
   const j = await r.json()
   return j?.content?.[0]?.text || ''
 }
