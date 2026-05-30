@@ -156,14 +156,23 @@ async function callGeminiModel(model, prompt) {
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({
       contents: [{ role: 'user', parts: [{ text: prompt }] }],
-      generationConfig: { temperature: 0.4, maxOutputTokens: 1200 },
+      // Thai text uses ~2x more tokens per character than English, so the
+      // earlier 1200-cap truncated answers mid-section. 4096 fits a full
+      // 4-section reply with headroom.
+      generationConfig: { temperature: 0.4, maxOutputTokens: 4096 },
     }),
-    signal: AbortSignal.timeout(30000),
+    signal: AbortSignal.timeout(45000),
   })
   if (!r.ok) throw new Error(`gemini ${r.status}`)
   const j = await r.json()
-  const text = j?.candidates?.[0]?.content?.parts?.map(p => p.text).join('') || ''
+  const cand = j?.candidates?.[0]
+  const text = cand?.content?.parts?.map(p => p.text).join('') || ''
   if (!text) throw new Error('empty response')
+  // If Gemini still cuts the response off, append a marker so the UI / user
+  // knows it wasn't a complete answer.
+  if (cand?.finishReason && cand.finishReason !== 'STOP') {
+    return text + `\n\n_(หมายเหตุ: คำตอบถูกตัดจบเอง · finishReason=${cand.finishReason})_`
+  }
   return text
 }
 
