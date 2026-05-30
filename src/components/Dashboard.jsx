@@ -556,7 +556,7 @@ function LiveDashboardPage({ t, lang, ccy, setRoute, liveHoldings, prices = {}, 
     { k: "holding",     label: th ? "รายหลักทรัพย์" : "By holding" },
   ]
   const allocClass = useMemo(() => {
-    if (rows.length === 0) return []
+    if (rows.length === 0 && cashTotal <= 0) return []
     const keyOf = r => {
       if (allocMode === "class")   return r.cls || "Equity"
       if (allocMode === "region")  return r.region === "TH" ? (th ? "ไทย" : "Thailand") : (th ? "สหรัฐฯ" : "United States")
@@ -574,8 +574,13 @@ function LiveDashboardPage({ t, lang, ccy, setRoute, liveHoldings, prices = {}, 
       const rest = arr.slice(7).reduce((s, x) => s + x.value, 0)
       arr = [...arr.slice(0, 7), { name: th ? "อื่นๆ" : "Others", value: rest, _other: true }]
     }
-    return arr.map((x, i) => ({ ...x, color: x._other ? "var(--ink-4)" : colors[i % colors.length] }))
-  }, [rows, th, allocMode])
+    // Cash counts as its own slice on every mode so the donut matches net worth
+    if (cashTotal > 0) arr.push({ name: th ? "เงินสด" : "Cash", value: cashTotal, _cash: true })
+    return arr.map((x, i) => ({
+      ...x,
+      color: x._cash ? "oklch(0.82 0.04 230)" : x._other ? "var(--ink-4)" : colors[i % colors.length],
+    }))
+  }, [rows, th, allocMode, cashTotal])
 
   // Top movers — group same-ticker lots first, then sort by |changePct|
   const movers = useMemo(() => {
@@ -939,14 +944,14 @@ function LiveDashboardPage({ t, lang, ccy, setRoute, liveHoldings, prices = {}, 
           </div>
           <div style={{ display: "flex", alignItems: "center", gap: 24 }}>
             <Donut data={allocClass} size={180} thickness={26}
-                   centerLabel={t.common.total}
-                   centerValue={LUMEN_FMT.money(totalValue, ccy, { compact: true })} />
+                   centerLabel={hasCash ? (th ? "มูลค่าสุทธิ" : "Net Worth") : t.common.total}
+                   centerValue={LUMEN_FMT.money(hasCash ? netWorth : totalValue, ccy, { compact: true })} />
             <div style={{ flex: 1, display: "grid", gap: 10 }}>
               {allocClass.map((s, i) => (
                 <div key={i} style={{ display: "grid", gridTemplateColumns: "auto 1fr auto", gap: 10, alignItems: "center", fontSize: 13 }}>
                   <span className="dot" style={{ background: s.color }} />
                   <span>{s.name}</span>
-                  <span className="mono">{(s.value / totalValue * 100).toFixed(1)}%</span>
+                  <span className="mono">{(s.value / (hasCash ? netWorth : totalValue) * 100).toFixed(1)}%</span>
                 </div>
               ))}
             </div>
