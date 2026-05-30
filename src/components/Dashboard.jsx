@@ -1192,7 +1192,7 @@ function LiveDashboardPage({ t, lang, ccy, setRoute, liveHoldings, prices = {}, 
               return (
                 <div key={a.id} style={{ display: "flex", alignItems: "center", gap: 12, padding: "10px 14px", borderRadius: 10, border: "1px solid var(--line)", background: "var(--bg)" }}>
                   <div style={{ width: 32, height: 32, borderRadius: 8, background: "var(--accent-soft)", color: "var(--accent-ink)", display: "grid", placeItems: "center", flexShrink: 0 }}>
-                    <Icon name="deposit" size={14} />
+                    <Icon name={a.icon || "deposit"} size={14} />
                   </div>
                   <div style={{ flex: 1, minWidth: 0 }}>
                     <div style={{ fontWeight: 500, fontSize: 13, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{a.label}</div>
@@ -1231,10 +1231,20 @@ function CashAccountModal({ lang, ccy, portfolioId, account, onClose, onSaved })
     label:    account?.label    ?? '',
     balance:  account?.balance != null ? String(account.balance) : '',
     currency: account?.currency ?? 'THB',
+    icon:     account?.icon     ?? 'deposit',
   })
   const [saving, setSaving] = useState(false)
   const [error,  setError]  = useState(null)
   const set = (k, v) => setForm(f => ({ ...f, [k]: v }))
+
+  const ICON_PRESETS = [
+    { k: 'deposit',  label: th ? 'ทั่วไป'    : 'General' },
+    { k: 'shield',   label: th ? 'สำรอง'      : 'Emergency' },
+    { k: 'dividend', label: th ? 'ปันผล'      : 'Dividend' },
+    { k: 'home',     label: th ? 'บ้าน'       : 'Home' },
+    { k: 'leaf',     label: th ? 'ระยะยาว'    : 'Long-term' },
+    { k: 'currency', label: th ? 'ต่างประเทศ' : 'Foreign' },
+  ]
 
   const handleSubmit = async (e) => {
     e.preventDefault()
@@ -1245,6 +1255,7 @@ function CashAccountModal({ lang, ccy, portfolioId, account, onClose, onSaved })
       label:    form.label.trim(),
       balance:  parseFloat(form.balance) || 0,
       currency: form.currency,
+      icon:     form.icon,
     }
     const { error } = await upsertCashAccount(portfolioId, payload)
     setSaving(false)
@@ -1278,6 +1289,27 @@ function CashAccountModal({ lang, ccy, portfolioId, account, onClose, onSaved })
             <input required value={form.label} onChange={e => set('label', e.target.value)}
               placeholder={th ? "เช่น กระแสรายวัน SCB, HYSA" : "e.g. SCB Savings, Emergency Fund"}
               style={{ padding: "10px 12px", borderRadius: 8, fontSize: 14, border: "1.5px solid var(--line)", background: "var(--bg)", color: "var(--ink)", outline: "none" }} />
+          </div>
+          <div style={{ display: "flex", flexDirection: "column", gap: 5 }}>
+            <label style={{ fontSize: 11, fontWeight: 600, color: "var(--ink-2)", letterSpacing: "0.06em", textTransform: "uppercase" }}>
+              {th ? "ไอคอน" : "Icon"}
+            </label>
+            <div style={{ display: "grid", gridTemplateColumns: "repeat(6, 1fr)", gap: 8 }}>
+              {ICON_PRESETS.map(opt => {
+                const on = form.icon === opt.k
+                return (
+                  <button key={opt.k} type="button" onClick={() => set('icon', opt.k)} title={opt.label}
+                    style={{
+                      display: "grid", placeItems: "center", aspectRatio: "1", borderRadius: 10, cursor: "pointer",
+                      border: on ? "1.5px solid var(--accent)" : "1.5px solid var(--line)",
+                      background: on ? "var(--accent-soft)" : "var(--bg-2)",
+                      color: on ? "var(--accent-ink)" : "var(--ink-2)",
+                    }}>
+                    <Icon name={opt.k} size={16} />
+                  </button>
+                )
+              })}
+            </div>
           </div>
           <div style={{ display: "grid", gridTemplateColumns: "1fr 100px", gap: 12 }}>
             <div style={{ display: "flex", flexDirection: "column", gap: 5 }}>

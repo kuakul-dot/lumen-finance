@@ -92,8 +92,10 @@ create table if not exists cash_accounts (
   label        text not null default 'Cash',
   balance      numeric not null default 0,
   currency     text not null default 'THB',
+  icon         text default 'deposit',
   updated_at   timestamptz not null default now()
 );
+alter table cash_accounts add column if not exists icon text default 'deposit';
 alter table cash_accounts enable row level security;
 drop policy if exists "Users can manage own cash accounts" on cash_accounts;
 create policy "Users can manage own cash accounts"
