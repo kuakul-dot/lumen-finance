@@ -447,8 +447,12 @@ function LiveDashboardPage({ t, lang, ccy, setRoute, liveHoldings, prices = {}, 
   const [aiText, setAiText]     = useState('')
   const [aiLoading, setAiLoading] = useState(false)
   const [aiError, setAiError]   = useState(null)
+  const [aiProvider, setAiProvider] = useState(null)    // 'gemini' | 'claude' | 'openai'
   useEffect(() => {
-    fetch('/api/analyze').then(r => r.json()).then(j => setAiAvailable(!!j?.available)).catch(() => setAiAvailable(false))
+    fetch('/api/analyze').then(r => r.json()).then(j => {
+      setAiAvailable(!!j?.available)
+      if (j?.provider) setAiProvider(j.provider)
+    }).catch(() => setAiAvailable(false))
   }, [])
   const [goals, setGoals] = useState([])
   const [allTx, setAllTx] = useState([])
@@ -865,6 +869,7 @@ function LiveDashboardPage({ t, lang, ccy, setRoute, liveHoldings, prices = {}, 
       }
       const j = await r.json()
       setAiText(j.text || '')
+      if (j.provider) setAiProvider(j.provider)
       localStorage.setItem(dayKey, String(used + 1))
     } catch (e) {
       setAiError(e?.message || 'failed')
@@ -1342,7 +1347,7 @@ function LiveDashboardPage({ t, lang, ccy, setRoute, liveHoldings, prices = {}, 
       />
     )}
     {aiOpen && (
-      <AiAnalysisModal th={th} loading={aiLoading} text={aiText} error={aiError}
+      <AiAnalysisModal th={th} loading={aiLoading} text={aiText} error={aiError} provider={aiProvider}
         onClose={() => setAiOpen(false)} onRetry={runAi} />
     )}
   </>
@@ -1350,15 +1355,23 @@ function LiveDashboardPage({ t, lang, ccy, setRoute, liveHoldings, prices = {}, 
 }
 
 // ─── AI analysis modal — minimal markdown renderer for ##, bullets, **bold** ──
-function AiAnalysisModal({ th, loading, text, error, onClose, onRetry }) {
+function AiAnalysisModal({ th, loading, text, error, provider, onClose, onRetry }) {
+  const providerLabel = { gemini: 'Google Gemini', claude: 'Anthropic Claude', openai: 'OpenAI' }[provider] || 'AI'
   return (
     <div onClick={e => e.target === e.currentTarget && onClose()}
       style={{ position: "fixed", inset: 0, zIndex: 1000, background: "rgba(0,0,0,0.45)", display: "flex", alignItems: "center", justifyContent: "center", padding: 16 }}>
       <div style={{ background: "var(--bg)", borderRadius: 18, padding: 26, width: "100%", maxWidth: 560, maxHeight: "85vh", display: "flex", flexDirection: "column", gap: 12, boxShadow: "0 20px 60px rgba(0,0,0,0.2)" }}>
-        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-          <h3 style={{ margin: 0, fontSize: 16, fontWeight: 600, display: "flex", alignItems: "center", gap: 8 }}>
-            <Icon name="spark" size={15} /> {th ? "วิเคราะห์พอร์ตด้วย AI" : "AI portfolio analysis"}
-          </h3>
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 12 }}>
+          <div>
+            <h3 style={{ margin: 0, fontSize: 16, fontWeight: 600, display: "flex", alignItems: "center", gap: 8 }}>
+              <Icon name="spark" size={15} /> {th ? "วิเคราะห์พอร์ตด้วย AI" : "AI portfolio analysis"}
+            </h3>
+            {provider && (
+              <div style={{ marginTop: 4, fontSize: 10.5, color: "var(--ink-3)", fontFamily: "var(--font-mono)" }}>
+                {th ? "ขับเคลื่อนโดย" : "Powered by"} <span style={{ color: "var(--accent-ink)", fontWeight: 600 }}>{providerLabel}</span>
+              </div>
+            )}
+          </div>
           <button onClick={onClose} style={{ background: "none", border: "none", cursor: "pointer", fontSize: 20, color: "var(--ink-3)", padding: 4 }}>✕</button>
         </div>
         <div style={{ overflow: "auto", flex: 1, fontSize: 13, lineHeight: 1.6 }}>
