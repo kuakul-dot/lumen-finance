@@ -113,9 +113,10 @@ async function callProvider(provider, prompt) {
 }
 
 async function callGemini(prompt) {
-  // Try the requested model, then fall back to widely-available ones.
+  // Try the requested model first, then fall back through progressively more
+  // permissive ones on 404 (renamed/retired model) or 429 (rate-limited).
   const requested = process.env.GEMINI_MODEL || 'gemini-2.0-flash'
-  const fallbacks = [requested, 'gemini-2.0-flash', 'gemini-1.5-flash']
+  const fallbacks = [requested, 'gemini-2.0-flash', 'gemini-1.5-flash', 'gemini-1.5-flash-8b']
   const tried = []
   let lastErr = null
   for (const model of [...new Set(fallbacks)]) {
@@ -124,10 +125,13 @@ async function callGemini(prompt) {
       return await callGeminiModel(model, prompt)
     } catch (e) {
       lastErr = e
-      if (!/404|not\s*found/i.test(e.message || '')) throw e
+      const m = e.message || ''
+      // Only fall back on retriable problems; surface real errors immediately
+      if (!/404|not\s*found|429|quota|rate/i.test(m)) throw e
     }
   }
-  throw new Error(`gemini: no model worked (tried ${tried.join(', ')}) — ${lastErr?.message || ''}`)
+  // Bubble up the most useful tail of the last error
+  throw new Error(lastErr?.message || `no gemini model worked (tried ${tried.join(', ')})`)
 }
 
 async function callGeminiModel(model, prompt) {

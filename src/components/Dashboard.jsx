@@ -1366,11 +1366,16 @@ function AiAnalysisModal({ th, loading, text, error, onClose, onRetry }) {
               {th ? "กำลังให้ AI วิเคราะห์… ใช้เวลาประมาณ 5-15 วินาที" : "AI is analysing… (5-15 sec)"}
             </div>
           )}
-          {error && (
-            <div style={{ padding: 14, borderRadius: 10, background: "var(--loss-soft)", color: "var(--loss)", fontSize: 13 }}>
-              ⚠ {error}
-            </div>
-          )}
+          {error && (() => {
+            const rateLimited = /429|rate|quota/i.test(error)
+            return (
+              <div style={{ padding: 14, borderRadius: 10, background: "var(--loss-soft)", color: "var(--loss)", fontSize: 13 }}>
+                ⚠ {rateLimited
+                  ? (th ? "ถูกจำกัดอัตราการเรียก — Gemini Free ให้ ~15 ครั้ง/นาที · รอสักครู่แล้วลองใหม่" : "Rate limited — Gemini free tier ~15/min · wait a minute and retry")
+                  : error}
+              </div>
+            )
+          })()}
           {!loading && !error && text && <Markdownish text={text} />}
         </div>
         <div style={{ display: "flex", gap: 10, paddingTop: 8, borderTop: "1px solid var(--line)" }}>
