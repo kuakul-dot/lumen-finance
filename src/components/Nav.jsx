@@ -52,9 +52,16 @@ export function LumenMark({ size = 30 }) {
   )
 }
 
-export function TopNav({ route, setRoute, lang, setLang, ccy, setCcy, t, session, signOut, displayName = '', setDisplayName }) {
+export function TopNav({ route, setRoute, lang, setLang, ccy, setCcy, t, session, signOut, displayName = '', setDisplayName,
+                         portfolios = [], activePortfolio, onSwitchPortfolio, onCreatePortfolio, onRenamePortfolio, onDeletePortfolio }) {
+  const th = lang === "th"
   const [showProfile, setShowProfile] = useState(false)
   const menuRef = useRef(null)
+  // Portfolio switcher
+  const [showPfMenu, setShowPfMenu] = useState(false)
+  const [showNewPf, setShowNewPf] = useState(false)
+  const [showManagePf, setShowManagePf] = useState(false)
+  const pfMenuRef = useRef(null)
 
   useEffect(() => {
     if (!showProfile) return
@@ -64,6 +71,15 @@ export function TopNav({ route, setRoute, lang, setLang, ccy, setCcy, t, session
     document.addEventListener('mousedown', handler)
     return () => document.removeEventListener('mousedown', handler)
   }, [showProfile])
+
+  useEffect(() => {
+    if (!showPfMenu) return
+    const handler = (e) => {
+      if (pfMenuRef.current && !pfMenuRef.current.contains(e.target)) setShowPfMenu(false)
+    }
+    document.addEventListener('mousedown', handler)
+    return () => document.removeEventListener('mousedown', handler)
+  }, [showPfMenu])
 
   const items = [
     { id: "dashboard", label: t.nav.dashboard },
@@ -95,6 +111,56 @@ export function TopNav({ route, setRoute, lang, setLang, ccy, setCcy, t, session
         </nav>
         <div className="nav-spacer" />
         <div className="nav-tools">
+          {/* Portfolio switcher */}
+          {portfolios.length > 0 && activePortfolio && (
+            <div ref={pfMenuRef} style={{ position: "relative" }}>
+              <button onClick={() => setShowPfMenu(s => !s)}
+                style={{
+                  display: "inline-flex", alignItems: "center", gap: 6,
+                  padding: "6px 10px 6px 12px", borderRadius: 999,
+                  border: "1px solid var(--line)", background: "var(--bg)",
+                  color: "var(--ink)", cursor: "pointer", fontSize: 13, fontWeight: 500,
+                  maxWidth: 180, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap",
+                }} title={activePortfolio.name}>
+                <span style={{ width: 8, height: 8, borderRadius: 2, background: "var(--accent)", flexShrink: 0 }} />
+                <span style={{ overflow: "hidden", textOverflow: "ellipsis" }}>{activePortfolio.name}</span>
+                <Icon name="down" size={11} />
+              </button>
+              {showPfMenu && (
+                <div style={{
+                  position: "absolute", top: "calc(100% + 6px)", right: 0, zIndex: 50,
+                  minWidth: 220, background: "var(--bg)", border: "1px solid var(--line)",
+                  borderRadius: 12, boxShadow: "0 12px 32px rgba(0,0,0,0.12)", padding: 6,
+                }}>
+                  {portfolios.map(p => {
+                    const on = p.id === activePortfolio.id
+                    return (
+                      <button key={p.id}
+                        onClick={() => { onSwitchPortfolio?.(p); setShowPfMenu(false) }}
+                        style={{
+                          display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8,
+                          width: "100%", padding: "8px 10px", borderRadius: 8, fontSize: 13,
+                          border: "none", background: on ? "var(--accent-soft)" : "transparent",
+                          color: on ? "var(--accent-ink)" : "var(--ink)", cursor: "pointer", textAlign: "left",
+                        }}>
+                        <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{p.name}</span>
+                        {on && <Icon name="check" size={13} />}
+                      </button>
+                    )
+                  })}
+                  <div style={{ height: 1, background: "var(--line)", margin: "6px 4px" }} />
+                  <button onClick={() => { setShowPfMenu(false); setShowNewPf(true) }}
+                    style={{ display: "flex", alignItems: "center", gap: 8, width: "100%", padding: "8px 10px", borderRadius: 8, fontSize: 13, border: "none", background: "transparent", color: "var(--ink)", cursor: "pointer", textAlign: "left" }}>
+                    <Icon name="plus" size={13} /> {th ? "สร้างพอร์ตใหม่" : "New portfolio"}
+                  </button>
+                  <button onClick={() => { setShowPfMenu(false); setShowManagePf(true) }}
+                    style={{ display: "flex", alignItems: "center", gap: 8, width: "100%", padding: "8px 10px", borderRadius: 8, fontSize: 13, border: "none", background: "transparent", color: "var(--ink-2)", cursor: "pointer", textAlign: "left" }}>
+                    <Icon name="edit" size={13} /> {th ? "จัดการพอร์ต…" : "Manage portfolios…"}
+                  </button>
+                </div>
+              )}
+            </div>
+          )}
           <div className="pill-toggle" role="group" aria-label="Currency">
             <button className={ccy === "THB" ? "on" : ""} onClick={() => setCcy("THB")}>฿ THB</button>
             <button className={ccy === "USD" ? "on" : ""} onClick={() => setCcy("USD")}>$ USD</button>
@@ -190,7 +256,95 @@ export function TopNav({ route, setRoute, lang, setLang, ccy, setCcy, t, session
           </div>
         </div>
       </div>
+      {showNewPf && (
+        <NewPortfolioModal th={th} onClose={() => setShowNewPf(false)}
+          onCreate={async (name) => { await onCreatePortfolio?.(name); setShowNewPf(false) }} />
+      )}
+      {showManagePf && (
+        <ManagePortfoliosModal th={th} portfolios={portfolios} activeId={activePortfolio?.id}
+          onClose={() => setShowManagePf(false)}
+          onRename={onRenamePortfolio} onDelete={onDeletePortfolio} />
+      )}
     </header>
+  )
+}
+
+function NewPortfolioModal({ th, onClose, onCreate }) {
+  const [name, setName] = useState('')
+  const [saving, setSaving] = useState(false)
+  return (
+    <div style={{ position: "fixed", inset: 0, zIndex: 1000, background: "rgba(0,0,0,0.45)", display: "flex", alignItems: "center", justifyContent: "center", padding: 16 }}
+      onClick={e => e.target === e.currentTarget && !saving && onClose()}>
+      <div style={{ background: "var(--bg)", borderRadius: 18, padding: 28, width: "100%", maxWidth: 420, boxShadow: "0 20px 60px rgba(0,0,0,0.2)" }}>
+        <h3 style={{ margin: 0, fontSize: 16, fontWeight: 600 }}>{th ? "สร้างพอร์ตใหม่" : "New portfolio"}</h3>
+        <p className="muted" style={{ margin: "4px 0 16px", fontSize: 12 }}>
+          {th ? "พอร์ตใหม่จะเริ่มต้นว่าง — ไม่มีหุ้น/เงินสด/ธุรกรรม" : "Starts empty — no holdings, cash, or transactions"}
+        </p>
+        <input autoFocus value={name} onChange={e => setName(e.target.value)}
+          placeholder={th ? "เช่น เกษียณ, เทรดสั้น, ลูก" : "e.g. Retirement, Speculation, Kids"}
+          style={{ width: "100%", padding: "10px 12px", borderRadius: 8, fontSize: 14, border: "1.5px solid var(--line)", background: "var(--bg)", color: "var(--ink)", outline: "none", boxSizing: "border-box" }} />
+        <div style={{ display: "flex", gap: 10, marginTop: 18 }}>
+          <button className="btn btn-outline" style={{ flex: 1 }} onClick={onClose} disabled={saving}>{th ? "ยกเลิก" : "Cancel"}</button>
+          <button className="btn" style={{ flex: 1 }} disabled={saving || !name.trim()}
+            onClick={async () => { setSaving(true); await onCreate(name.trim()); setSaving(false) }}>
+            {saving ? (th ? "กำลังสร้าง…" : "Creating…") : (th ? "สร้าง" : "Create")}
+          </button>
+        </div>
+      </div>
+    </div>
+  )
+}
+
+function ManagePortfoliosModal({ th, portfolios, activeId, onClose, onRename, onDelete }) {
+  const [rows, setRows] = useState(() => portfolios.map(p => ({ id: p.id, name: p.name, original: p.name })))
+  const [busy, setBusy] = useState(false)
+  const handleDelete = async (id) => {
+    if (portfolios.length <= 1) { alert(th ? "ต้องมีอย่างน้อย 1 พอร์ต" : "Must keep at least one portfolio"); return }
+    const p = portfolios.find(x => x.id === id)
+    const confirmText = th
+      ? `ลบ "${p?.name}"? ข้อมูลในพอร์ตนี้ (หุ้น / ธุรกรรม / เงินสด / เป้าหมาย) จะถูกลบทั้งหมด — กู้คืนไม่ได้`
+      : `Delete "${p?.name}"? Everything in this portfolio (holdings / transactions / cash / goals) will be removed — this can't be undone.`
+    if (!window.confirm(confirmText)) return
+    setBusy(true)
+    await onDelete?.(id)
+    setRows(rs => rs.filter(r => r.id !== id))
+    setBusy(false)
+  }
+  const handleSave = async () => {
+    setBusy(true)
+    for (const r of rows) {
+      const trimmed = r.name.trim()
+      if (trimmed && trimmed !== r.original) await onRename?.(r.id, trimmed)
+    }
+    setBusy(false)
+    onClose()
+  }
+  return (
+    <div style={{ position: "fixed", inset: 0, zIndex: 1000, background: "rgba(0,0,0,0.45)", display: "flex", alignItems: "center", justifyContent: "center", padding: 16 }}
+      onClick={e => e.target === e.currentTarget && !busy && onClose()}>
+      <div style={{ background: "var(--bg)", borderRadius: 18, padding: 28, width: "100%", maxWidth: 480, maxHeight: "85vh", display: "flex", flexDirection: "column", gap: 14, boxShadow: "0 20px 60px rgba(0,0,0,0.2)" }}>
+        <h3 style={{ margin: 0, fontSize: 16, fontWeight: 600 }}>{th ? "จัดการพอร์ต" : "Manage portfolios"}</h3>
+        <p className="muted" style={{ margin: 0, fontSize: 12 }}>{th ? "เปลี่ยนชื่อ หรือลบพอร์ต — ต้องเหลืออย่างน้อย 1 พอร์ตเสมอ" : "Rename or delete portfolios — at least one must remain."}</p>
+        <div style={{ overflow: "auto", display: "flex", flexDirection: "column", gap: 8 }}>
+          {rows.map(r => (
+            <div key={r.id} style={{ display: "flex", alignItems: "center", gap: 8, padding: "8px 10px", borderRadius: 10, border: "1px solid var(--line)", background: "var(--bg-2)" }}>
+              <input value={r.name} onChange={e => setRows(rs => rs.map(x => x.id === r.id ? { ...x, name: e.target.value } : x))}
+                style={{ flex: 1, padding: "6px 10px", fontSize: 13, border: "1px solid var(--line)", borderRadius: 8, background: "var(--bg)", color: "var(--ink)", outline: "none" }} />
+              {r.id === activeId && <span className="chip" style={{ fontSize: 10 }}>{th ? "ใช้งานอยู่" : "Active"}</span>}
+              <button onClick={() => handleDelete(r.id)} disabled={busy || rows.length <= 1}
+                style={{ background: "none", border: "none", cursor: rows.length <= 1 ? "not-allowed" : "pointer", color: "var(--loss)", padding: "4px 6px", borderRadius: 6, opacity: rows.length <= 1 ? 0.3 : 1 }}
+                title={th ? "ลบ" : "Delete"}>
+                <Icon name="trash" size={14} />
+              </button>
+            </div>
+          ))}
+        </div>
+        <div style={{ display: "flex", gap: 10, justifyContent: "flex-end", paddingTop: 8, borderTop: "1px solid var(--line)" }}>
+          <button className="btn btn-outline" onClick={onClose} disabled={busy}>{th ? "ปิด" : "Close"}</button>
+          <button className="btn" onClick={handleSave} disabled={busy}>{busy ? (th ? "กำลังบันทึก…" : "Saving…") : (th ? "บันทึก" : "Save changes")}</button>
+        </div>
+      </div>
+    </div>
   )
 }
 

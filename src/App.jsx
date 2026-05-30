@@ -9,7 +9,7 @@ import { ToolsPage } from './components/Tools'
 import { PlanningPage } from './components/Planning'
 import { LUMEN_I18N, setLiveFxRate } from './data'
 import { supabase } from './lib/supabase'
-import { getOrCreatePortfolio, getHoldingsSafe, getCashAccounts, deriveHoldings, recordSnapshot, exportData } from './lib/db'
+import { getOrCreatePortfolio, getPortfolios, addPortfolio, updatePortfolio, deletePortfolioCascade, getHoldingsSafe, getCashAccounts, deriveHoldings, recordSnapshot, exportData } from './lib/db'
 import { fetchPrices, fetchFxRate } from './lib/prices'
 
 const TWEAK_DEFAULTS = {
@@ -67,6 +67,7 @@ export default function App() {
   // Auth state: undefined = initializing, null = signed out, object = signed in
   const [session, setSession] = useState(undefined)
   const [portfolio, setPortfolio] = useState(null)
+  const [portfolios, setPortfolios] = useState([])   // every portfolio this user owns
   const [liveHoldings, setLiveHoldings] = useState([])
   const [prices, setPrices] = useState({})
   const [cashAccounts, setCashAccounts] = useState([])
@@ -83,27 +84,82 @@ export default function App() {
     return () => clearInterval(id)
   }, [])
 
+  // Load the holdings/prices/cash for whichever portfolio is active
+  const loadActivePortfolioData = useCallback(async (p) => {
+    if (!p) return
+    const h = await getHoldingsSafe(p.id)
+    setLiveHoldings(h)
+    const [px, ca] = await Promise.allSettled([fetchPrices(h), getCashAccounts(p.id)])
+    if (px.status === 'fulfilled') setPrices(px.value)
+    else console.warn('[Lumen] price fetch failed:', px.reason?.message)
+    if (ca.status === 'fulfilled') setCashAccounts(ca.value)
+  }, [])
+
   const loadPortfolioData = useCallback(async (userId) => {
     setLoadingData(true)
     setDataError(null)
     try {
-      const p = await getOrCreatePortfolio(userId, ccy)
-      setPortfolio(p)
-      const h = await getHoldingsSafe(p.id)
-      setLiveHoldings(h)
-      const [px, ca] = await Promise.allSettled([fetchPrices(h), getCashAccounts(p.id)])
-      if (px.status === 'fulfilled') setPrices(px.value)
-      else console.warn('[Lumen] price fetch failed:', px.reason?.message)
-      if (ca.status === 'fulfilled') setCashAccounts(ca.value)
+      let list = await getPortfolios(userId)
+      if (list.length === 0) {
+        // First-time user: seed a "Main" portfolio in their preferred currency
+        const seed = await getOrCreatePortfolio(userId, ccy)
+        list = [seed]
+      }
+      setPortfolios(list)
+      const savedId = localStorage.getItem(`lumen.activePortfolio.${userId}`)
+      const active = list.find(p => p.id === savedId) || list[0]
+      setPortfolio(active)
+      await loadActivePortfolioData(active)
     } catch (err) {
       console.error('[Lumen] loadPortfolioData error:', err)
       setDataError(err.message)
       setPortfolio(null)
+      setPortfolios([])
       setLiveHoldings([])
     } finally {
       setLoadingData(false)
     }
-  }, [ccy])
+  }, [ccy, loadActivePortfolioData])
+
+  // ── Portfolio switching & management ────────────────────────────────────
+  const switchPortfolio = useCallback(async (p) => {
+    if (!p || p.id === portfolio?.id) return
+    setPortfolio(p)
+    setLiveHoldings([]); setPrices({}); setCashAccounts([])
+    if (session?.user?.id) localStorage.setItem(`lumen.activePortfolio.${session.user.id}`, p.id)
+    setLoadingData(true)
+    try { await loadActivePortfolioData(p) }
+    finally { setLoadingData(false) }
+  }, [portfolio?.id, session?.user?.id, loadActivePortfolioData])
+
+  const createPortfolio = useCallback(async (name) => {
+    if (!session?.user?.id) return { error: 'not signed in' }
+    const { data, error } = await addPortfolio(session.user.id, name, ccy)
+    if (error || !data) return { error: error?.message || 'create failed' }
+    setPortfolios(list => [...list, data])
+    await switchPortfolio(data)
+    return { data }
+  }, [session?.user?.id, ccy, switchPortfolio])
+
+  const renamePortfolio = useCallback(async (id, name) => {
+    const trimmed = (name || '').trim()
+    if (!trimmed) return { error: 'name required' }
+    const { data, error } = await updatePortfolio(id, { name: trimmed })
+    if (error || !data) return { error: error?.message || 'rename failed' }
+    setPortfolios(list => list.map(p => (p.id === id ? data : p)))
+    if (portfolio?.id === id) setPortfolio(data)
+    return { data }
+  }, [portfolio?.id])
+
+  const removePortfolio = useCallback(async (id) => {
+    if (portfolios.length <= 1) return { error: 'cannot delete the last portfolio' }
+    const { error } = await deletePortfolioCascade(id)
+    if (error) return { error: error.message }
+    const remaining = portfolios.filter(p => p.id !== id)
+    setPortfolios(remaining)
+    if (portfolio?.id === id) await switchPortfolio(remaining[0])
+    return {}
+  }, [portfolios, portfolio?.id, switchPortfolio])
 
   const refreshHoldings = useCallback(async () => {
     if (!portfolio) return
@@ -291,6 +347,12 @@ export default function App() {
           signOut={signOut}
           displayName={displayName}
           setDisplayName={setDisplayName}
+          portfolios={portfolios}
+          activePortfolio={portfolio}
+          onSwitchPortfolio={switchPortfolio}
+          onCreatePortfolio={createPortfolio}
+          onRenamePortfolio={renamePortfolio}
+          onDeletePortfolio={removePortfolio}
         />
       ) : (
         <OnboardingNav

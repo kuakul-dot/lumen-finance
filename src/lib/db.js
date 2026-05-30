@@ -12,17 +12,49 @@ export async function getOrCreatePortfolio(userId, currency = 'THB') {
     .from('portfolios')
     .select('*')
     .eq('user_id', userId)
+    .order('created_at', { ascending: true })
     .limit(1)
     .maybeSingle()
   if (error) throw new Error(`portfolios select: ${error.message}`)
   if (data) return data
   const { data: created, error: insertError } = await supabase
     .from('portfolios')
-    .insert({ user_id: userId, currency })
+    .insert({ user_id: userId, name: 'Main', currency })
     .select()
     .single()
   if (insertError) throw new Error(`portfolios insert: ${insertError.message}`)
   return created
+}
+
+// ── Multiple portfolios per user ────────────────────────────────────────────
+export async function getPortfolios(userId) {
+  const { data } = await supabase
+    .from('portfolios').select('*')
+    .eq('user_id', userId)
+    .order('created_at', { ascending: true })
+  return data || []
+}
+
+export async function addPortfolio(userId, name, currency = 'THB') {
+  const { data, error } = await supabase
+    .from('portfolios')
+    .insert({ user_id: userId, name: (name || 'New portfolio').trim() || 'New portfolio', currency })
+    .select().single()
+  return { data, error }
+}
+
+export async function updatePortfolio(id, patch) {
+  const { data, error } = await supabase
+    .from('portfolios')
+    .update({ ...patch, updated_at: new Date().toISOString() })
+    .eq('id', id).select().single()
+  return { data, error }
+}
+
+export async function deletePortfolioCascade(id) {
+  // FKs are ON DELETE CASCADE, so holdings/transactions/cash/goals/snapshots
+  // all disappear with the portfolio row.
+  return supabase.from('portfolios').delete().eq('id', id)
 }
 
 export async function getHoldingsSafe(portfolioId) {
