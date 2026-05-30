@@ -1,4 +1,4 @@
-import { useState, useMemo, useEffect } from 'react'
+import { useState, useMemo, useEffect, useRef } from 'react'
 import { PageHead, Delta, Icon, TickerLogo } from './Nav'
 import { Sparkline, LineChart, Donut } from './Charts'
 import {
@@ -448,6 +448,10 @@ function LiveDashboardPage({ t, lang, ccy, setRoute, liveHoldings, prices = {}, 
   const [aiLoading, setAiLoading] = useState(false)
   const [aiError, setAiError]   = useState(null)
   const [aiProvider, setAiProvider] = useState(null)    // 'gemini' | 'claude' | 'openai'
+  const [aiHistory, setAiHistory] = useState([])        // [{role:'assistant'|'user', content:'...'}, ...]
+  const [aiPayload, setAiPayload] = useState(null)      // snapshot of portfolio sent on initial call
+  const [chatInput, setChatInput] = useState('')
+  const [chatLoading, setChatLoading] = useState(false)
   useEffect(() => {
     fetch('/api/analyze').then(r => r.json()).then(j => {
       setAiAvailable(!!j?.available)
@@ -825,6 +829,7 @@ function LiveDashboardPage({ t, lang, ccy, setRoute, liveHoldings, prices = {}, 
   // (no names / labels / account IDs — just structured ticker/weight/return).
   const runAi = async () => {
     setAiOpen(true); setAiLoading(true); setAiError(null); setAiText('')
+    setAiHistory([]); setChatInput('')
     const DAILY_CAP = 20   // sanity cap — Anthropic spend limit is the real safety net
     const dayKey = `lumen.aiCount.${new Date().toISOString().slice(0,10)}`
     const used = Number(localStorage.getItem(dayKey) || 0)
@@ -870,12 +875,53 @@ function LiveDashboardPage({ t, lang, ccy, setRoute, liveHoldings, prices = {}, 
       }
       const j = await r.json()
       setAiText(j.text || '')
+      setAiHistory([{ role: 'assistant', content: j.text || '' }])
+      setAiPayload(payload)
       if (j.provider) setAiProvider(j.provider)
       localStorage.setItem(dayKey, String(used + 1))
     } catch (e) {
       setAiError(e?.message || 'failed')
     } finally {
       setAiLoading(false)
+    }
+  }
+
+  // Send a follow-up question that continues the analysis conversation
+  const askFollowUp = async () => {
+    const question = chatInput.trim()
+    if (!question || chatLoading || !aiPayload) return
+    setChatInput('')
+    setAiError(null)
+    const next = [...aiHistory, { role: 'user', content: question }]
+    setAiHistory(next)
+    setChatLoading(true)
+    const dayKey = `lumen.aiCount.${new Date().toISOString().slice(0,10)}`
+    const used = Number(localStorage.getItem(dayKey) || 0)
+    if (used >= 20) {
+      setChatLoading(false)
+      setAiError(th ? 'ใช้ครบ 20 ครั้งวันนี้แล้ว · กลับมาพรุ่งนี้' : 'Daily quota reached (20 / day) · try again tomorrow')
+      return
+    }
+    try {
+      const r = await fetch('/api/analyze', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ ...aiPayload, history: next }),
+      })
+      if (!r.ok) {
+        const j = await r.json().catch(() => ({}))
+        throw new Error(j.error || `HTTP ${r.status}`)
+      }
+      const j = await r.json()
+      setAiHistory([...next, { role: 'assistant', content: j.text || '' }])
+      if (j.provider) setAiProvider(j.provider)
+      localStorage.setItem(dayKey, String(used + 1))
+    } catch (e) {
+      setAiError(e?.message || 'failed')
+      // Roll back the optimistic user message so they can retry
+      setAiHistory(aiHistory)
+    } finally {
+      setChatLoading(false)
     }
   }
 
@@ -1348,7 +1394,10 @@ function LiveDashboardPage({ t, lang, ccy, setRoute, liveHoldings, prices = {}, 
       />
     )}
     {aiOpen && (
-      <AiAnalysisModal th={th} loading={aiLoading} text={aiText} error={aiError} provider={aiProvider}
+      <AiAnalysisModal th={th} loading={aiLoading} error={aiError} provider={aiProvider}
+        history={aiHistory} chatInput={chatInput} chatLoading={chatLoading}
+        onChatInput={setChatInput} onSend={askFollowUp}
+        canChat={!!aiPayload && !aiLoading && aiHistory.length > 0}
         onClose={() => setAiOpen(false)} onRetry={runAi} />
     )}
   </>
@@ -1356,12 +1405,23 @@ function LiveDashboardPage({ t, lang, ccy, setRoute, liveHoldings, prices = {}, 
 }
 
 // ─── AI analysis modal — minimal markdown renderer for ##, bullets, **bold** ──
-function AiAnalysisModal({ th, loading, text, error, provider, onClose, onRetry }) {
+function AiAnalysisModal({ th, loading, error, provider, history = [], chatInput, chatLoading, canChat, onChatInput, onSend, onClose, onRetry }) {
   const providerLabel = { gemini: 'Google Gemini', claude: 'Anthropic Claude', openai: 'OpenAI' }[provider] || 'AI'
+  const scrollRef = useRef(null)
+  useEffect(() => {
+    // Auto-scroll to latest message
+    if (scrollRef.current) scrollRef.current.scrollTop = scrollRef.current.scrollHeight
+  }, [history.length, chatLoading])
+  const handleKey = (e) => {
+    if (e.key === 'Enter' && !e.shiftKey) {
+      e.preventDefault()
+      onSend?.()
+    }
+  }
   return (
     <div onClick={e => e.target === e.currentTarget && onClose()}
       style={{ position: "fixed", inset: 0, zIndex: 1000, background: "rgba(0,0,0,0.45)", display: "flex", alignItems: "center", justifyContent: "center", padding: 16 }}>
-      <div style={{ background: "var(--bg)", borderRadius: 18, padding: 26, width: "100%", maxWidth: 560, maxHeight: "85vh", display: "flex", flexDirection: "column", gap: 12, boxShadow: "0 20px 60px rgba(0,0,0,0.2)" }}>
+      <div style={{ background: "var(--bg)", borderRadius: 18, padding: 24, width: "100%", maxWidth: 580, maxHeight: "88vh", display: "flex", flexDirection: "column", gap: 12, boxShadow: "0 20px 60px rgba(0,0,0,0.2)" }}>
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 12 }}>
           <div>
             <h3 style={{ margin: 0, fontSize: 16, fontWeight: 600, display: "flex", alignItems: "center", gap: 8 }}>
@@ -1375,10 +1435,24 @@ function AiAnalysisModal({ th, loading, text, error, provider, onClose, onRetry 
           </div>
           <button onClick={onClose} style={{ background: "none", border: "none", cursor: "pointer", fontSize: 20, color: "var(--ink-3)", padding: 4 }}>✕</button>
         </div>
-        <div style={{ overflow: "auto", flex: 1, fontSize: 13, lineHeight: 1.6 }}>
+        <div ref={scrollRef} style={{ overflow: "auto", flex: 1, fontSize: 13, lineHeight: 1.6, display: "flex", flexDirection: "column", gap: 14 }}>
           {loading && (
             <div style={{ padding: "32px 0", textAlign: "center", color: "var(--ink-3)", fontSize: 13 }}>
               {th ? "กำลังให้ AI วิเคราะห์… ใช้เวลาประมาณ 5-15 วินาที" : "AI is analysing… (5-15 sec)"}
+            </div>
+          )}
+          {history.map((m, i) => (
+            m.role === 'assistant' ? (
+              <div key={i}><Markdownish text={m.content} /></div>
+            ) : (
+              <div key={i} style={{ alignSelf: "flex-end", maxWidth: "85%", background: "var(--accent-soft)", color: "var(--accent-ink)", padding: "10px 14px", borderRadius: "14px 14px 4px 14px", fontSize: 13 }}>
+                {m.content}
+              </div>
+            )
+          ))}
+          {chatLoading && (
+            <div style={{ alignSelf: "flex-start", color: "var(--ink-3)", fontSize: 12, fontStyle: "italic", padding: "4px 0" }}>
+              {th ? "AI กำลังคิด…" : "AI is thinking…"}
             </div>
           )}
           {error && (() => {
@@ -1394,11 +1468,27 @@ function AiAnalysisModal({ th, loading, text, error, provider, onClose, onRetry 
               </div>
             )
           })()}
-          {!loading && !error && text && <Markdownish text={text} />}
         </div>
-        <div style={{ display: "flex", gap: 10, paddingTop: 8, borderTop: "1px solid var(--line)" }}>
+        {/* Chat input — appears only after the initial analysis succeeds */}
+        {canChat && (
+          <div style={{ display: "flex", gap: 8, alignItems: "flex-end" }}>
+            <textarea
+              value={chatInput}
+              onChange={e => onChatInput?.(e.target.value)}
+              onKeyDown={handleKey}
+              placeholder={th ? "ถามต่อ เช่น 'ทำไม US ถึงเสี่ยง?', 'ถ้าซื้อ Bond เพิ่มดีไหม?'" : "Ask a follow-up, e.g. 'Why is US risky?', 'Should I add bonds?'"}
+              rows={1}
+              disabled={chatLoading}
+              style={{ flex: 1, padding: "10px 12px", borderRadius: 10, border: "1.5px solid var(--line)", background: "var(--bg)", color: "var(--ink)", outline: "none", fontSize: 13, fontFamily: "inherit", resize: "none", maxHeight: 120, lineHeight: 1.4 }} />
+            <button className="btn" disabled={chatLoading || !chatInput.trim()} onClick={onSend}
+              style={{ padding: "10px 14px", flexShrink: 0 }}>
+              {th ? "ส่ง" : "Send"}
+            </button>
+          </div>
+        )}
+        <div style={{ display: "flex", gap: 10 }}>
           {error && <button className="btn btn-outline" style={{ flex: 1 }} onClick={onRetry}>{th ? "ลองอีกครั้ง" : "Retry"}</button>}
-          <button className="btn" style={{ flex: error ? 1 : 1 }} onClick={onClose}>{th ? "ปิด" : "Close"}</button>
+          <button className="btn btn-outline" style={{ flex: 1 }} onClick={onClose}>{th ? "ปิด" : "Close"}</button>
         </div>
         <p className="muted" style={{ margin: 0, fontSize: 10, textAlign: "center" }}>
           {th ? "ข้อมูลพอร์ตถูกส่งไปยังผู้ให้บริการ AI · ไม่มีชื่อ/อีเมล/เลขบัญชี" : "Portfolio data is sent to the AI provider · no names/emails/account IDs"}

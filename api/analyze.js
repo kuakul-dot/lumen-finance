@@ -40,10 +40,17 @@ export default async function handler(request) {
 
   const lang = body?.lang === 'en' ? 'en' : 'th'
   const portfolio = body?.portfolio || {}
+  const history = Array.isArray(body?.history) ? body.history : []
+  // The initial prompt (system instructions + portfolio data) is always the
+  // first user message; the client only stores the conversation after it.
   const prompt = buildPrompt(portfolio, lang)
+  const messages = [
+    { role: 'user', content: prompt },
+    ...history.filter(m => m && m.role && m.content),
+  ]
 
   try {
-    const text = await callProvider(PROVIDER, prompt, lang)
+    const text = await callProvider(PROVIDER, messages)
     return ok({ text, provider: PROVIDER })
   } catch (e) {
     return err(502, `provider error: ${e.message || String(e)}`)
@@ -110,15 +117,15 @@ End with: "This is an AI-generated analysis for education only — not investmen
   return intro
 }
 
-// ── Provider adapters ──────────────────────────────────────────────────────
-async function callProvider(provider, prompt) {
-  if (provider === 'gemini') return callGemini(prompt)
-  if (provider === 'claude') return callClaude(prompt)
-  if (provider === 'openai') return callOpenAI(prompt)
+// ── Provider adapters (all receive a normalised messages array now) ────────
+async function callProvider(provider, messages) {
+  if (provider === 'gemini') return callGemini(messages)
+  if (provider === 'claude') return callClaude(messages)
+  if (provider === 'openai') return callOpenAI(messages)
   throw new Error(`unknown provider: ${provider}`)
 }
 
-async function callGemini(prompt) {
+async function callGemini(messages) {
   // Try the requested model first, then fall back through progressively more
   // permissive ones on 404 (renamed/retired/region-locked) or 429 (rate-limited).
   const requested = process.env.GEMINI_MODEL || 'gemini-1.5-flash'
@@ -128,7 +135,7 @@ async function callGemini(prompt) {
   for (const model of [...new Set(fallbacks)]) {
     try {
       tried.push(model)
-      return await callGeminiModel(model, prompt)
+      return await callGeminiModel(model, messages)
     } catch (e) {
       lastErr = e
       const m = e.message || ''
@@ -155,17 +162,17 @@ async function callGemini(prompt) {
   throw new Error(`gemini: no model accepted the request (tried ${tried.join(', ')})${hint}`)
 }
 
-async function callGeminiModel(model, prompt) {
+async function callGeminiModel(model, messages) {
   const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${process.env.GEMINI_API_KEY}`
+  const contents = messages.map(m => ({
+    role: m.role === 'assistant' ? 'model' : 'user',
+    parts: [{ text: m.content }],
+  }))
   const r = await fetch(url, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({
-      contents: [{ role: 'user', parts: [{ text: prompt }] }],
-      // Thai text uses ~2x more tokens per character than English. Headroom
-      // is more useful than a tight cap, so use the per-call ceiling that
-      // gemini-1.5/2.0-flash supports (8192). The 5-per-day client cap
-      // already bounds total spend.
+      contents,
       generationConfig: { temperature: 0.4, maxOutputTokens: 8192 },
     }),
     signal: AbortSignal.timeout(45000),
@@ -183,10 +190,7 @@ async function callGeminiModel(model, prompt) {
   return text
 }
 
-async function callClaude(prompt) {
-  // Try requested model first, then fall back through known-good names.
-  // Anthropic occasionally retires aliases (e.g. *-latest) and rolls in new
-  // versions (e.g. haiku-4-5) — try several so the feature doesn't break.
+async function callClaude(messages) {
   const requested = process.env.ANTHROPIC_MODEL || 'claude-haiku-4-5'
   const fallbacks = [
     requested,
@@ -200,7 +204,7 @@ async function callClaude(prompt) {
   for (const model of [...new Set(fallbacks)]) {
     try {
       tried.push(model)
-      return await callClaudeModel(model, prompt)
+      return await callClaudeModel(model, messages)
     } catch (e) {
       lastErr = e
       const m = e.message || ''
@@ -212,7 +216,7 @@ async function callClaude(prompt) {
   throw new Error(`claude: no model worked (tried ${tried.join(', ')}) — ${lastErr?.message || ''}`)
 }
 
-async function callClaudeModel(model, prompt) {
+async function callClaudeModel(model, messages) {
   const r = await fetch('https://api.anthropic.com/v1/messages', {
     method: 'POST',
     headers: {
@@ -223,7 +227,7 @@ async function callClaudeModel(model, prompt) {
     body: JSON.stringify({
       model,
       max_tokens: 4096,
-      messages: [{ role: 'user', content: prompt }],
+      messages,
     }),
     signal: AbortSignal.timeout(45000),
   })
@@ -241,7 +245,7 @@ async function callClaudeModel(model, prompt) {
   return j?.content?.[0]?.text || ''
 }
 
-async function callOpenAI(prompt) {
+async function callOpenAI(messages) {
   const model = process.env.OPENAI_MODEL || 'gpt-4o-mini'
   const r = await fetch('https://api.openai.com/v1/chat/completions', {
     method: 'POST',
@@ -251,11 +255,11 @@ async function callOpenAI(prompt) {
     },
     body: JSON.stringify({
       model,
-      max_tokens: 1200,
+      max_tokens: 4096,
       temperature: 0.4,
-      messages: [{ role: 'user', content: prompt }],
+      messages,
     }),
-    signal: AbortSignal.timeout(30000),
+    signal: AbortSignal.timeout(45000),
   })
   if (!r.ok) throw new Error(`openai ${r.status}`)
   const j = await r.json()
