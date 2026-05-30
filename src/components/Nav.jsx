@@ -327,21 +327,23 @@ function ManagePortfoliosModal({ th, portfolios, activeId, onClose, onRename, on
         <p className="muted" style={{ margin: 0, fontSize: 12 }}>{th ? "เปลี่ยนชื่อ หรือลบพอร์ต — ต้องเหลืออย่างน้อย 1 พอร์ตเสมอ" : "Rename or delete portfolios — at least one must remain."}</p>
         <div style={{ overflow: "auto", display: "flex", flexDirection: "column", gap: 8 }}>
           {rows.map(r => (
-            <div key={r.id} style={{ display: "flex", alignItems: "center", gap: 8, padding: "8px 10px", borderRadius: 10, border: "1px solid var(--line)", background: "var(--bg-2)" }}>
+            <div key={r.id} style={{ display: "grid", gridTemplateColumns: "1fr 90px 28px", gap: 10, alignItems: "center", padding: "8px 10px", borderRadius: 10, border: "1px solid var(--line)", background: "var(--bg-2)" }}>
               <input value={r.name} onChange={e => setRows(rs => rs.map(x => x.id === r.id ? { ...x, name: e.target.value } : x))}
-                style={{ flex: 1, padding: "6px 10px", fontSize: 13, border: "1px solid var(--line)", borderRadius: 8, background: "var(--bg)", color: "var(--ink)", outline: "none" }} />
-              {r.id === activeId && <span className="chip" style={{ fontSize: 10 }}>{th ? "ใช้งานอยู่" : "Active"}</span>}
+                style={{ width: "100%", padding: "6px 10px", fontSize: 13, border: "1px solid var(--line)", borderRadius: 8, background: "var(--bg)", color: "var(--ink)", outline: "none", boxSizing: "border-box" }} />
+              <div style={{ display: "flex", justifyContent: "flex-end" }}>
+                {r.id === activeId && <span className="chip" style={{ fontSize: 10 }}>{th ? "ใช้งานอยู่" : "Active"}</span>}
+              </div>
               <button onClick={() => handleDelete(r.id)} disabled={busy || rows.length <= 1}
-                style={{ background: "none", border: "none", cursor: rows.length <= 1 ? "not-allowed" : "pointer", color: "var(--loss)", padding: "4px 6px", borderRadius: 6, opacity: rows.length <= 1 ? 0.3 : 1 }}
+                style={{ background: "none", border: "none", cursor: rows.length <= 1 ? "not-allowed" : "pointer", color: "var(--loss)", padding: "4px 6px", borderRadius: 6, opacity: rows.length <= 1 ? 0.3 : 1, justifySelf: "end" }}
                 title={th ? "ลบ" : "Delete"}>
                 <Icon name="trash" size={14} />
               </button>
             </div>
           ))}
         </div>
-        <div style={{ display: "flex", gap: 10, justifyContent: "flex-end", paddingTop: 8, borderTop: "1px solid var(--line)" }}>
-          <button className="btn btn-outline" onClick={onClose} disabled={busy}>{th ? "ปิด" : "Close"}</button>
-          <button className="btn" onClick={handleSave} disabled={busy}>{busy ? (th ? "กำลังบันทึก…" : "Saving…") : (th ? "บันทึก" : "Save changes")}</button>
+        <div style={{ display: "flex", gap: 10, paddingTop: 8, borderTop: "1px solid var(--line)" }}>
+          <button className="btn btn-outline" style={{ flex: 1 }} onClick={onClose} disabled={busy}>{th ? "ปิด" : "Close"}</button>
+          <button className="btn" style={{ flex: 1 }} onClick={handleSave} disabled={busy}>{busy ? (th ? "กำลังบันทึก…" : "Saving…") : (th ? "บันทึก" : "Save changes")}</button>
         </div>
       </div>
     </div>
