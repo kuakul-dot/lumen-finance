@@ -553,58 +553,26 @@ export function ToolsPage({ t, lang, ccy, dataState, liveHoldings = [], prices =
                 const after = newTotal > 0 ? (s.target / newTotal) * 100 : 0
                 const before = s.curPct
                 const drift = before - s.tgtPct
-                const isOpen = openRow === s.name
-                const currentVal = s.value                          // ฿ now
-                const targetVal  = total > 0 ? total * s.tgtPct / 100 : 0   // ฿ target at current total
-                const afterVal   = s.target                          // ฿ target at new (post-deposit) total
-                const diffVal    = currentVal - targetVal            // ฿ current − target
-                const moveVal    = afterVal - currentVal             // ฿ needed move (buy if +, sell if −)
                 return (
-                  <div key={s.name}>
-                    <div onClick={() => setOpenRow(o => o === s.name ? null : s.name)}
-                      style={{ display: "grid", gridTemplateColumns: "minmax(96px,150px) 42px 1fr 56px 60px 50px", alignItems: "center", gap: 10, padding: "5px 0", borderTop: "1px solid var(--line)", cursor: "pointer", background: isOpen ? "var(--bg-2)" : "transparent" }}>
-                      <div style={{ fontSize: 12.5, fontWeight: 500, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}><ClassBadge name={s.name} /></div>
-                      <div className="mono muted" style={{ fontSize: 10.5 }}>→{s.tgtPct.toFixed(0)}%</div>
-                      <div style={{ position: "relative", height: 10 }}>
-                        <div style={{ position: "absolute", inset: 0, background: "var(--bg-2)", borderRadius: 999 }} />
-                        <div style={{ position: "absolute", height: "100%", background: "var(--ink-4)", width: Math.min(100, before) + "%", opacity: 0.5, borderRadius: 999 }} />
-                        <div style={{ position: "absolute", height: "100%", background: "var(--accent)", width: Math.min(100, after) + "%", borderRadius: 999 }} />
-                        <div style={{ position: "absolute", top: -2, height: 14, width: 2, background: "var(--ink-2)", left: "calc(" + Math.min(100, s.tgtPct) + "% - 1px)" }} />
-                      </div>
-                      <div className="mono muted" style={{ fontSize: 10.5, textAlign: "right" }}>{before.toFixed(1)}%</div>
-                      <div className="mono" style={{ fontSize: 10.5, textAlign: "right", fontWeight: 500 }}>{after.toFixed(1)}%</div>
-                      <div style={{ textAlign: "right" }}>
-                        {Math.abs(drift) > 1 && (
-                          <span className={"chip " + (drift > 0 ? "chip-loss" : "chip-gain")} style={{ fontSize: 9.5 }}>
-                            {drift > 0 ? "+" : ""}{drift.toFixed(1)}%
-                          </span>
-                        )}
-                      </div>
+                  <div key={s.name} onClick={() => setOpenRow(s)}
+                    style={{ display: "grid", gridTemplateColumns: "minmax(96px,150px) 42px 1fr 56px 60px 50px", alignItems: "center", gap: 10, padding: "5px 0", borderTop: "1px solid var(--line)", cursor: "pointer" }}>
+                    <div style={{ fontSize: 12.5, fontWeight: 500, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}><ClassBadge name={s.name} /></div>
+                    <div className="mono muted" style={{ fontSize: 10.5 }}>→{s.tgtPct.toFixed(0)}%</div>
+                    <div style={{ position: "relative", height: 10 }}>
+                      <div style={{ position: "absolute", inset: 0, background: "var(--bg-2)", borderRadius: 999 }} />
+                      <div style={{ position: "absolute", height: "100%", background: "var(--ink-4)", width: Math.min(100, before) + "%", opacity: 0.5, borderRadius: 999 }} />
+                      <div style={{ position: "absolute", height: "100%", background: "var(--accent)", width: Math.min(100, after) + "%", borderRadius: 999 }} />
+                      <div style={{ position: "absolute", top: -2, height: 14, width: 2, background: "var(--ink-2)", left: "calc(" + Math.min(100, s.tgtPct) + "% - 1px)" }} />
                     </div>
-                    {isOpen && (
-                      <div style={{ padding: "10px 12px 12px", background: "var(--bg-2)", display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: 10, fontSize: 11 }}>
-                        <div>
-                          <div className="label-up" style={{ fontSize: 9 }}>{th ? "ปัจจุบัน" : "Now"}</div>
-                          <div className="mono" style={{ marginTop: 2 }}>{FMT.money(currentVal, ccy, { compact: true })}</div>
-                        </div>
-                        <div>
-                          <div className="label-up" style={{ fontSize: 9 }}>{th ? "เป้าหมาย" : "Target"}</div>
-                          <div className="mono" style={{ marginTop: 2 }}>{FMT.money(targetVal, ccy, { compact: true })}</div>
-                        </div>
-                        <div>
-                          <div className="label-up" style={{ fontSize: 9 }}>{th ? "ส่วนต่างจากเป้า" : "Off target"}</div>
-                          <div className="mono" style={{ marginTop: 2, color: Math.abs(diffVal) < 1 ? "var(--ink)" : diffVal > 0 ? "var(--loss)" : "var(--gain)" }}>
-                            {diffVal >= 0 ? "+" : "−"}{FMT.money(Math.abs(diffVal), ccy, { compact: true })}
-                          </div>
-                        </div>
-                        <div>
-                          <div className="label-up" style={{ fontSize: 9 }}>{th ? "ต้องดำเนินการ" : "Action"}</div>
-                          <div className="mono" style={{ marginTop: 2, fontWeight: 600, color: Math.abs(moveVal) < 1 ? "var(--ink-3)" : moveVal > 0 ? "var(--gain)" : "var(--loss)" }}>
-                            {Math.abs(moveVal) < 1 ? "—" : (moveVal > 0 ? (th ? "ซื้อ " : "Buy ") : (th ? "ขาย " : "Sell ")) + FMT.money(Math.abs(moveVal), ccy, { compact: true })}
-                          </div>
-                        </div>
-                      </div>
-                    )}
+                    <div className="mono muted" style={{ fontSize: 10.5, textAlign: "right" }}>{before.toFixed(1)}%</div>
+                    <div className="mono" style={{ fontSize: 10.5, textAlign: "right", fontWeight: 500 }}>{after.toFixed(1)}%</div>
+                    <div style={{ textAlign: "right" }}>
+                      {Math.abs(drift) > 1 && (
+                        <span className={"chip " + (drift > 0 ? "chip-loss" : "chip-gain")} style={{ fontSize: 9.5 }}>
+                          {drift > 0 ? "+" : ""}{drift.toFixed(1)}%
+                        </span>
+                      )}
+                    </div>
                   </div>
                 )
               })}
@@ -709,6 +677,52 @@ export function ToolsPage({ t, lang, ccy, dataState, liveHoldings = [], prices =
           </div>
         </div>
       </div>
+      {openRow && (() => {
+        const s = openRow
+        const currentVal = Number(s.current) || 0
+        const targetVal  = Number(s.target)  || 0           // ฿ target after rebalance
+        const targetNowVal = total > 0 ? total * s.tgtPct / 100 : 0   // ฿ what the target % is at today's total
+        const diffVal    = currentVal - targetNowVal        // current minus today's-total target
+        const moveVal    = targetVal - currentVal           // signed: + = buy, − = sell
+        return (
+          <div onClick={e => e.target === e.currentTarget && setOpenRow(null)}
+            style={{ position: "fixed", inset: 0, zIndex: 1000, background: "rgba(0,0,0,0.45)", display: "flex", alignItems: "center", justifyContent: "center", padding: 16 }}>
+            <div style={{ background: "var(--bg)", borderRadius: 18, padding: 24, width: "100%", maxWidth: 420, boxShadow: "0 20px 60px rgba(0,0,0,0.2)" }}>
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 4 }}>
+                <h3 style={{ margin: 0, fontSize: 16, fontWeight: 600 }}><ClassBadge name={s.name} /></h3>
+                <button onClick={() => setOpenRow(null)} style={{ background: "none", border: "none", cursor: "pointer", fontSize: 20, color: "var(--ink-3)", lineHeight: 1, padding: 4 }}>✕</button>
+              </div>
+              <p className="muted" style={{ fontSize: 11, margin: "0 0 16px" }}>
+                {th ? `เป้า ${s.tgtPct.toFixed(0)}% · ปัจจุบัน ${s.curPct.toFixed(1)}%` : `Target ${s.tgtPct.toFixed(0)}% · Now ${s.curPct.toFixed(1)}%`}
+              </p>
+              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
+                <div style={{ padding: 12, borderRadius: 10, background: "var(--bg-2)" }}>
+                  <div className="label-up" style={{ fontSize: 9 }}>{th ? "ปัจจุบัน" : "Now"}</div>
+                  <div className="mono" style={{ fontSize: 15, fontFamily: "var(--font-display)", marginTop: 4 }}>{FMT.money(currentVal, ccy)}</div>
+                </div>
+                <div style={{ padding: 12, borderRadius: 10, background: "var(--bg-2)" }}>
+                  <div className="label-up" style={{ fontSize: 9 }}>{th ? "เป้าหลังปรับ" : "Target (after)"}</div>
+                  <div className="mono" style={{ fontSize: 15, fontFamily: "var(--font-display)", marginTop: 4 }}>{FMT.money(targetVal, ccy)}</div>
+                </div>
+                <div style={{ padding: 12, borderRadius: 10, background: "var(--bg-2)" }}>
+                  <div className="label-up" style={{ fontSize: 9 }}>{th ? "ส่วนต่างจากเป้า" : "Off target"}</div>
+                  <div className="mono" style={{ fontSize: 15, fontFamily: "var(--font-display)", marginTop: 4, color: Math.abs(diffVal) < 1 ? "var(--ink)" : diffVal > 0 ? "var(--loss)" : "var(--gain)" }}>
+                    {diffVal >= 0 ? "+" : "−"}{FMT.money(Math.abs(diffVal), ccy, { compact: true })}
+                  </div>
+                </div>
+                <div style={{ padding: 12, borderRadius: 10, background: Math.abs(moveVal) < 1 ? "var(--bg-2)" : moveVal > 0 ? "var(--gain-soft)" : "var(--loss-soft)" }}>
+                  <div className="label-up" style={{ fontSize: 9 }}>{th ? "ต้องดำเนินการ" : "Action"}</div>
+                  <div className="mono" style={{ fontSize: 15, fontFamily: "var(--font-display)", marginTop: 4, fontWeight: 600, color: Math.abs(moveVal) < 1 ? "var(--ink-3)" : moveVal > 0 ? "var(--gain)" : "var(--loss)" }}>
+                    {Math.abs(moveVal) < 1
+                      ? (th ? "ไม่ต้องทำอะไร" : "No action")
+                      : (moveVal > 0 ? (th ? "ซื้อ " : "Buy ") : (th ? "ขาย " : "Sell ")) + FMT.money(Math.abs(moveVal), ccy)}
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+        )
+      })()}
     </div>
   )
 }
