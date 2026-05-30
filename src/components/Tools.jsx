@@ -574,6 +574,22 @@ export function ToolsPage({ t, lang, ccy, dataState, liveHoldings = [], prices =
                   </div>
                 )
               })}
+              {/* Totals row — sums of target/now/after across all classes */}
+              {(() => {
+                const sumTgt = suggestions.reduce((s, x) => s + x.tgtPct, 0)
+                const sumNow = suggestions.reduce((s, x) => s + x.curPct, 0)
+                const sumAfter = suggestions.reduce((s, x) => s + (newTotal > 0 ? (x.target / newTotal) * 100 : 0), 0)
+                return (
+                  <div style={{ display: "grid", gridTemplateColumns: "minmax(96px,150px) 42px 1fr 56px 60px 50px", alignItems: "center", gap: 10, padding: "8px 0 2px", borderTop: "2px solid var(--line)", marginTop: 2 }}>
+                    <div className="label-up" style={{ fontSize: 9 }}>{th ? "รวม" : "Total"}</div>
+                    <div className="mono muted" style={{ fontSize: 10.5 }}>{sumTgt.toFixed(0)}%</div>
+                    <div />
+                    <div className="mono muted" style={{ fontSize: 10.5, textAlign: "right" }}>{sumNow.toFixed(1)}%</div>
+                    <div className="mono" style={{ fontSize: 10.5, textAlign: "right", fontWeight: 600 }}>{sumAfter.toFixed(1)}%</div>
+                    <div />
+                  </div>
+                )
+              })()}
             </div>
           </div>
 
