@@ -77,6 +77,10 @@ ${JSON.stringify(portfolio, null, 2)}
 - ตัวเลข weight/% ใน totals ของ allocation ต้องคิดจาก net worth ทั้งหมด ไม่ใช่จากแค่หุ้น
 - คำนวณ FX exposure (USD%) จาก: (sum valueTHB ของหุ้น US + sum balanceTHB ของ cash USD) / netWorthTHB × 100
 
+⚠️ การนับจำนวน:
+- **ใช้ \`counts\` ที่ให้มาเสมอ** ห้ามไปนับจาก array \`stocks\` เอง (จะนับผิดได้)
+- \`counts.stocksTH\` = จำนวนหุ้นไทย, \`counts.stocksUS\` = จำนวนหุ้น US, \`counts.stocksTotal\` = รวมทั้งหมด
+
 โปรดวิเคราะห์เป็นภาษาไทย โดยตอบสั้นกระชับใน 4 หัวข้อ (markdown headings ##):
 
 ## จุดเด่น (Strengths)

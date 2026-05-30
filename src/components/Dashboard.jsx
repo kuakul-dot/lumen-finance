@@ -838,29 +838,39 @@ function LiveDashboardPage({ t, lang, ccy, setRoute, liveHoldings, prices = {}, 
       setAiError(th ? `ใช้ครบ ${DAILY_CAP} ครั้งวันนี้แล้ว · กลับมาพรุ่งนี้` : `Daily quota reached (${DAILY_CAP} / day) · try again tomorrow`)
       return
     }
+    const groupedStocks = groupRowsByTicker(rows).map(r => ({
+      ticker:   r.ticker,
+      region:   r.region,
+      cls:      r.cls,
+      valueTHB: Math.round(r.value),
+      pctOfNetWorth: netWorth > 0 ? +((r.value / netWorth) * 100).toFixed(1) : 0,
+      pctOfStocks:   totalValue > 0 ? +((r.value / totalValue) * 100).toFixed(1) : 0,
+      plPct:    Number.isFinite(r.plPct) ? +r.plPct.toFixed(1) : null,
+      divYield: +Number(r.divYield || 0).toFixed(2),
+    }))
+    const cashList = cashAccounts.map(a => ({
+      currency: a.currency || 'THB',
+      balanceTHB: Math.round((a.currency === 'USD' ? (Number(a.balance) || 0) * fxRate : (Number(a.balance) || 0))),
+    }))
     const payload = {
       lang,
       portfolio: {
+        // Explicit counts so the AI doesn't have to count the stocks/cash
+        // arrays itself (it occasionally off-by-ones long lists).
+        counts: {
+          stocksTotal: groupedStocks.length,
+          stocksTH:    groupedStocks.filter(s => s.region === 'TH').length,
+          stocksUS:    groupedStocks.filter(s => s.region !== 'TH').length,
+          cashAccounts: cashList.length,
+        },
         totals: {
-          netWorthTHB: Math.round(netWorth),
-          stocksTHB:   Math.round(totalValue),
-          cashTHB:     Math.round(cashTotal),
+          netWorthTHB:  Math.round(netWorth),
+          stocksTHB:    Math.round(totalValue),
+          cashTHB:      Math.round(cashTotal),
           annualDivTHB: Math.round(annualDiv),
         },
-        stocks: groupRowsByTicker(rows).map(r => ({
-          ticker:   r.ticker,
-          region:   r.region,
-          cls:      r.cls,
-          valueTHB: Math.round(r.value),
-          pctOfNetWorth: netWorth > 0 ? +((r.value / netWorth) * 100).toFixed(1) : 0,
-          pctOfStocks:   totalValue > 0 ? +((r.value / totalValue) * 100).toFixed(1) : 0,
-          plPct:    Number.isFinite(r.plPct) ? +r.plPct.toFixed(1) : null,
-          divYield: +Number(r.divYield || 0).toFixed(2),
-        })),
-        cash: cashAccounts.map(a => ({
-          currency: a.currency || 'THB',
-          balanceTHB: Math.round((a.currency === 'USD' ? (Number(a.balance) || 0) * fxRate : (Number(a.balance) || 0))),
-        })),
+        stocks: groupedStocks,
+        cash: cashList,
       },
     }
     try {
