@@ -1303,7 +1303,7 @@ function CashAccountModal({ lang, ccy, portfolioId, account, onClose, onSaved })
             <button type="button" className="btn btn-outline" style={{ flex: 1 }} onClick={onClose}>
               {th ? "ยกเลิก" : "Cancel"}
             </button>
-            <button type="submit" className="btn" style={{ flex: 2 }} disabled={saving}>
+            <button type="submit" className="btn" style={{ flex: 1 }} disabled={saving}>
               {saving ? (th ? "กำลังบันทึก…" : "Saving…") : (th ? "บันทึก" : "Save account")}
             </button>
           </div>
