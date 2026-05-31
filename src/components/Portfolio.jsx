@@ -4,6 +4,7 @@ import { Sparkline } from './Charts'
 import { LUMEN_FMT, LUMEN_DERIVE } from '../data'
 import { addHolding, updateHolding, deleteHolding, deriveHoldings, addTransaction, syncHoldingsFromTransactions, rebuildHolding, rebuildAllHoldings, updateHoldingMeta, getTransactions, getAllTransactions, computeRealized, updateTransaction, deleteTransaction, deleteTransactionsByTicker, applySplit } from '../lib/db'
 import { fetchSplits, toYahooSymbol, fetchHistory } from '../lib/prices'
+import { computeTA } from '../lib/ta'
 import { AiAnalysisModal } from './AiModal'
 import { useAiAnalysis } from '../lib/useAiAnalysis'
 
@@ -253,7 +254,10 @@ function LivePortfolioPage({ t, lang, ccy, portfolio, liveHoldings, prices = {},
 
   // ── Auto-detect stock splits from Yahoo and suggest restating old trades ──
   // ── Send one specific holding to AI, with the full stocks context ─────
-  const analyzeHolding = (r) => {
+  const [preparingAi, setPreparingAi] = useState(false)
+  const analyzeHolding = async (r) => {
+    if (preparingAi || ai.loading) return
+    setPreparingAi(true)
     const stocksTotal = rows.reduce((s, x) => s + (Number(x.value) || 0), 0)
     const allStocks = rows.map(x => ({
       ticker: x.ticker, region: x.region, cls: x.cls,
@@ -279,10 +283,22 @@ function LivePortfolioPage({ t, lang, ccy, portfolio, liveHoldings, prices = {},
       divYield: +Number(r.divYield || 0).toFixed(2),
       changePct: Number.isFinite(r.changePct) ? +r.changePct.toFixed(2) : null,
     }
+    // Enrich with fundamentals (Yahoo quoteSummary) + computed TA so the AI
+    // can reference real financial figures and price levels, not just guess.
+    const sym = toYahooSymbol(r.ticker, r.region || 'TH', r.cls || 'Equity')
+    const [fundRes, histRes] = await Promise.allSettled([
+      fetch(`/api/fundamentals?symbol=${encodeURIComponent(sym)}`).then(res => res.ok ? res.json() : null).catch(() => null),
+      fetchHistory(sym, '1y').catch(() => null),
+    ])
+    const fundamentals = fundRes.status === 'fulfilled' ? fundRes.value : null
+    const ta = histRes.status === 'fulfilled' ? computeTA(histRes.value?.series || []) : null
+    setPreparingAi(false)
     ai.run({
       lang,
       kind: 'holding',
       holding,
+      fundamentals: fundamentals && Object.keys(fundamentals).length ? fundamentals : null,
+      ta,
       portfolio: {
         counts: {
           stocksTotal: allStocks.length,
@@ -558,8 +574,8 @@ function LivePortfolioPage({ t, lang, ccy, portfolio, liveHoldings, prices = {},
                           {aiAvailable && (
                             <button
                               onClick={() => analyzeHolding(r)}
-                              disabled={ai.loading}
-                              style={{ background: "none", border: "none", cursor: "pointer", color: "var(--accent-ink)", padding: "4px 6px", borderRadius: 6, lineHeight: 1, display: "inline-flex", alignItems: "center" }}
+                              disabled={ai.loading || preparingAi}
+                              style={{ background: "none", border: "none", cursor: "pointer", color: "var(--accent-ink)", padding: "4px 6px", borderRadius: 6, lineHeight: 1, display: "inline-flex", alignItems: "center", opacity: (ai.loading || preparingAi) ? 0.4 : 1 }}
                               title={th ? "วิเคราะห์ด้วย AI" : "Analyse with AI"}
                             ><Icon name="spark" size={14} /></button>
                           )}

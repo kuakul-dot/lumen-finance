@@ -44,6 +44,8 @@ export default async function handler(request) {
   const kind = body?.kind || 'overview'
   const extra = body?.rebalance || null
   const holding = body?.holding || null
+  const fundamentals = body?.fundamentals || null
+  const ta = body?.ta || null
   // Limit chat history to the last 6 messages (≈3 Q&A pairs).
   const HISTORY_TAIL = 6
   const rawHistory = Array.isArray(body?.history) ? body.history : []
@@ -55,7 +57,7 @@ export default async function handler(request) {
   let prompt
   if (isFollowUp)                prompt = buildFollowUpPrompt(portfolio, lang)
   else if (kind === 'rebalance') prompt = buildRebalancePrompt(portfolio, extra, lang)
-  else if (kind === 'holding')   prompt = buildHoldingPrompt(portfolio, holding, lang)
+  else if (kind === 'holding')   prompt = buildHoldingPrompt(portfolio, holding, fundamentals, ta, lang)
   else                           prompt = buildPrompt(portfolio, lang)
   const messages = [{ role: 'user', content: prompt }, ...history]
   // Cap output too — follow-ups are answers to single questions, not the
@@ -93,7 +95,7 @@ export default async function handler(request) {
 }
 
 // Per-holding deep-dive — used by the Portfolio page's per-row AI button.
-function buildHoldingPrompt(portfolio, h, lang) {
+function buildHoldingPrompt(portfolio, h, fund, ta, lang) {
   h = h || {}
   const counts = portfolio?.counts || {}
   const totals = portfolio?.totals || {}
@@ -102,57 +104,55 @@ function buildHoldingPrompt(portfolio, h, lang) {
   // can talk about correlation/concentration with actual neighbours.
   const peers = (portfolio?.stocks || []).filter(s => s.ticker !== h.ticker)
   const sameClass = peers.filter(s => s.cls === h.cls).slice(0, 8)
-  const sameRegion = peers.filter(s => s.region === h.region && s.cls === h.cls).slice(0, 8)
   const regionLabel = h.region === 'TH' ? 'หุ้นไทย' : 'หุ้น US'
   const enRegion = h.region === 'TH' ? 'Thai' : 'US'
+
+  // Build fundamentals block (only if we got data from Yahoo)
+  const fundBlock = fund ? formatFundamentals(fund, lang) : null
+  // Build TA block (only if we got enough price history)
+  const taBlock = ta ? formatTA(ta, lang) : null
 
   return lang === 'th'
     ? `คุณคือผู้ช่วยวิเคราะห์การลงทุนรายตัว ทำหน้าที่ "เพื่อนผู้รู้" — ไม่ใช่ที่ปรึกษาทางการเงิน ห้ามแนะนำซื้อ-ขายเด็ดขาด
 
 ผู้ใช้คลิกที่หุ้น **${h.ticker}** (${h.name || h.ticker}) เพื่อขอบทวิเคราะห์เฉพาะตัว
 
-ข้อมูลของหุ้นตัวนี้:
+ข้อมูลที่ผู้ใช้ถือ:
 - กลุ่ม: ${regionLabel} · ${h.cls || 'Equity'}
-- จำนวนหุ้นที่ถือ: ${h.shares}
-- ราคาทุน: ${h.costNative} ${h.nativeCcy} / หุ้น
-- ราคาปัจจุบัน: ${h.priceNative} ${h.nativeCcy} / หุ้น
-- มูลค่ารวม: ฿${(h.valueTHB || 0).toLocaleString()}
-- กำไร/ขาดทุน: ${h.plPct != null ? (h.plPct >= 0 ? '+' : '') + h.plPct + '%' : 'n/a'} (฿${(h.plTHB || 0).toLocaleString()})
+- ถือ ${h.shares} หุ้น · ราคาทุน ${h.costNative} → ปัจจุบัน ${h.priceNative} ${h.nativeCcy}/หุ้น
+- มูลค่ารวม: ฿${(h.valueTHB || 0).toLocaleString()} · กำไร/ขาดทุน ${h.plPct != null ? (h.plPct >= 0 ? '+' : '') + h.plPct + '%' : 'n/a'}
 - น้ำหนักในพอร์ตหุ้น: ${h.pctOfStocks}% (จากหุ้นรวม ฿${stocksTotal.toLocaleString()})
-- เงินปันผลคาดการณ์ (yield): ${h.divYield}%
-- เปลี่ยนแปลงวันนี้: ${h.changePct != null ? (h.changePct >= 0 ? '+' : '') + h.changePct + '%' : 'n/a'}
+- ปันผลคาดการณ์: ${h.divYield}% · วันนี้ ${h.changePct != null ? (h.changePct >= 0 ? '+' : '') + h.changePct + '%' : 'n/a'}
 
-ในพอร์ตของคุณมี ${counts.stocksTotal || 0} หลักทรัพย์ (${counts.stocksTH || 0} TH, ${counts.stocksUS || 0} US)
+พอร์ตทั้งหมด: ${counts.stocksTotal || 0} หลักทรัพย์ (${counts.stocksTH || 0} TH, ${counts.stocksUS || 0} US)
 
-หุ้นในกลุ่ม "${h.cls}" ตัวอื่นของผู้ใช้ที่อาจมี correlation:
+หุ้นกลุ่ม "${h.cls}" อื่นในพอร์ตนี้:
 ${sameClass.length ? sameClass.map(s => `- ${s.ticker} (${s.region}) · ${s.pctOfStocks}% · ${s.plPct != null ? (s.plPct >= 0 ? '+' : '') + s.plPct + '%' : 'n/a'}`).join('\n') : '(ไม่มี)'}
+${fundBlock ? '\n' + fundBlock : ''}
+${taBlock ? '\n' + taBlock : ''}
 
 โปรดวิเคราะห์เป็นภาษาไทยกระชับ ในรูปแบบ markdown 4 หัวข้อ:
 
 ## บทบาทในพอร์ต
-- น้ำหนักและสถานะ (top holding หรือ small position?)
-- ผลงาน (กำไร/ขาดทุน) — ใหญ่หรือเล็กแค่ไหนเทียบสัดส่วน
+- น้ำหนัก, สถานะ (top/concentration), ผลงานเทียบสัดส่วน
 
-## ความเสี่ยงเฉพาะตัว
-- จุดเด่น/จุดอ่อนของบริษัท (ใช้ความรู้ทั่วไปของคุณ ห้าม fabricate ตัวเลข)
-- ความเสี่ยง sector / theme
+## งบการเงิน (Fundamentals)
+${fund ? '- ใช้ตัวเลขจากบล็อก "งบการเงิน" ข้างต้น ตีความ valuation, profitability, growth, debt, dividend\n- ระบุจุดแข็ง/อ่อน — ห้ามแต่งตัวเลขที่ไม่มีในบล็อก' : '- ไม่มีข้อมูลงบจาก Yahoo (อาจเป็นหุ้นไทยเล็กหรือ ETF) → ใช้ความรู้ทั่วไป + บอกว่าข้อมูลจำกัด'}
 
-## ความเชื่อมโยงกับหุ้นอื่นในพอร์ต
-- มี holding อื่นที่ค่าผันผวนคล้ายกันไหม (เช่น semi-AI cluster)
-- การเปลี่ยนแปลงในหุ้นนี้กระทบพอร์ตยังไง
+## มุมมองเทคนิค (Technical)
+${ta ? '- ใช้ตัวเลขจากบล็อก "เทคนิค" — ตำแหน่งราคาเทียบ MA, RSI, แนวรับ-แนวต้านจาก swing high/low + 52-week range\n- ห้ามแต่งระดับราคาที่ไม่มีในบล็อก' : '- ไม่มีข้อมูลราคาย้อนหลังพอ → ระบุว่าวิเคราะห์เทคนิคไม่ได้'}
 
 ## สิ่งที่อาจพิจารณา
-2-3 ข้อ — ใช้คำ "อาจ/ควรพิจารณา" ห้าม "ต้อง" ห้ามแนะนำซื้อ-ขายหุ้นรายตัวอื่นโดยตรง
+2-3 ข้อ — ใช้คำ "อาจ/ควรพิจารณา" ห้าม "ต้อง" ห้ามแนะนำซื้อ-ขายโดยตรง
 
 ลงท้าย: "บทวิเคราะห์นี้สร้างโดย AI เพื่อการศึกษาเท่านั้น ไม่ใช่คำแนะนำการลงทุน"`
     : `You are a single-holding analysis helper. Never recommend buying or selling.
 
-User clicked on **${h.ticker}** (${h.name || h.ticker}).
+User clicked **${h.ticker}** (${h.name || h.ticker}).
 
-Holding data:
+User's position:
 - Class: ${enRegion} · ${h.cls || 'Equity'}
-- Shares: ${h.shares}
-- Cost: ${h.costNative} ${h.nativeCcy}/share · Now: ${h.priceNative} ${h.nativeCcy}/share
+- Holds ${h.shares} · Cost ${h.costNative} → Now ${h.priceNative} ${h.nativeCcy}/share
 - Value: ฿${(h.valueTHB || 0).toLocaleString()} · P/L: ${h.plPct != null ? (h.plPct >= 0 ? '+' : '') + h.plPct + '%' : 'n/a'}
 - Weight in stocks: ${h.pctOfStocks}% (of ฿${stocksTotal.toLocaleString()})
 - Div yield: ${h.divYield}% · Today: ${h.changePct != null ? (h.changePct >= 0 ? '+' : '') + h.changePct + '%' : 'n/a'}
@@ -161,9 +161,77 @@ Portfolio: ${counts.stocksTotal || 0} holdings (${counts.stocksTH || 0} TH, ${co
 
 Same-class peers in this portfolio:
 ${sameClass.length ? sameClass.map(s => `- ${s.ticker} (${s.region}) · ${s.pctOfStocks}% · ${s.plPct != null ? (s.plPct >= 0 ? '+' : '') + s.plPct + '%' : 'n/a'}`).join('\n') : '(none)'}
+${fundBlock ? '\n' + fundBlock : ''}
+${taBlock ? '\n' + taBlock : ''}
 
-Reply concisely in English markdown with sections: ## Role in portfolio · ## Idiosyncratic risk · ## Correlation with other holdings · ## Things to consider (each 2-3 bullets, using "might/consider", no specific buy/sell advice).
+Reply in markdown with 4 sections: ## Role in portfolio · ## Fundamentals (use the figures above; don't fabricate) · ## Technical (use the levels above; don't fabricate) · ## Things to consider (2-3 bullets, "might/consider", no specific buy/sell).
 End with: "AI-generated analysis for education only — not investment advice."`
+}
+
+// Format the fundamentals data Yahoo gave us into a compact bullet block.
+// Skips fields that came back as null so the prompt stays tight.
+function formatFundamentals(f, lang) {
+  if (!f) return null
+  const isTh = lang === 'th'
+  const rows = []
+  const push = (label, value, suffix = '') => {
+    if (value != null && value !== '') rows.push(`- ${label}: ${value}${suffix}`)
+  }
+  const fmtMoney = (v) => v == null ? null : v >= 1e9 ? (v / 1e9).toFixed(2) + 'B' : v >= 1e6 ? (v / 1e6).toFixed(1) + 'M' : v.toLocaleString()
+  push(isTh ? 'ราคา/Target' : 'Price/Target', f.currentPrice != null ? `${f.currentPrice}${f.targetMeanPrice ? ` (target ${f.targetMeanPrice})` : ''}` : null)
+  push('P/E (trailing/forward)', [f.trailingPE, f.forwardPE].filter(x => x != null).join(' / ') || null)
+  push('P/B · P/S', [f.priceToBook, f.priceToSales].filter(x => x != null).join(' · ') || null)
+  push(isTh ? 'อัตรากำไร (gross/op/net)' : 'Margins (gross/op/net)',
+    [f.grossMargin, f.operatingMargin, f.profitMargin].filter(x => x != null).map(x => x + '%').join(' / ') || null)
+  push('ROE · ROA', [f.roe, f.roa].filter(x => x != null).map(x => x + '%').join(' · ') || null)
+  push(isTh ? 'เติบโต รายได้/กำไร YoY' : 'Growth rev/earnings YoY',
+    [f.revenueGrowth, f.earningsGrowth].filter(x => x != null).map(x => (x >= 0 ? '+' : '') + x + '%').join(' / ') || null)
+  push('Debt/Equity · Current ratio', [f.debtToEquity, f.currentRatio].filter(x => x != null).join(' · ') || null)
+  push(isTh ? 'ปันผล yield/payout' : 'Dividend yield/payout',
+    [f.dividendYield, f.payoutRatio].filter(x => x != null).map(x => x + '%').join(' / ') || null)
+  push(isTh ? 'ช่วง 52 สัปดาห์' : '52-week range', (f.fiftyTwoWeekLow && f.fiftyTwoWeekHigh) ? `${f.fiftyTwoWeekLow} – ${f.fiftyTwoWeekHigh}` : null)
+  push('Market cap', fmtMoney(f.marketCap))
+  push(isTh ? 'คำแนะนำนักวิเคราะห์' : 'Analyst rating', f.recommendationKey ? `${f.recommendationKey}${f.numAnalystOpinions ? ' (' + f.numAnalystOpinions + ' analysts)' : ''}` : null)
+  // Income history (4 yrs)
+  if (f.incomeHistory && f.incomeHistory.length) {
+    const lines = f.incomeHistory
+      .filter(r => r.period)
+      .map(r => `${r.period}: rev ${fmtMoney(r.revenue) || '?'} · netIncome ${fmtMoney(r.netIncome) || '?'}`)
+      .join(' · ')
+    if (lines) rows.push(`- ${isTh ? 'รายได้/กำไรย้อนหลัง' : 'Income history'}: ${lines}`)
+  }
+  if (rows.length === 0) return null
+  const heading = isTh ? '📊 งบการเงิน (จาก Yahoo Finance)' : '📊 Fundamentals (from Yahoo Finance)'
+  return `${heading}:\n${rows.join('\n')}`
+}
+
+// Format computed TA indicators into a compact block.
+function formatTA(t, lang) {
+  if (!t) return null
+  const isTh = lang === 'th'
+  const rows = []
+  if (t.price != null && t.ma20 != null && t.ma50 != null) {
+    rows.push(`- ${isTh ? 'ราคาเทียบ MA' : 'Price vs MA'}: ${t.price} · MA20 ${t.ma20} · MA50 ${t.ma50}${t.ma200 != null ? ` · MA200 ${t.ma200}` : ''}`)
+  }
+  if (t.rsi14 != null) rows.push(`- RSI (14): ${t.rsi14} ${t.rsi14 >= 70 ? '(overbought)' : t.rsi14 <= 30 ? '(oversold)' : ''}`)
+  if (t.high52 != null && t.low52 != null) {
+    rows.push(`- ${isTh ? '52 สัปดาห์' : '52-week'}: low ${t.low52} – high ${t.high52} (ตอนนี้ ${t.range52pct}% ของช่วง)`)
+  }
+  if (t.recentHigh != null && t.recentLow != null) {
+    rows.push(`- ${isTh ? 'แนวรับ/ต้านล่าสุด (3 เดือน)' : 'Recent S/R (3mo)'}: support ${t.recentLow} · resistance ${t.recentHigh}`)
+  }
+  if (t.bollinger) rows.push(`- Bollinger (20,2): ${t.bollinger.lower} – ${t.bollinger.mid} – ${t.bollinger.upper}`)
+  if (t.momentum) {
+    const m = t.momentum
+    const parts = []
+    if (m.d20 != null) parts.push(`20d ${m.d20 >= 0 ? '+' : ''}${m.d20}%`)
+    if (m.d50 != null) parts.push(`50d ${m.d50 >= 0 ? '+' : ''}${m.d50}%`)
+    if (m.d200 != null) parts.push(`200d ${m.d200 >= 0 ? '+' : ''}${m.d200}%`)
+    if (parts.length) rows.push(`- ${isTh ? 'momentum' : 'Momentum'}: ${parts.join(' · ')}`)
+  }
+  if (rows.length === 0) return null
+  const heading = isTh ? '📈 เทคนิค (คำนวณจากราคาปิดจริง)' : '📈 Technical (computed from real closes)'
+  return `${heading}:\n${rows.join('\n')}`
 }
 
 // Explain a set of suggested rebalancing trades — used by the Tools page.
