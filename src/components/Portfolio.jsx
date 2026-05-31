@@ -7,6 +7,7 @@ import { fetchSplits, toYahooSymbol, fetchHistory } from '../lib/prices'
 import { computeTA } from '../lib/ta'
 import { AiAnalysisModal } from './AiModal'
 import { useAiAnalysis } from '../lib/useAiAnalysis'
+import { TradingViewChart } from './TradingViewChart'
 
 export function PortfolioPage({ t, lang, ccy, setRoute, dataState, portfolio, liveHoldings = [], prices = {}, refreshHoldings, loadingData, dataError, retryLoad, fxRate = 36 }) {
   const [showAdd, setShowAdd] = useState(false)
@@ -94,6 +95,8 @@ function LivePortfolioPage({ t, lang, ccy, portfolio, liveHoldings, prices = {},
   }, [])
   // ── Investment journal — notes attached to a holding ─────────────────────
   const [notesHolding, setNotesHolding] = useState(null)   // raw holding row when notes modal is open
+  // ── TradingView chart modal (free widget, no API key) ────────────────────
+  const [chartHolding, setChartHolding] = useState(null)
 
   // Realized P/L — recompute from all transactions whenever holdings change
   useEffect(() => {
@@ -571,6 +574,11 @@ function LivePortfolioPage({ t, lang, ccy, portfolio, liveHoldings, prices = {},
                       </td>
                       <td>
                         <div style={{ display: "flex", gap: 2, justifyContent: "flex-end" }}>
+                          <button
+                            onClick={() => setChartHolding(r)}
+                            style={{ background: "none", border: "none", cursor: "pointer", color: "var(--ink-3)", padding: "4px 6px", borderRadius: 6, lineHeight: 1, display: "inline-flex", alignItems: "center" }}
+                            title={th ? "ดูกราฟ (TradingView)" : "View chart (TradingView)"}
+                          ><Icon name="spark" size={14} style={{ display: "none" }} />📊</button>
                           {aiAvailable && (
                             <button
                               onClick={() => analyzeHolding(r)}
@@ -684,6 +692,30 @@ function LivePortfolioPage({ t, lang, ccy, portfolio, liveHoldings, prices = {},
         <NotesModal th={th} holding={notesHolding}
           onClose={() => setNotesHolding(null)}
           onSaved={async () => { setNotesHolding(null); await refreshHoldings() }} />
+      )}
+
+      {chartHolding && (
+        <div style={{ position: "fixed", inset: 0, zIndex: 1000, background: "rgba(0,0,0,0.45)", display: "flex", alignItems: "center", justifyContent: "center", padding: 16 }}
+          onClick={e => e.target === e.currentTarget && setChartHolding(null)}>
+          <div style={{ background: "var(--bg)", borderRadius: 18, padding: 20, width: "100%", maxWidth: 1000, maxHeight: "92vh", display: "flex", flexDirection: "column", gap: 12, boxShadow: "0 20px 60px rgba(0,0,0,0.2)" }}>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 12 }}>
+              <div style={{ display: "flex", alignItems: "center", gap: 10, minWidth: 0 }}>
+                <TickerLogo ticker={chartHolding.ticker} logoUrl={chartHolding.logo_url} region={chartHolding.region} cls={chartHolding.cls} size={32} />
+                <div style={{ minWidth: 0 }}>
+                  <h3 style={{ margin: 0, fontSize: 16, fontWeight: 600 }}>{chartHolding.ticker} · {chartHolding.name}</h3>
+                  <div className="muted" style={{ fontSize: 11, marginTop: 2 }}>
+                    {th ? "กราฟจาก" : "Chart by"} <span style={{ color: "var(--accent-ink)", fontWeight: 500 }}>TradingView</span>
+                  </div>
+                </div>
+              </div>
+              <button onClick={() => setChartHolding(null)} style={{ background: "none", border: "none", cursor: "pointer", fontSize: 22, color: "var(--ink-3)", padding: 4 }}>✕</button>
+            </div>
+            <TradingViewChart ticker={chartHolding.ticker} region={chartHolding.region} height={Math.min(560, window.innerHeight * 0.7)} />
+            <p className="muted" style={{ margin: 0, fontSize: 10, textAlign: "center" }}>
+              {th ? "กราฟ TradingView สำหรับการศึกษา · ไม่ใช่คำแนะนำการลงทุน" : "TradingView chart for education only · not investment advice"}
+            </p>
+          </div>
+        </div>
       )}
 
       {splitModal && (
