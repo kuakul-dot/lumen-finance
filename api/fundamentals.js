@@ -59,6 +59,14 @@ export default async function handler(request) {
   const symbol = (searchParams.get('symbol') || '').trim()
   if (!symbol) return json({})
 
+  // 1) If a Financial Modeling Prep key is configured, prefer it — it's a
+  //    proper authenticated API rather than scraping, so it doesn't fail
+  //    from cloud IPs the way Yahoo's anti-bot does.
+  if (process.env.FMP_API_KEY) {
+    const fmp = await fetchFmp(symbol).catch(() => null)
+    if (fmp && fmp.currentPrice != null) return json(fmp)
+  }
+
   const auth = await getYahooAuth()
 
   for (const host of ['query2', 'query1']) {
@@ -110,6 +118,70 @@ function json(payload) {
 
 function num(x) { return (x && typeof x.raw === 'number') ? x.raw : null }
 function round(x, d = 2) { return x == null ? null : +x.toFixed(d) }
+
+// Pull a symbol's fundamentals from Financial Modeling Prep when FMP_API_KEY
+// is configured. FMP free tier = 250 calls/day. Stocks supported include US +
+// many international (Thai .BK is partial coverage).
+async function fetchFmp(symbol) {
+  const key = process.env.FMP_API_KEY
+  if (!key) return null
+  const sym = symbol.replace(/\.BK$/i, '.BK')   // FMP uses .BK for Thai listed
+  // Fetch quote + ratios + key-metrics + income statements in parallel
+  const base = 'https://financialmodelingprep.com/api/v3'
+  const urls = [
+    `${base}/quote/${encodeURIComponent(sym)}?apikey=${key}`,
+    `${base}/ratios-ttm/${encodeURIComponent(sym)}?apikey=${key}`,
+    `${base}/key-metrics-ttm/${encodeURIComponent(sym)}?apikey=${key}`,
+    `${base}/income-statement/${encodeURIComponent(sym)}?limit=4&apikey=${key}`,
+  ]
+  const [qR, rR, kR, iR] = await Promise.allSettled(
+    urls.map(u => fetch(u, { signal: AbortSignal.timeout(8000) }).then(r => r.ok ? r.json() : null))
+  )
+  const q = qR.status === 'fulfilled' && Array.isArray(qR.value) ? qR.value[0] : null
+  const ratios = rR.status === 'fulfilled' && Array.isArray(rR.value) ? rR.value[0] : null
+  const keyM = kR.status === 'fulfilled' && Array.isArray(kR.value) ? kR.value[0] : null
+  const income = (iR.status === 'fulfilled' && Array.isArray(iR.value) ? iR.value : []).slice(0, 4)
+
+  if (!q) return null
+  const r = (x, d = 2) => (typeof x === 'number' && Number.isFinite(x) ? +x.toFixed(d) : null)
+  return {
+    name: q.name || null,
+    currency: q.currency || null,
+    marketCap: typeof q.marketCap === 'number' ? q.marketCap : null,
+    trailingPE:  r(q.pe),
+    forwardPE:   r(q.forwardPE ?? ratios?.priceEarningsRatioTTM),
+    priceToBook: r(ratios?.priceToBookRatioTTM ?? keyM?.pbRatioTTM),
+    priceToSales: r(ratios?.priceToSalesRatioTTM),
+    profitMargin:    r((ratios?.netProfitMarginTTM ?? 0) * 100, 1),
+    operatingMargin: r((ratios?.operatingProfitMarginTTM ?? 0) * 100, 1),
+    grossMargin:     r((ratios?.grossProfitMarginTTM ?? 0) * 100, 1),
+    roe: r((ratios?.returnOnEquityTTM ?? 0) * 100, 1),
+    roa: r((ratios?.returnOnAssetsTTM ?? 0) * 100, 1),
+    revenueGrowth: null,         // FMP needs separate growth endpoint; skip on free tier
+    earningsGrowth: null,
+    debtToEquity: r(ratios?.debtEquityRatioTTM),
+    currentRatio: r(ratios?.currentRatioTTM),
+    quickRatio: r(ratios?.quickRatioTTM),
+    totalCash: keyM?.cashPerShareTTM != null && q.sharesOutstanding ? keyM.cashPerShareTTM * q.sharesOutstanding : null,
+    totalDebt: null,
+    dividendYield: r((ratios?.dividendYielTTM ?? ratios?.dividendYieldTTM ?? 0) * 100, 2),
+    payoutRatio:   r((ratios?.payoutRatioTTM ?? 0) * 100, 1),
+    currentPrice: typeof q.price === 'number' ? q.price : null,
+    fiftyTwoWeekLow:  typeof q.yearLow === 'number' ? q.yearLow : null,
+    fiftyTwoWeekHigh: typeof q.yearHigh === 'number' ? q.yearHigh : null,
+    targetMeanPrice: null,
+    recommendationKey: null,
+    numAnalystOpinions: null,
+    incomeHistory: income.map(s => ({
+      period: s.date || null,
+      revenue: typeof s.revenue === 'number' ? s.revenue : null,
+      grossProfit: typeof s.grossProfit === 'number' ? s.grossProfit : null,
+      operatingIncome: typeof s.operatingIncome === 'number' ? s.operatingIncome : null,
+      netIncome: typeof s.netIncome === 'number' ? s.netIncome : null,
+    })),
+    _source: 'fmp',
+  }
+}
 
 // Lighter parse for the v7/quote fallback — the shape is flat, not the
 // {raw, fmt} envelope that quoteSummary uses.
