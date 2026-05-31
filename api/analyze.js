@@ -43,6 +43,7 @@ export default async function handler(request) {
   const portfolio = body?.portfolio || {}
   const kind = body?.kind || 'overview'
   const extra = body?.rebalance || null
+  const holding = body?.holding || null
   // Limit chat history to the last 6 messages (≈3 Q&A pairs).
   const HISTORY_TAIL = 6
   const rawHistory = Array.isArray(body?.history) ? body.history : []
@@ -52,9 +53,10 @@ export default async function handler(request) {
   // Pick the right prompt builder based on what the client asked for. Follow-ups
   // always use the compact continuation prompt regardless of kind.
   let prompt
-  if (isFollowUp)               prompt = buildFollowUpPrompt(portfolio, lang)
+  if (isFollowUp)                prompt = buildFollowUpPrompt(portfolio, lang)
   else if (kind === 'rebalance') prompt = buildRebalancePrompt(portfolio, extra, lang)
-  else                          prompt = buildPrompt(portfolio, lang)
+  else if (kind === 'holding')   prompt = buildHoldingPrompt(portfolio, holding, lang)
+  else                           prompt = buildPrompt(portfolio, lang)
   const messages = [{ role: 'user', content: prompt }, ...history]
   // Cap output too — follow-ups are answers to single questions, not the
   // 4-section structured analysis the initial call asks for.
@@ -88,6 +90,80 @@ export default async function handler(request) {
   } catch (e) {
     return err(502, `provider error: ${e.message || String(e)}`)
   }
+}
+
+// Per-holding deep-dive — used by the Portfolio page's per-row AI button.
+function buildHoldingPrompt(portfolio, h, lang) {
+  h = h || {}
+  const counts = portfolio?.counts || {}
+  const totals = portfolio?.totals || {}
+  const stocksTotal = Number(totals.stocksTHB) || 0
+  // Identify same-region and same-class peers in the user's portfolio so AI
+  // can talk about correlation/concentration with actual neighbours.
+  const peers = (portfolio?.stocks || []).filter(s => s.ticker !== h.ticker)
+  const sameClass = peers.filter(s => s.cls === h.cls).slice(0, 8)
+  const sameRegion = peers.filter(s => s.region === h.region && s.cls === h.cls).slice(0, 8)
+  const regionLabel = h.region === 'TH' ? 'หุ้นไทย' : 'หุ้น US'
+  const enRegion = h.region === 'TH' ? 'Thai' : 'US'
+
+  return lang === 'th'
+    ? `คุณคือผู้ช่วยวิเคราะห์การลงทุนรายตัว ทำหน้าที่ "เพื่อนผู้รู้" — ไม่ใช่ที่ปรึกษาทางการเงิน ห้ามแนะนำซื้อ-ขายเด็ดขาด
+
+ผู้ใช้คลิกที่หุ้น **${h.ticker}** (${h.name || h.ticker}) เพื่อขอบทวิเคราะห์เฉพาะตัว
+
+ข้อมูลของหุ้นตัวนี้:
+- กลุ่ม: ${regionLabel} · ${h.cls || 'Equity'}
+- จำนวนหุ้นที่ถือ: ${h.shares}
+- ราคาทุน: ${h.costNative} ${h.nativeCcy} / หุ้น
+- ราคาปัจจุบัน: ${h.priceNative} ${h.nativeCcy} / หุ้น
+- มูลค่ารวม: ฿${(h.valueTHB || 0).toLocaleString()}
+- กำไร/ขาดทุน: ${h.plPct != null ? (h.plPct >= 0 ? '+' : '') + h.plPct + '%' : 'n/a'} (฿${(h.plTHB || 0).toLocaleString()})
+- น้ำหนักในพอร์ตหุ้น: ${h.pctOfStocks}% (จากหุ้นรวม ฿${stocksTotal.toLocaleString()})
+- เงินปันผลคาดการณ์ (yield): ${h.divYield}%
+- เปลี่ยนแปลงวันนี้: ${h.changePct != null ? (h.changePct >= 0 ? '+' : '') + h.changePct + '%' : 'n/a'}
+
+ในพอร์ตของคุณมี ${counts.stocksTotal || 0} หลักทรัพย์ (${counts.stocksTH || 0} TH, ${counts.stocksUS || 0} US)
+
+หุ้นในกลุ่ม "${h.cls}" ตัวอื่นของผู้ใช้ที่อาจมี correlation:
+${sameClass.length ? sameClass.map(s => `- ${s.ticker} (${s.region}) · ${s.pctOfStocks}% · ${s.plPct != null ? (s.plPct >= 0 ? '+' : '') + s.plPct + '%' : 'n/a'}`).join('\n') : '(ไม่มี)'}
+
+โปรดวิเคราะห์เป็นภาษาไทยกระชับ ในรูปแบบ markdown 4 หัวข้อ:
+
+## บทบาทในพอร์ต
+- น้ำหนักและสถานะ (top holding หรือ small position?)
+- ผลงาน (กำไร/ขาดทุน) — ใหญ่หรือเล็กแค่ไหนเทียบสัดส่วน
+
+## ความเสี่ยงเฉพาะตัว
+- จุดเด่น/จุดอ่อนของบริษัท (ใช้ความรู้ทั่วไปของคุณ ห้าม fabricate ตัวเลข)
+- ความเสี่ยง sector / theme
+
+## ความเชื่อมโยงกับหุ้นอื่นในพอร์ต
+- มี holding อื่นที่ค่าผันผวนคล้ายกันไหม (เช่น semi-AI cluster)
+- การเปลี่ยนแปลงในหุ้นนี้กระทบพอร์ตยังไง
+
+## สิ่งที่อาจพิจารณา
+2-3 ข้อ — ใช้คำ "อาจ/ควรพิจารณา" ห้าม "ต้อง" ห้ามแนะนำซื้อ-ขายหุ้นรายตัวอื่นโดยตรง
+
+ลงท้าย: "บทวิเคราะห์นี้สร้างโดย AI เพื่อการศึกษาเท่านั้น ไม่ใช่คำแนะนำการลงทุน"`
+    : `You are a single-holding analysis helper. Never recommend buying or selling.
+
+User clicked on **${h.ticker}** (${h.name || h.ticker}).
+
+Holding data:
+- Class: ${enRegion} · ${h.cls || 'Equity'}
+- Shares: ${h.shares}
+- Cost: ${h.costNative} ${h.nativeCcy}/share · Now: ${h.priceNative} ${h.nativeCcy}/share
+- Value: ฿${(h.valueTHB || 0).toLocaleString()} · P/L: ${h.plPct != null ? (h.plPct >= 0 ? '+' : '') + h.plPct + '%' : 'n/a'}
+- Weight in stocks: ${h.pctOfStocks}% (of ฿${stocksTotal.toLocaleString()})
+- Div yield: ${h.divYield}% · Today: ${h.changePct != null ? (h.changePct >= 0 ? '+' : '') + h.changePct + '%' : 'n/a'}
+
+Portfolio: ${counts.stocksTotal || 0} holdings (${counts.stocksTH || 0} TH, ${counts.stocksUS || 0} US).
+
+Same-class peers in this portfolio:
+${sameClass.length ? sameClass.map(s => `- ${s.ticker} (${s.region}) · ${s.pctOfStocks}% · ${s.plPct != null ? (s.plPct >= 0 ? '+' : '') + s.plPct + '%' : 'n/a'}`).join('\n') : '(none)'}
+
+Reply concisely in English markdown with sections: ## Role in portfolio · ## Idiosyncratic risk · ## Correlation with other holdings · ## Things to consider (each 2-3 bullets, using "might/consider", no specific buy/sell advice).
+End with: "AI-generated analysis for education only — not investment advice."`
 }
 
 // Explain a set of suggested rebalancing trades — used by the Tools page.

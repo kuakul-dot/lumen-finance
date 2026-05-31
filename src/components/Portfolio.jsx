@@ -4,6 +4,8 @@ import { Sparkline } from './Charts'
 import { LUMEN_FMT, LUMEN_DERIVE } from '../data'
 import { addHolding, updateHolding, deleteHolding, deriveHoldings, addTransaction, syncHoldingsFromTransactions, rebuildHolding, rebuildAllHoldings, updateHoldingMeta, getTransactions, getAllTransactions, computeRealized, updateTransaction, deleteTransaction, deleteTransactionsByTicker, applySplit } from '../lib/db'
 import { fetchSplits, toYahooSymbol, fetchHistory } from '../lib/prices'
+import { AiAnalysisModal } from './AiModal'
+import { useAiAnalysis } from '../lib/useAiAnalysis'
 
 export function PortfolioPage({ t, lang, ccy, setRoute, dataState, portfolio, liveHoldings = [], prices = {}, refreshHoldings, loadingData, dataError, retryLoad, fxRate = 36 }) {
   const [showAdd, setShowAdd] = useState(false)
@@ -83,6 +85,12 @@ function LivePortfolioPage({ t, lang, ccy, portfolio, liveHoldings, prices = {},
   const [showRealized, setShowRealized] = useState(false)
   const [splitModal, setSplitModal] = useState(null)   // null | 'loading' | suggestion[]
   const [splitApplying, setSplitApplying] = useState(false)
+  // ── AI per-holding analysis (optional — hides when /api/analyze 503s) ──
+  const ai = useAiAnalysis()
+  const [aiAvailable, setAiAvailable] = useState(false)
+  useEffect(() => {
+    fetch('/api/analyze').then(r => r.json()).then(j => setAiAvailable(!!j?.available)).catch(() => setAiAvailable(false))
+  }, [])
 
   // Realized P/L — recompute from all transactions whenever holdings change
   useEffect(() => {
@@ -242,6 +250,49 @@ function LivePortfolioPage({ t, lang, ccy, portfolio, liveHoldings, prices = {},
   }
 
   // ── Auto-detect stock splits from Yahoo and suggest restating old trades ──
+  // ── Send one specific holding to AI, with the full stocks context ─────
+  const analyzeHolding = (r) => {
+    const stocksTotal = rows.reduce((s, x) => s + (Number(x.value) || 0), 0)
+    const allStocks = rows.map(x => ({
+      ticker: x.ticker, region: x.region, cls: x.cls,
+      valueTHB: Math.round(x.value),
+      pctOfStocks: stocksTotal > 0 ? +((x.value / stocksTotal) * 100).toFixed(1) : 0,
+      plPct: Number.isFinite(x.plPct) ? +x.plPct.toFixed(1) : null,
+      divYield: +Number(x.divYield || 0).toFixed(2),
+    }))
+    const holding = {
+      ticker: r.ticker,
+      name: r.name || r.ticker,
+      region: r.region,
+      cls: r.cls,
+      shares: r.shares,
+      costNative: r.costNative,
+      priceNative: r.priceNative,
+      nativeCcy: r.nativeCcy,
+      valueTHB: Math.round(r.value),
+      costTHB: Math.round(r.value - (Number(r.pl) || 0)),
+      plTHB: Math.round(Number(r.pl) || 0),
+      plPct: Number.isFinite(r.plPct) ? +r.plPct.toFixed(1) : null,
+      pctOfStocks: stocksTotal > 0 ? +((r.value / stocksTotal) * 100).toFixed(1) : 0,
+      divYield: +Number(r.divYield || 0).toFixed(2),
+      changePct: Number.isFinite(r.changePct) ? +r.changePct.toFixed(2) : null,
+    }
+    ai.run({
+      lang,
+      kind: 'holding',
+      holding,
+      portfolio: {
+        counts: {
+          stocksTotal: allStocks.length,
+          stocksTH: allStocks.filter(s => s.region === 'TH').length,
+          stocksUS: allStocks.filter(s => s.region !== 'TH').length,
+        },
+        totals: { stocksTHB: Math.round(stocksTotal) },
+        stocks: allStocks,
+      },
+    })
+  }
+
   const handleCheckSplits = async () => {
     if (!portfolio?.id) return
     setSplitModal('loading')
@@ -502,6 +553,14 @@ function LivePortfolioPage({ t, lang, ccy, portfolio, liveHoldings, prices = {},
                       </td>
                       <td>
                         <div style={{ display: "flex", gap: 2, justifyContent: "flex-end" }}>
+                          {aiAvailable && (
+                            <button
+                              onClick={() => analyzeHolding(r)}
+                              disabled={ai.loading}
+                              style={{ background: "none", border: "none", cursor: "pointer", color: "var(--accent-ink)", padding: "4px 6px", borderRadius: 6, lineHeight: 1, display: "inline-flex", alignItems: "center" }}
+                              title={th ? "วิเคราะห์ด้วย AI" : "Analyse with AI"}
+                            ><Icon name="spark" size={14} /></button>
+                          )}
                           <button
                             onClick={() => setSellHolding(r)}
                             style={{ background: "none", border: "none", cursor: "pointer", color: "var(--loss)", padding: "4px 7px", borderRadius: 6, fontSize: 12, fontWeight: 600, lineHeight: 1 }}
@@ -578,6 +637,15 @@ function LivePortfolioPage({ t, lang, ccy, portfolio, liveHoldings, prices = {},
       )}
       {showRealized && (
         <RealizedModal lang={lang} ccy={ccy} realized={realized} onClose={() => setShowRealized(false)} />
+      )}
+
+      {ai.open && (
+        <AiAnalysisModal th={th}
+          title={th ? "วิเคราะห์รายตัวด้วย AI" : "AI per-holding analysis"}
+          loading={ai.loading} error={ai.error} provider={ai.provider}
+          history={ai.history} chatInput={ai.chatInput} chatLoading={ai.chatLoading}
+          onChatInput={ai.setChatInput} onSend={ai.ask} canChat={ai.canChat}
+          onClose={ai.close} onRetry={() => {}} />
       )}
 
       {splitModal && (
