@@ -91,6 +91,8 @@ function LivePortfolioPage({ t, lang, ccy, portfolio, liveHoldings, prices = {},
   useEffect(() => {
     fetch('/api/analyze').then(r => r.json()).then(j => setAiAvailable(!!j?.available)).catch(() => setAiAvailable(false))
   }, [])
+  // ── Investment journal — notes attached to a holding ─────────────────────
+  const [notesHolding, setNotesHolding] = useState(null)   // raw holding row when notes modal is open
 
   // Realized P/L — recompute from all transactions whenever holdings change
   useEffect(() => {
@@ -561,6 +563,20 @@ function LivePortfolioPage({ t, lang, ccy, portfolio, liveHoldings, prices = {},
                               title={th ? "วิเคราะห์ด้วย AI" : "Analyse with AI"}
                             ><Icon name="spark" size={14} /></button>
                           )}
+                          {(() => {
+                            const orig = liveHoldings.find(h => h.id === r._ids?.[0])
+                            const hasNotes = !!(orig?.notes && orig.notes.trim())
+                            return (
+                              <button
+                                onClick={() => orig && setNotesHolding({ ...orig, displayTicker: r.ticker, logo_url: r.logo_url, region: r.region, cls: r.cls })}
+                                style={{ background: "none", border: "none", cursor: "pointer", color: hasNotes ? "var(--accent-ink)" : "var(--ink-4)", padding: "4px 6px", borderRadius: 6, lineHeight: 1, display: "inline-flex", alignItems: "center", position: "relative" }}
+                                title={hasNotes ? (th ? "ดู/แก้ไขโน้ต" : "View/edit notes") : (th ? "เพิ่มโน้ต" : "Add notes")}
+                              >
+                                <Icon name="book" size={14} />
+                                {hasNotes && <span style={{ position: "absolute", top: 3, right: 3, width: 5, height: 5, borderRadius: "50%", background: "var(--accent)" }} />}
+                              </button>
+                            )
+                          })()}
                           <button
                             onClick={() => setSellHolding(r)}
                             style={{ background: "none", border: "none", cursor: "pointer", color: "var(--loss)", padding: "4px 7px", borderRadius: 6, fontSize: 12, fontWeight: 600, lineHeight: 1 }}
@@ -646,6 +662,12 @@ function LivePortfolioPage({ t, lang, ccy, portfolio, liveHoldings, prices = {},
           history={ai.history} chatInput={ai.chatInput} chatLoading={ai.chatLoading}
           onChatInput={ai.setChatInput} onSend={ai.ask} canChat={ai.canChat}
           onClose={ai.close} onRetry={() => {}} />
+      )}
+
+      {notesHolding && (
+        <NotesModal th={th} holding={notesHolding}
+          onClose={() => setNotesHolding(null)}
+          onSaved={async () => { setNotesHolding(null); await refreshHoldings() }} />
       )}
 
       {splitModal && (
@@ -1480,6 +1502,65 @@ function Field({ label, children }) {
         {label}
       </label>
       {children}
+    </div>
+  )
+}
+
+// ─── Investment journal — notes attached to a holding ────────────────────────
+function NotesModal({ th, holding, onClose, onSaved }) {
+  const [text, setText] = useState(holding?.notes || '')
+  const [saving, setSaving] = useState(false)
+  const PLACEHOLDER = th
+    ? `เหตุผลที่ซื้อ:\n\nราคาเป้าหมาย:\n\nStop loss:\n\nความเสี่ยงที่ต้องจับตา:\n\nวันที่จะทบทวน thesis อีกครั้ง:`
+    : `Why I bought:\n\nTarget price:\n\nStop loss:\n\nRisks to watch:\n\nWhen to re-evaluate thesis:`
+  const handleSave = async () => {
+    if (!holding?.id) return
+    setSaving(true)
+    const { error } = await updateHolding(holding.id, { notes: text.trim() })
+    setSaving(false)
+    if (error) { alert(error.message); return }
+    onSaved?.()
+  }
+  return (
+    <div style={{ position: "fixed", inset: 0, zIndex: 1000, background: "rgba(0,0,0,0.45)", display: "flex", alignItems: "center", justifyContent: "center", padding: 16 }}
+      onClick={e => e.target === e.currentTarget && !saving && onClose()}>
+      <div style={{ background: "var(--bg)", borderRadius: 18, padding: 24, width: "100%", maxWidth: 560, maxHeight: "85vh", display: "flex", flexDirection: "column", gap: 14, boxShadow: "0 20px 60px rgba(0,0,0,0.2)" }}>
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 12 }}>
+          <div style={{ display: "flex", alignItems: "center", gap: 10, minWidth: 0 }}>
+            <TickerLogo ticker={holding.displayTicker || holding.ticker} logoUrl={holding.logo_url} region={holding.region} cls={holding.cls} size={36} />
+            <div style={{ minWidth: 0 }}>
+              <h3 style={{ margin: 0, fontSize: 16, fontWeight: 600, display: "flex", alignItems: "center", gap: 6 }}>
+                <Icon name="book" size={15} /> {th ? "บันทึกการลงทุน" : "Investment journal"}
+              </h3>
+              <div className="muted" style={{ fontSize: 11, marginTop: 2 }}>{holding.displayTicker || holding.ticker} · {holding.name}</div>
+            </div>
+          </div>
+          <button onClick={onClose} style={{ background: "none", border: "none", cursor: "pointer", fontSize: 20, color: "var(--ink-3)", padding: 4 }}>✕</button>
+        </div>
+        <p className="muted" style={{ margin: 0, fontSize: 12, lineHeight: 1.5 }}>
+          {th
+            ? "บันทึกความคิดของคุณก่อนซื้อ — กลับมาดูเมื่อพอร์ตขึ้น/ลง เพื่อรู้ว่าตัดสินใจถูกหรือผิดเพราะอะไร"
+            : "Capture your thinking before buying — revisit when the market moves to learn from each decision."}
+        </p>
+        <textarea
+          autoFocus
+          value={text}
+          onChange={e => setText(e.target.value)}
+          placeholder={PLACEHOLDER}
+          rows={12}
+          style={{ width: "100%", padding: "12px 14px", borderRadius: 10, border: "1.5px solid var(--line)", background: "var(--bg)", color: "var(--ink)", outline: "none", fontSize: 13, fontFamily: "inherit", lineHeight: 1.55, resize: "vertical", minHeight: 200, boxSizing: "border-box" }} />
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 12 }}>
+          <span className="muted" style={{ fontSize: 11 }}>{text.length} {th ? "ตัวอักษร" : "characters"}</span>
+          <div style={{ display: "flex", gap: 10 }}>
+            <button className="btn btn-outline" style={{ flex: "0 0 auto", padding: "8px 18px" }} onClick={onClose} disabled={saving}>
+              {th ? "ยกเลิก" : "Cancel"}
+            </button>
+            <button className="btn" style={{ flex: "0 0 auto", padding: "8px 22px" }} onClick={handleSave} disabled={saving}>
+              {saving ? (th ? "กำลังบันทึก…" : "Saving…") : (th ? "บันทึก" : "Save")}
+            </button>
+          </div>
+        </div>
+      </div>
     </div>
   )
 }

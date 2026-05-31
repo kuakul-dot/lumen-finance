@@ -32,11 +32,13 @@ create table if not exists holdings (
   div_yield      numeric default 0,
   div_frequency  integer default 4,
   logo_url     text,
+  notes        text,
   created_at   timestamptz not null default now(),
   updated_at   timestamptz not null default now()
 );
--- Add logo_url to pre-existing holdings tables (idempotent)
+-- Add columns to pre-existing holdings tables (idempotent)
 alter table holdings add column if not exists logo_url text;
+alter table holdings add column if not exists notes text;
 alter table holdings enable row level security;
 drop policy if exists "Users can manage own holdings" on holdings;
 create policy "Users can manage own holdings"
