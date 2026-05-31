@@ -162,20 +162,35 @@ Reply in markdown with sections: ## Why, ## Impact, ## Alternatives, ## Watch-ou
 function buildFollowUpPrompt(portfolio, lang) {
   const totals = portfolio?.totals || {}
   const counts = portfolio?.counts || {}
+  const stocks = portfolio?.stocks || []
   const cashList = portfolio?.cash || []
+  // Pre-compute by-region totals so follow-ups can answer "What % is TH?"
+  // accurately without the model having to re-aggregate the holdings array.
+  const thStocks = stocks.filter(s => s.region === 'TH')
+  const usStocks = stocks.filter(s => s.region !== 'TH')
+  const thValue = thStocks.reduce((sum, s) => sum + (Number(s.valueTHB) || 0), 0)
+  const usValue = usStocks.reduce((sum, s) => sum + (Number(s.valueTHB) || 0), 0)
+  const netWorth = Number(totals.netWorthTHB) || 0
+  const stocksTotal = Number(totals.stocksTHB) || (thValue + usValue)
+  const pct = (v) => netWorth > 0 ? ((v / netWorth) * 100).toFixed(1) : '0'
   const cashSummary = cashList.length
     ? cashList.map(c => `${c.currency} ${c.balanceTHB.toLocaleString()}`).join(', ')
     : 'none'
-  const summary = `Net worth ฿${(totals.netWorthTHB || 0).toLocaleString()} ` +
-    `(stocks ฿${(totals.stocksTHB || 0).toLocaleString()}, cash ฿${(totals.cashTHB || 0).toLocaleString()}). ` +
+  const summary = `Net worth ฿${netWorth.toLocaleString()} ` +
+    `(all stocks ฿${stocksTotal.toLocaleString()} = ${pct(stocksTotal)}% of NW, ` +
+    `Thai stocks ฿${thValue.toLocaleString()} = ${pct(thValue)}% of NW, ` +
+    `US stocks ฿${usValue.toLocaleString()} = ${pct(usValue)}% of NW, ` +
+    `cash ฿${(Number(totals.cashTHB) || 0).toLocaleString()} = ${pct(Number(totals.cashTHB) || 0)}% of NW). ` +
     `${counts.stocksTotal || 0} holdings (${counts.stocksTH || 0} TH, ${counts.stocksUS || 0} US). ` +
     `Cash accounts: ${cashSummary}.`
   return lang === 'th'
     ? `คุณกำลังต่อยอดบทสนทนาเดิม ตอบคำถามผู้ใช้ตรงประเด็น กระชับ เป็นไทยลื่นๆ
 ห้ามแนะนำซื้อ-ขายหุ้นรายตัว ใช้คำว่า "อาจ/ควรพิจารณา" ไม่ใช่ "ต้อง"
+เมื่อพูดถึง "หุ้น TH" หมายถึง **หุ้นไทยเท่านั้น** (ไม่ใช่ stocks total)
 
 ภาพรวมพอร์ตปัจจุบัน: ${summary}`
-    : `Continue the prior conversation. Answer the user's question concisely.
+    : `Continue the prior conversation. Answer concisely.
+"TH stocks" means Thai-listed stocks only, NOT total stocks.
 Never recommend buying or selling specific stocks; use "might/consider" not "should".
 
 Current portfolio: ${summary}`
