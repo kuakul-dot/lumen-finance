@@ -578,7 +578,7 @@ function LivePortfolioPage({ t, lang, ccy, portfolio, liveHoldings, prices = {},
                             onClick={() => setChartHolding(r)}
                             style={{ background: "none", border: "none", cursor: "pointer", color: "var(--ink-3)", padding: "4px 6px", borderRadius: 6, lineHeight: 1, display: "inline-flex", alignItems: "center" }}
                             title={th ? "ดูกราฟ (TradingView)" : "View chart (TradingView)"}
-                          ><Icon name="spark" size={14} style={{ display: "none" }} />📊</button>
+                          ><Icon name="chart" size={14} /></button>
                           {aiAvailable && (
                             <button
                               onClick={() => analyzeHolding(r)}
