@@ -308,14 +308,21 @@ export function ToolsPage({ t, lang, ccy, dataState, liveHoldings = [], prices =
     } catch {}
   }
 
-  // Send the current rebalance state to AI for a plain-Thai explanation
+  // Send the current rebalance state to AI for a plain-Thai explanation.
+  // Builds the same portfolio payload shape as the Dashboard so AI responses
+  // stay consistent across pages (same net worth, same cash split, same %).
   const explainRebalance = () => {
     if (!trades.length) return
-    // Build a privacy-conscious portfolio snapshot (same shape as Dashboard's)
+    const stocksTotal = Math.round(total - cash)
     const groupedStocks = rows.map(r => ({
       ticker: r.ticker, region: r.region, cls: r.cls,
       valueTHB: Math.round(r.value),
-      pctOfNetWorth: total > 0 ? +((r.value / total) * 100).toFixed(1) : 0,
+      pctOfNetWorth: total      > 0 ? +((r.value / total)      * 100).toFixed(1) : 0,
+      pctOfStocks:   stocksTotal > 0 ? +((r.value / stocksTotal) * 100).toFixed(1) : 0,
+    }))
+    const cashList = cashAccounts.map(a => ({
+      currency: a.currency || 'THB',
+      balanceTHB: Math.round((a.currency === 'USD' ? (Number(a.balance) || 0) * fxRate : (Number(a.balance) || 0))),
     }))
     const driftPayload = suggestions.map(s => ({
       name: s.name,
@@ -340,12 +347,15 @@ export function ToolsPage({ t, lang, ccy, dataState, liveHoldings = [], prices =
           stocksTotal: groupedStocks.length,
           stocksTH: groupedStocks.filter(s => s.region === 'TH').length,
           stocksUS: groupedStocks.filter(s => s.region !== 'TH').length,
+          cashAccounts: cashList.length,
         },
         totals: {
           netWorthTHB: Math.round(total),
-          stocksTHB: Math.round(total - (Number(amount) || 0)),
+          stocksTHB: stocksTotal,
+          cashTHB: Math.round(cash),
         },
         stocks: groupedStocks,
+        cash: cashList,
       },
       rebalance: {
         mode,                       // 'deposit' | 'withdraw'
