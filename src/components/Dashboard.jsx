@@ -1,6 +1,8 @@
 import { useState, useMemo, useEffect, useRef } from 'react'
 import { PageHead, Delta, Icon, TickerLogo } from './Nav'
 import { Sparkline, LineChart, Donut } from './Charts'
+import { AiAnalysisModal } from './AiModal'
+import { useAiAnalysis } from '../lib/useAiAnalysis'
 import {
   LUMEN_FMT, LUMEN_DERIVE, LUMEN_HISTORY, LUMEN_GOALS,
   LUMEN_ACTIVITY, LUMEN_UPCOMING, LUMEN_INSIGHTS, LUMEN_FX,
@@ -443,19 +445,10 @@ function LiveDashboardPage({ t, lang, ccy, setRoute, liveHoldings, prices = {}, 
   const [showCashModal, setShowCashModal] = useState(null)
   // ── AI analysis (optional feature — auto-hides when /api/analyze 503s) ──
   const [aiAvailable, setAiAvailable] = useState(false)
-  const [aiOpen, setAiOpen]     = useState(false)
-  const [aiText, setAiText]     = useState('')
-  const [aiLoading, setAiLoading] = useState(false)
-  const [aiError, setAiError]   = useState(null)
-  const [aiProvider, setAiProvider] = useState(null)    // 'gemini' | 'claude' | 'openai'
-  const [aiHistory, setAiHistory] = useState([])        // [{role:'assistant'|'user', content:'...'}, ...]
-  const [aiPayload, setAiPayload] = useState(null)      // snapshot of portfolio sent on initial call
-  const [chatInput, setChatInput] = useState('')
-  const [chatLoading, setChatLoading] = useState(false)
+  const ai = useAiAnalysis()
   useEffect(() => {
     fetch('/api/analyze').then(r => r.json()).then(j => {
       setAiAvailable(!!j?.available)
-      if (j?.provider) setAiProvider(j.provider)
     }).catch(() => setAiAvailable(false))
   }, [])
   const [goals, setGoals] = useState([])
@@ -827,17 +820,7 @@ function LiveDashboardPage({ t, lang, ccy, setRoute, liveHoldings, prices = {}, 
 
   // Run an AI portfolio analysis with a privacy-conscious payload
   // (no names / labels / account IDs — just structured ticker/weight/return).
-  const runAi = async () => {
-    setAiOpen(true); setAiLoading(true); setAiError(null); setAiText('')
-    setAiHistory([]); setChatInput('')
-    const DAILY_CAP = 20   // sanity cap — Anthropic spend limit is the real safety net
-    const dayKey = `lumen.aiCount.${new Date().toISOString().slice(0,10)}`
-    const used = Number(localStorage.getItem(dayKey) || 0)
-    if (used >= DAILY_CAP) {
-      setAiLoading(false)
-      setAiError(th ? `ใช้ครบ ${DAILY_CAP} ครั้งวันนี้แล้ว · กลับมาพรุ่งนี้` : `Daily quota reached (${DAILY_CAP} / day) · try again tomorrow`)
-      return
-    }
+  const runAi = () => {
     const groupedStocks = groupRowsByTicker(rows).map(r => ({
       ticker:   r.ticker,
       region:   r.region,
@@ -873,74 +856,7 @@ function LiveDashboardPage({ t, lang, ccy, setRoute, liveHoldings, prices = {}, 
         cash: cashList,
       },
     }
-    try {
-      const r = await fetch('/api/analyze', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(payload),
-      })
-      if (!r.ok) {
-        const j = await r.json().catch(() => ({}))
-        throw new Error(j.error || `HTTP ${r.status}`)
-      }
-      const provider = r.headers.get('X-Provider')
-      if (provider) setAiProvider(provider)
-      setAiPayload(payload)
-      // Stream the response — each chunk gets appended to the live message
-      // so the user sees text appear progressively (also dodges Vercel's
-      // edge timeout because data keeps flowing).
-      setAiLoading(false)
-      setAiHistory([{ role: 'assistant', content: '' }])
-      const acc = await consumeStream(r, (chunk, full) => {
-        setAiHistory([{ role: 'assistant', content: full }])
-      })
-      setAiText(acc)
-      localStorage.setItem(dayKey, String(used + 1))
-    } catch (e) {
-      setAiError(e?.message || 'failed')
-      setAiLoading(false)
-    }
-  }
-
-  // Send a follow-up question that continues the analysis conversation
-  const askFollowUp = async () => {
-    const question = chatInput.trim()
-    if (!question || chatLoading || !aiPayload) return
-    setChatInput('')
-    setAiError(null)
-    const next = [...aiHistory, { role: 'user', content: question }]
-    setAiHistory(next)
-    setChatLoading(true)
-    const dayKey = `lumen.aiCount.${new Date().toISOString().slice(0,10)}`
-    const used = Number(localStorage.getItem(dayKey) || 0)
-    if (used >= 20) {
-      setChatLoading(false)
-      setAiError(th ? 'ใช้ครบ 20 ครั้งวันนี้แล้ว · กลับมาพรุ่งนี้' : 'Daily quota reached (20 / day) · try again tomorrow')
-      return
-    }
-    try {
-      const r = await fetch('/api/analyze', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ ...aiPayload, history: next }),
-      })
-      if (!r.ok) {
-        const j = await r.json().catch(() => ({}))
-        throw new Error(j.error || `HTTP ${r.status}`)
-      }
-      const provider = r.headers.get('X-Provider')
-      if (provider) setAiProvider(provider)
-      setChatLoading(false)
-      setAiHistory([...next, { role: 'assistant', content: '' }])
-      await consumeStream(r, (chunk, full) => {
-        setAiHistory([...next, { role: 'assistant', content: full }])
-      })
-      localStorage.setItem(dayKey, String(used + 1))
-    } catch (e) {
-      setAiError(e?.message || 'failed')
-      setAiHistory(aiHistory)
-      setChatLoading(false)
-    }
+    ai.run(payload)
   }
 
   if (rows.length === 0) {
@@ -972,9 +888,9 @@ function LiveDashboardPage({ t, lang, ccy, setRoute, liveHoldings, prices = {}, 
         right={
           <div style={{ display: "flex", gap: 8 }}>
             {aiAvailable && (
-              <button className="btn btn-outline btn-sm" onClick={runAi} disabled={aiLoading}
+              <button className="btn btn-outline btn-sm" onClick={runAi} disabled={ai.loading}
                 title={th ? "วิเคราะห์พอร์ตด้วย AI" : "Analyse portfolio with AI"}>
-                <Icon name="spark" size={14} /> {aiLoading ? (th ? "กำลังวิเคราะห์…" : "Analysing…") : (th ? "วิเคราะห์ด้วย AI" : "AI analysis")}
+                <Icon name="spark" size={14} /> {ai.loading ? (th ? "กำลังวิเคราะห์…" : "Analysing…") : (th ? "วิเคราะห์ด้วย AI" : "AI analysis")}
               </button>
             )}
             <button className="btn btn-outline btn-sm" onClick={() => setShowCashModal('add')}>
@@ -1411,174 +1327,20 @@ function LiveDashboardPage({ t, lang, ccy, setRoute, liveHoldings, prices = {}, 
         onSaved={async () => { setShowCashModal(null); await refreshCashAccounts() }}
       />
     )}
-    {aiOpen && (
-      <AiAnalysisModal th={th} loading={aiLoading} error={aiError} provider={aiProvider}
-        history={aiHistory} chatInput={chatInput} chatLoading={chatLoading}
-        onChatInput={setChatInput} onSend={askFollowUp}
-        canChat={!!aiPayload && !aiLoading && aiHistory.length > 0}
-        onClose={() => setAiOpen(false)} onRetry={runAi} />
+    {ai.open && (
+      <AiAnalysisModal th={th}
+        title={th ? "วิเคราะห์พอร์ตด้วย AI" : "AI portfolio analysis"}
+        loading={ai.loading} error={ai.error} provider={ai.provider}
+        history={ai.history} chatInput={ai.chatInput} chatLoading={ai.chatLoading}
+        onChatInput={ai.setChatInput} onSend={ai.ask}
+        canChat={ai.canChat}
+        onClose={ai.close} onRetry={runAi} />
     )}
   </>
   )
 }
 
-// ─── AI analysis modal — minimal markdown renderer for ##, bullets, **bold** ──
-// Read a Response.body stream chunk by chunk, passing each chunk + the
-// cumulative text to onChunk. Returns the full text when the stream ends.
-async function consumeStream(response, onChunk) {
-  const reader = response.body.getReader()
-  const decoder = new TextDecoder()
-  let acc = ''
-  while (true) {
-    const { done, value } = await reader.read()
-    if (done) break
-    const chunk = decoder.decode(value, { stream: true })
-    acc += chunk
-    onChunk(chunk, acc)
-  }
-  return acc
-}
-
-function AiAnalysisModal({ th, loading, error, provider, history = [], chatInput, chatLoading, canChat, onChatInput, onSend, onClose, onRetry }) {
-  const providerLabel = { gemini: 'Google Gemini', claude: 'Anthropic Claude', openai: 'OpenAI' }[provider] || 'AI'
-  const scrollRef = useRef(null)
-  useEffect(() => {
-    // Auto-scroll to latest message
-    if (scrollRef.current) scrollRef.current.scrollTop = scrollRef.current.scrollHeight
-  }, [history.length, chatLoading])
-  const handleKey = (e) => {
-    if (e.key === 'Enter' && !e.shiftKey) {
-      e.preventDefault()
-      onSend?.()
-    }
-  }
-  return (
-    <div onClick={e => e.target === e.currentTarget && onClose()}
-      style={{ position: "fixed", inset: 0, zIndex: 1000, background: "rgba(0,0,0,0.45)", display: "flex", alignItems: "center", justifyContent: "center", padding: 16 }}>
-      <div style={{ background: "var(--bg)", borderRadius: 18, padding: 24, width: "100%", maxWidth: 580, maxHeight: "88vh", display: "flex", flexDirection: "column", gap: 12, boxShadow: "0 20px 60px rgba(0,0,0,0.2)" }}>
-        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 12 }}>
-          <div>
-            <h3 style={{ margin: 0, fontSize: 16, fontWeight: 600, display: "flex", alignItems: "center", gap: 8 }}>
-              <Icon name="spark" size={15} /> {th ? "วิเคราะห์พอร์ตด้วย AI" : "AI portfolio analysis"}
-            </h3>
-            {provider && (
-              <div style={{ marginTop: 4, fontSize: 10.5, color: "var(--ink-3)", fontFamily: "var(--font-mono)" }}>
-                {th ? "ขับเคลื่อนโดย" : "Powered by"} <span style={{ color: "var(--accent-ink)", fontWeight: 600 }}>{providerLabel}</span>
-              </div>
-            )}
-          </div>
-          <button onClick={onClose} style={{ background: "none", border: "none", cursor: "pointer", fontSize: 20, color: "var(--ink-3)", padding: 4 }}>✕</button>
-        </div>
-        <div ref={scrollRef} style={{ overflow: "auto", flex: 1, fontSize: 13, lineHeight: 1.6, display: "flex", flexDirection: "column", gap: 14 }}>
-          {loading && (
-            <div style={{ padding: "32px 0", textAlign: "center", color: "var(--ink-3)", fontSize: 13 }}>
-              {th ? "กำลังให้ AI วิเคราะห์… ใช้เวลาประมาณ 5-15 วินาที" : "AI is analysing… (5-15 sec)"}
-            </div>
-          )}
-          {history.map((m, i) => (
-            m.role === 'assistant' ? (
-              <div key={i}><Markdownish text={m.content} /></div>
-            ) : (
-              <div key={i} style={{ alignSelf: "flex-end", maxWidth: "85%", background: "var(--accent-soft)", color: "var(--accent-ink)", padding: "10px 14px", borderRadius: "14px 14px 4px 14px", fontSize: 13 }}>
-                {m.content}
-              </div>
-            )
-          ))}
-          {chatLoading && (
-            <div style={{ alignSelf: "flex-start", color: "var(--ink-3)", fontSize: 12, fontStyle: "italic", padding: "4px 0" }}>
-              {th ? "AI กำลังคิด…" : "AI is thinking…"}
-            </div>
-          )}
-          {error && (() => {
-            const rateLimited = /429|rate_limit/i.test(error)
-            const timedOut    = /504|timeout|timed out/i.test(error)
-            return (
-              <div style={{ padding: 14, borderRadius: 10, background: "var(--loss-soft)", color: "var(--loss)", fontSize: 13, display: "flex", flexDirection: "column", gap: 6 }}>
-                <div>⚠ {error}</div>
-                {timedOut && (
-                  <div style={{ fontSize: 11, opacity: 0.85 }}>
-                    💡 {th ? "AI ตอบช้าเกินเวลา · ลองส่งคำถามที่สั้นลง หรือกดส่งใหม่อีกครั้ง" : "AI took too long · try a shorter question or send again"}
-                  </div>
-                )}
-                {rateLimited && !timedOut && (
-                  <div style={{ fontSize: 11, opacity: 0.85 }}>
-                    💡 {th ? "ถ้าเป็น rate limit จริง รอ 30-60 วินาทีแล้วลองใหม่" : "If it's a real rate limit, wait 30-60 seconds and retry"}
-                  </div>
-                )}
-              </div>
-            )
-          })()}
-        </div>
-        {/* Chat input — appears only after the initial analysis succeeds */}
-        {canChat && (
-          <div style={{ display: "flex", gap: 8, alignItems: "flex-end" }}>
-            <textarea
-              value={chatInput}
-              onChange={e => onChatInput?.(e.target.value)}
-              onKeyDown={handleKey}
-              placeholder={th ? "ถามต่อ เช่น 'ทำไม US ถึงเสี่ยง?', 'ถ้าซื้อ Bond เพิ่มดีไหม?'" : "Ask a follow-up, e.g. 'Why is US risky?', 'Should I add bonds?'"}
-              rows={1}
-              disabled={chatLoading}
-              style={{ flex: 1, padding: "10px 12px", borderRadius: 10, border: "1.5px solid var(--line)", background: "var(--bg)", color: "var(--ink)", outline: "none", fontSize: 13, fontFamily: "inherit", resize: "none", maxHeight: 120, lineHeight: 1.4 }} />
-            <button className="btn" disabled={chatLoading || !chatInput.trim()} onClick={onSend}
-              style={{ padding: "10px 14px", flexShrink: 0 }}>
-              {th ? "ส่ง" : "Send"}
-            </button>
-          </div>
-        )}
-        <div style={{ display: "flex", gap: 10 }}>
-          {error && <button className="btn btn-outline" style={{ flex: 1 }} onClick={onRetry}>{th ? "ลองอีกครั้ง" : "Retry"}</button>}
-          <button className="btn btn-outline" style={{ flex: 1 }} onClick={onClose}>{th ? "ปิด" : "Close"}</button>
-        </div>
-        <p className="muted" style={{ margin: 0, fontSize: 10, textAlign: "center" }}>
-          {th ? "ข้อมูลพอร์ตถูกส่งไปยังผู้ให้บริการ AI · ไม่มีชื่อ/อีเมล/เลขบัญชี" : "Portfolio data is sent to the AI provider · no names/emails/account IDs"}
-        </p>
-      </div>
-    </div>
-  )
-}
-
-function Markdownish({ text }) {
-  // Minimal renderer: ## heading, * / - bullets, **bold**, blank line = paragraph
-  const blocks = []
-  let listBuf = null
-  text.split('\n').forEach((raw, i) => {
-    const line = raw.trimEnd()
-    if (/^\s*$/.test(line)) {
-      if (listBuf) { blocks.push({ t: 'list', items: listBuf }); listBuf = null }
-      return
-    }
-    if (/^##\s+/.test(line)) {
-      if (listBuf) { blocks.push({ t: 'list', items: listBuf }); listBuf = null }
-      blocks.push({ t: 'h', text: line.replace(/^##\s+/, '') })
-      return
-    }
-    if (/^\s*[-*]\s+/.test(line)) {
-      ;(listBuf = listBuf || []).push(line.replace(/^\s*[-*]\s+/, ''))
-      return
-    }
-    if (listBuf) { blocks.push({ t: 'list', items: listBuf }); listBuf = null }
-    blocks.push({ t: 'p', text: line })
-  })
-  if (listBuf) blocks.push({ t: 'list', items: listBuf })
-  const inline = (s) => {
-    const parts = s.split(/(\*\*[^*]+\*\*)/g)
-    return parts.map((p, i) => p.startsWith('**') ? <strong key={i}>{p.slice(2, -2)}</strong> : <span key={i}>{p}</span>)
-  }
-  return (
-    <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
-      {blocks.map((b, i) => {
-        if (b.t === 'h') return <h4 key={i} style={{ margin: "8px 0 2px", fontSize: 14, fontWeight: 600, color: "var(--ink)" }}>{inline(b.text)}</h4>
-        if (b.t === 'list') return (
-          <ul key={i} style={{ margin: 0, paddingLeft: 18, display: "flex", flexDirection: "column", gap: 4 }}>
-            {b.items.map((it, j) => <li key={j}>{inline(it)}</li>)}
-          </ul>
-        )
-        return <p key={i} style={{ margin: 0 }}>{inline(b.text)}</p>
-      })}
-    </div>
-  )
-}
+// AiAnalysisModal / Markdownish / consumeStream now live in ./AiModal.jsx
 
 // ─── Cash Account Modal ───────────────────────────────────────────────────────
 function CashAccountModal({ lang, ccy, portfolioId, account, onClose, onSaved }) {

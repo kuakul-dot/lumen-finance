@@ -41,17 +41,20 @@ export default async function handler(request) {
 
   const lang = body?.lang === 'en' ? 'en' : 'th'
   const portfolio = body?.portfolio || {}
+  const kind = body?.kind || 'overview'
+  const extra = body?.rebalance || null
   // Limit chat history to the last 6 messages (≈3 Q&A pairs).
   const HISTORY_TAIL = 6
   const rawHistory = Array.isArray(body?.history) ? body.history : []
   const history = rawHistory.filter(m => m && m.role && m.content).slice(-HISTORY_TAIL)
   while (history.length && history[0].role === 'user') history.shift()
-  // For follow-ups, the initial analysis already lives in the chat history —
-  // re-sending the full portfolio JSON + structured-reply instructions wastes
-  // tokens and pushes the request over Vercel's edge timeout. Use a compact
-  // continuation prompt instead.
   const isFollowUp = history.length > 0
-  const prompt = isFollowUp ? buildFollowUpPrompt(portfolio, lang) : buildPrompt(portfolio, lang)
+  // Pick the right prompt builder based on what the client asked for. Follow-ups
+  // always use the compact continuation prompt regardless of kind.
+  let prompt
+  if (isFollowUp)               prompt = buildFollowUpPrompt(portfolio, lang)
+  else if (kind === 'rebalance') prompt = buildRebalancePrompt(portfolio, extra, lang)
+  else                          prompt = buildPrompt(portfolio, lang)
   const messages = [{ role: 'user', content: prompt }, ...history]
   // Cap output too — follow-ups are answers to single questions, not the
   // 4-section structured analysis the initial call asks for.
@@ -85,6 +88,72 @@ export default async function handler(request) {
   } catch (e) {
     return err(502, `provider error: ${e.message || String(e)}`)
   }
+}
+
+// Explain a set of suggested rebalancing trades — used by the Tools page.
+function buildRebalancePrompt(portfolio, rb, lang) {
+  rb = rb || {}
+  const totals = portfolio?.totals || {}
+  const counts = portfolio?.counts || {}
+  const driftSummary = (rb.drift || []).map(d =>
+    `${d.name}: เป้า ${d.targetPct}%, ปัจจุบัน ${d.nowPct}%, หลังปรับ ${d.afterPct}% (ส่วนต่าง ${d.diffPct >= 0 ? '+' : ''}${d.diffPct}%)`
+  ).join('\n')
+  const tradeSummary = (rb.trades || []).map(t =>
+    `${t.action === 'Sell' ? 'ขาย' : 'ซื้อ'} ${t.ticker} ${t.shares} หุ้น @ ${t.priceNative} ${t.nativeCcy} (≈ ฿${Math.round(t.amount).toLocaleString()})`
+  ).join('\n')
+  const modeText = rb.mode === 'withdraw' ? 'ถอนเงินออก' : 'เติมเงินเข้า'
+  const cashRemainingTxt = typeof rb.cashRemaining === 'number'
+    ? `เงินสดคงเหลือหลังเทรด: ฿${Math.round(rb.cashRemaining).toLocaleString()}`
+    : ''
+
+  return lang === 'th'
+    ? `คุณคือผู้ช่วยอธิบายแผน rebalance ของพอร์ตการลงทุน ตอบสั้นกระชับเป็นไทยลื่นๆ ไม่ใช่ที่ปรึกษาทางการเงิน
+
+ภาพรวมพอร์ต:
+- Net worth ฿${(totals.netWorthTHB || 0).toLocaleString()} (หุ้น ฿${(totals.stocksTHB || 0).toLocaleString()}, เงินสด ฿${(totals.cashTHB || 0).toLocaleString()})
+- หลักทรัพย์ทั้งหมด ${counts.stocksTotal || 0} (TH ${counts.stocksTH || 0}, US ${counts.stocksUS || 0})
+
+โหมด: ${modeText} ฿${(rb.amount || 0).toLocaleString()}
+ขายได้: ${rb.allowSales ? 'ใช่' : 'ไม่'}
+Tolerance band: ${rb.band || 0}%
+
+เป้าหมาย vs หลังปรับ:
+${driftSummary || '(ไม่มี)'}
+
+รายการซื้อ-ขายที่แนะนำ (${(rb.trades || []).length} รายการ):
+${tradeSummary || '(ไม่มี)'}
+${cashRemainingTxt}
+
+กรุณาอธิบาย markdown 4 หัวข้อ:
+
+## เหตุผลของแผน (Why)
+ทำไมระบบแนะนำ trade เหล่านี้ — bullet 2-3 ข้อ โยงกับ drift และ target
+
+## ผลกระทบต่อพอร์ต (Impact)
+หลัง execute trades จะเกิดอะไร — เช่น risk concentration ลด, FX exposure เปลี่ยน, dividend stream เปลี่ยนแปลง
+
+## ทางเลือกที่อาจพิจารณา (Alternatives)
+2-3 ทางเลือกที่แตกต่างจากแผนระบบ — เช่น "ขายตัวอื่นแทน", "ใช้ DCA แทน lump-sum", "เลื่อนทำเดือนหน้า"
+
+## ข้อควรระวัง (Watch-outs)
+สิ่งที่ต้องคิดก่อนกดทำ — ค่าธรรมเนียม, ภาษี (capital gains TH withholding), market timing, FX timing — bullet 2-3 ข้อ
+
+ลงท้ายด้วย: "บทวิเคราะห์นี้สร้างโดย AI เพื่อการศึกษาเท่านั้น ไม่ใช่คำแนะนำการลงทุน"
+
+ห้ามแนะนำซื้อ-ขายหุ้นรายตัวอื่นนอกเหนือจากในแผน · ใช้ "อาจ/ควรพิจารณา" ไม่ใช่ "ต้อง"`
+    : `You are a rebalancing-plan explainer. Reply concisely in English.
+
+Portfolio: net worth ฿${(totals.netWorthTHB || 0).toLocaleString()}, ${counts.stocksTotal || 0} holdings.
+Mode: ${rb.mode === 'withdraw' ? 'withdraw' : 'deposit'} ฿${(rb.amount || 0).toLocaleString()}, sales ${rb.allowSales ? 'allowed' : 'disabled'}, tolerance ${rb.band || 0}%.
+
+Target vs after:
+${driftSummary || '(none)'}
+
+Suggested trades:
+${tradeSummary || '(none)'}
+${cashRemainingTxt}
+
+Reply in markdown with sections: ## Why, ## Impact, ## Alternatives, ## Watch-outs (each 2-3 bullets). End with: "This is an AI-generated analysis for education only — not investment advice." Use "might/consider"; never recommend specific buys/sells outside the plan.`
 }
 
 // Compact prompt for follow-up turns — the AI already saw the full data on

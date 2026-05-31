@@ -1,5 +1,7 @@
 import { useState, useMemo, useEffect } from 'react'
 import { PageHead, Icon, TickerLogo } from './Nav'
+import { AiAnalysisModal } from './AiModal'
+import { useAiAnalysis } from '../lib/useAiAnalysis'
 import { LUMEN_FMT, LUMEN_DERIVE, LUMEN_TARGETS, LUMEN_FX } from '../data'
 import { deriveHoldings } from '../lib/db'
 
@@ -87,6 +89,12 @@ export function ToolsPage({ t, lang, ccy, dataState, liveHoldings = [], prices =
   const [band,       setBand]       = useState(loadBand)   // tolerance (percentage points)
   const [copied,     setCopied]     = useState(false)
   const [openRow,    setOpenRow]    = useState(null)   // which drift row is expanded to show ฿ amounts
+  // ── AI rebalance explainer (optional — hides when /api/analyze 503s) ──
+  const ai = useAiAnalysis()
+  const [aiAvailable, setAiAvailable] = useState(false)
+  useEffect(() => {
+    fetch('/api/analyze').then(r => r.json()).then(j => setAiAvailable(!!j?.available)).catch(() => setAiAvailable(false))
+  }, [])
   const [targetMode, setTargetMode] = useState(() => {
     try { const m = localStorage.getItem("lumen_rebalance_mode"); return m === "hybrid" ? "hybrid" : "class" } catch { return "class" }
   })
@@ -298,6 +306,57 @@ export function ToolsPage({ t, lang, ccy, dataState, liveHoldings = [], prices =
       await navigator.clipboard.writeText(text)
       setCopied(true); setTimeout(() => setCopied(false), 1500)
     } catch {}
+  }
+
+  // Send the current rebalance state to AI for a plain-Thai explanation
+  const explainRebalance = () => {
+    if (!trades.length) return
+    // Build a privacy-conscious portfolio snapshot (same shape as Dashboard's)
+    const groupedStocks = rows.map(r => ({
+      ticker: r.ticker, region: r.region, cls: r.cls,
+      valueTHB: Math.round(r.value),
+      pctOfNetWorth: total > 0 ? +((r.value / total) * 100).toFixed(1) : 0,
+    }))
+    const driftPayload = suggestions.map(s => ({
+      name: s.name,
+      targetPct: +s.tgtPct.toFixed(1),
+      nowPct: +s.curPct.toFixed(1),
+      afterPct: newTotal > 0 ? +((s.target / newTotal) * 100).toFixed(1) : 0,
+      diffPct: +(s.curPct - s.tgtPct).toFixed(1),
+    }))
+    const tradesPayload = trades.map(t => ({
+      action: t.action,
+      ticker: t.ticker,
+      shares: t.shares,
+      priceNative: t.priceNative,
+      nativeCcy: t.nativeCcy,
+      amount: Math.round(t.amount),
+    }))
+    ai.run({
+      lang,
+      kind: 'rebalance',
+      portfolio: {
+        counts: {
+          stocksTotal: groupedStocks.length,
+          stocksTH: groupedStocks.filter(s => s.region === 'TH').length,
+          stocksUS: groupedStocks.filter(s => s.region !== 'TH').length,
+        },
+        totals: {
+          netWorthTHB: Math.round(total),
+          stocksTHB: Math.round(total - (Number(amount) || 0)),
+        },
+        stocks: groupedStocks,
+      },
+      rebalance: {
+        mode,                       // 'deposit' | 'withdraw'
+        amount: Number(amount) || 0,
+        allowSales,
+        band,
+        drift: driftPayload,
+        trades: tradesPayload,
+        cashRemaining: Math.round(cashRemaining),
+      },
+    })
   }
 
   if (dataState === "empty") {
@@ -608,9 +667,17 @@ export function ToolsPage({ t, lang, ccy, dataState, liveHoldings = [], prices =
 
           {/* Suggested trades */}
           <div className="card">
-            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 16 }}>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 16, gap: 8 }}>
               <h3 className="section-title">{t.tools.suggestion}</h3>
-              {showResult && <span className="chip">{trades.length} {th ? "รายการ" : "trades"}</span>}
+              <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                {showResult && <span className="chip">{trades.length} {th ? "รายการ" : "trades"}</span>}
+                {aiAvailable && showResult && trades.length > 0 && (
+                  <button className="btn btn-outline btn-sm" onClick={explainRebalance} disabled={ai.loading}
+                    title={th ? "ให้ AI อธิบายแผน rebalance นี้" : "Have AI explain this rebalance plan"}>
+                    <Icon name="spark" size={13} /> {ai.loading ? (th ? "กำลังคิด…" : "Thinking…") : (th ? "อธิบายด้วย AI" : "Explain with AI")}
+                  </button>
+                )}
+              </div>
             </div>
             {!showResult ? (
               <div className="empty" style={{ padding: "40px 16px" }}>
@@ -723,6 +790,14 @@ export function ToolsPage({ t, lang, ccy, dataState, liveHoldings = [], prices =
           </div>
         )
       })()}
+      {ai.open && (
+        <AiAnalysisModal th={th}
+          title={th ? "อธิบายแผน Rebalance ด้วย AI" : "AI rebalance explainer"}
+          loading={ai.loading} error={ai.error} provider={ai.provider}
+          history={ai.history} chatInput={ai.chatInput} chatLoading={ai.chatLoading}
+          onChatInput={ai.setChatInput} onSend={ai.ask} canChat={ai.canChat}
+          onClose={ai.close} onRetry={explainRebalance} />
+      )}
     </div>
   )
 }
