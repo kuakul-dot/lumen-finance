@@ -309,6 +309,9 @@ export default function App() {
         dataError={dataError}
         retryLoad={() => session?.user && loadPortfolioData(session.user.id)}
         fxRate={fxRate}
+        cashAccounts={cashAccounts}
+        refreshCashAccounts={refreshCashAccounts}
+        session={session}
       />
     )
   } else if (route === "analytics") {

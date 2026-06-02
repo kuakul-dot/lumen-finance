@@ -2,7 +2,7 @@
 import { PageHead, Delta, Icon, TickerLogo } from './Nav'
 import { Sparkline } from './Charts'
 import { LUMEN_FMT, LUMEN_DERIVE } from '../data'
-import { addHolding, updateHolding, deleteHolding, deriveHoldings, addTransaction, syncHoldingsFromTransactions, rebuildHolding, rebuildAllHoldings, updateHoldingMeta, getTransactions, getAllTransactions, computeRealized, updateTransaction, deleteTransaction, deleteTransactionsByTicker, applySplit } from '../lib/db'
+import { addHolding, updateHolding, deleteHolding, deriveHoldings, addTransaction, syncHoldingsFromTransactions, rebuildHolding, rebuildAllHoldings, updateHoldingMeta, getTransactions, getAllTransactions, computeRealized, updateTransaction, deleteTransaction, deleteTransactionsByTicker, applySplit, getGoals, upsertGoal, deleteGoal, upsertCashAccount, deleteCashAccount } from '../lib/db'
 import { fetchSplits, toYahooSymbol, fetchHistory } from '../lib/prices'
 import { computeTA } from '../lib/ta'
 import { AiAnalysisModal } from './AiModal'
@@ -10,7 +10,7 @@ import { useAiAnalysis } from '../lib/useAiAnalysis'
 import { TradingViewChart } from './TradingViewChart'
 import { CalcInput } from './CalcInput'
 
-export function PortfolioPage({ t, lang, ccy, setRoute, dataState, portfolio, liveHoldings = [], prices = {}, refreshHoldings, loadingData, dataError, retryLoad, fxRate = 36 }) {
+export function PortfolioPage({ t, lang, ccy, setRoute, dataState, portfolio, liveHoldings = [], prices = {}, refreshHoldings, loadingData, dataError, retryLoad, fxRate = 36, cashAccounts = [], refreshCashAccounts, session }) {
   const [showAdd, setShowAdd] = useState(false)
   const th = lang === "th"
 
@@ -63,6 +63,9 @@ export function PortfolioPage({ t, lang, ccy, setRoute, dataState, portfolio, li
         showAdd={showAdd}
         setShowAdd={setShowAdd}
         fxRate={fxRate}
+        cashAccounts={cashAccounts}
+        refreshCashAccounts={refreshCashAccounts}
+        session={session}
       />
     )
   }
@@ -72,7 +75,7 @@ export function PortfolioPage({ t, lang, ccy, setRoute, dataState, portfolio, li
 }
 
 // ─── Live Portfolio ──────────────────────────────────────────────────────────
-function LivePortfolioPage({ t, lang, ccy, portfolio, liveHoldings, prices = {}, refreshHoldings, loadingData, showAdd, setShowAdd, fxRate = 36 }) {
+function LivePortfolioPage({ t, lang, ccy, portfolio, liveHoldings, prices = {}, refreshHoldings, loadingData, showAdd, setShowAdd, fxRate = 36, cashAccounts = [], refreshCashAccounts, session }) {
   const th = lang === "th"
   const [tab, setTab] = useState("holdings")
   const [deleting, setDeleting] = useState(null)
@@ -412,13 +415,33 @@ function LivePortfolioPage({ t, lang, ccy, portfolio, liveHoldings, prices = {},
         <button className={tab === "holdings" ? "on" : ""} onClick={() => setTab("holdings")}>
           {th ? "หลักทรัพย์" : "Holdings"} {allGrouped.length > 0 && <span style={{ opacity: 0.6, marginLeft: 4 }}>{allGrouped.length}</span>}
         </button>
+        <button className={tab === "dividends" ? "on" : ""} onClick={() => setTab("dividends")}>
+          {th ? "ปันผล" : "Dividends"}
+        </button>
+        <button className={tab === "goals" ? "on" : ""} onClick={() => setTab("goals")}>
+          {th ? "เป้าหมาย" : "Goals"}
+        </button>
+        <button className={tab === "cash" ? "on" : ""} onClick={() => setTab("cash")}>
+          {th ? "เงินสด" : "Cash"} {cashAccounts.length > 0 && <span style={{ opacity: 0.6, marginLeft: 4 }}>{cashAccounts.length}</span>}
+        </button>
+        <button className={tab === "categories" ? "on" : ""} onClick={() => setTab("categories")}>
+          {th ? "หมวดหมู่" : "Categories"}
+        </button>
         <button className={tab === "transactions" ? "on" : ""} onClick={() => setTab("transactions")}>
-          {th ? "ประวัติธุรกรรม" : "Transactions"}
+          {th ? "ธุรกรรม" : "Transactions"}
         </button>
       </div>
 
       {tab === "transactions" ? (
         <TransactionsTab transactions={transactions} holdings={liveHoldings} loading={txLoading} lang={lang} ccy={ccy} fxRate={fxRate} onReload={async () => { await loadTransactions(); await refreshHoldings?.() }} portfolioId={portfolio?.id} />
+      ) : tab === "dividends" ? (
+        <DividendsTab rows={rows} lang={lang} ccy={ccy} fxRate={fxRate} />
+      ) : tab === "goals" ? (
+        <GoalsTab lang={lang} ccy={ccy} portfolioId={portfolio?.id} userId={session?.user?.id} liveHoldings={liveHoldings} prices={prices} fxRate={fxRate} />
+      ) : tab === "cash" ? (
+        <CashTab lang={lang} ccy={ccy} portfolioId={portfolio?.id} cashAccounts={cashAccounts} refreshCashAccounts={refreshCashAccounts} fxRate={fxRate} />
+      ) : tab === "categories" ? (
+        <CategoriesTab rows={rows} lang={lang} ccy={ccy} fxRate={fxRate} />
       ) : rows.length === 0 ? (
         <div className="card empty">
           <h2 className="display" style={{ fontSize: 28, margin: 0 }}>
@@ -2579,6 +2602,433 @@ function ImportPDFModal({ lang, portfolioId, onClose, onImported }) {
             )}
           </div>
         )}
+      </div>
+    </div>
+  )
+}
+
+// ─── Dividends Tab ───────────────────────────────────────────────────────────
+function DividendsTab({ rows, lang, ccy, fxRate }) {
+  const th = lang === "th"
+  const FMT = LUMEN_FMT
+  const divRows = useMemo(() => {
+    return [...rows]
+      .filter(r => r.divYield > 0)
+      .map(r => ({
+        ...r,
+        annualDiv: r.value * (r.divYield / 100),
+        perShare: r.priceNative * (r.divYield / 100) / (r.divFrequency || 1),
+      }))
+      .sort((a, b) => b.annualDiv - a.annualDiv)
+  }, [rows])
+
+  const totalAnnual = divRows.reduce((s, r) => s + r.annualDiv, 0)
+  const totalValue  = rows.reduce((s, r) => s + r.value, 0)
+  const blendedYield = totalValue > 0 ? (totalAnnual / totalValue) * 100 : 0
+
+  if (divRows.length === 0)
+    return <div className="card empty"><p className="muted">{th ? "ไม่มีหลักทรัพย์ที่จ่ายปันผล" : "No dividend-paying holdings"}</p></div>
+
+  return (
+    <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
+      {/* Summary */}
+      <div className="card" style={{ display: "grid", gridTemplateColumns: "repeat(3,1fr)", gap: 16 }}>
+        <div>
+          <div className="label-up" style={{ fontSize: 10, marginBottom: 4 }}>{th ? "ปันผลรายปี (คาดการณ์)" : "Est. annual dividend"}</div>
+          <div style={{ fontSize: 22, fontWeight: 700, fontFamily: "var(--font-display)" }}>{FMT.money(totalAnnual, ccy, { compact: true })}</div>
+        </div>
+        <div>
+          <div className="label-up" style={{ fontSize: 10, marginBottom: 4 }}>{th ? "Yield รวม" : "Blended yield"}</div>
+          <div style={{ fontSize: 22, fontWeight: 700, fontFamily: "var(--font-display)" }}>{blendedYield.toFixed(2)}%</div>
+        </div>
+        <div>
+          <div className="label-up" style={{ fontSize: 10, marginBottom: 4 }}>{th ? "หลักทรัพย์จ่ายปันผล" : "Dividend payers"}</div>
+          <div style={{ fontSize: 22, fontWeight: 700, fontFamily: "var(--font-display)" }}>{divRows.length}</div>
+        </div>
+      </div>
+      {/* Table */}
+      <div className="card" style={{ padding: 0, overflow: "hidden" }}>
+        <table className="table">
+          <thead><tr>
+            <th>{th ? "หลักทรัพย์" : "Holding"}</th>
+            <th className="num">{th ? "มูลค่า" : "Value"}</th>
+            <th className="num">Yield</th>
+            <th className="num">{th ? "ปันผล/ปี (คาด)" : "Est. annual"}</th>
+            <th className="num">{th ? "ต่อครั้ง/หุ้น" : "Per share/period"}</th>
+            <th className="num">{th ? "จ่ายต่อปี" : "Freq."}</th>
+          </tr></thead>
+          <tbody>
+            {divRows.map(r => (
+              <tr key={r.ticker}>
+                <td>
+                  <div className="ticker">
+                    <TickerLogo ticker={r.ticker} logoUrl={r.logo_url} region={r.region} cls={r.cls} size={28} />
+                    <div>
+                      <div style={{ fontWeight: 500 }}>{r.ticker}</div>
+                      <div className="muted" style={{ fontSize: 11 }}>{r.name}</div>
+                    </div>
+                  </div>
+                </td>
+                <td className="num">{FMT.money(r.value, ccy, { compact: true })}</td>
+                <td className="num" style={{ color: "var(--gain)", fontWeight: 500 }}>{r.divYield.toFixed(2)}%</td>
+                <td className="num" style={{ fontWeight: 600 }}>{FMT.money(r.annualDiv, ccy, { compact: true })}</td>
+                <td className="num muted">{r.perShare > 0 ? FMT.moneyNative(r.perShare, r.nativeCcy) : "—"}</td>
+                <td className="num muted">{r.divFrequency}×</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  )
+}
+
+// ─── Goals Tab ────────────────────────────────────────────────────────────────
+function GoalsTab({ lang, ccy, portfolioId, userId, liveHoldings, prices, fxRate }) {
+  const th = lang === "th"
+  const FMT = LUMEN_FMT
+  const [goals, setGoals] = useState([])
+  const [loading, setLoading] = useState(true)
+
+  useEffect(() => {
+    if (!userId) { setLoading(false); return }
+    getGoals(userId).then(g => { setGoals(g || []); setLoading(false) }).catch(() => setLoading(false))
+  }, [userId])
+
+  if (!userId) return (
+    <div className="card empty">
+      <p className="muted">{th ? "กรุณาลงชื่อเข้าใช้เพื่อดูเป้าหมาย" : "Sign in to view goals"}</p>
+    </div>
+  )
+  if (loading) return <div className="card empty"><p className="muted">{th ? "กำลังโหลด…" : "Loading…"}</p></div>
+  if (goals.length === 0) return (
+    <div className="card empty">
+      <p className="muted" style={{ marginBottom: 12 }}>{th ? "ยังไม่มีเป้าหมาย" : "No goals yet"}</p>
+    </div>
+  )
+
+  return (
+    <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(280px, 1fr))", gap: 14 }}>
+      {goals.map(g => {
+        const current = Number(g.current_amount) || 0
+        const target = Number(g.target_amount) || 1
+        const pct = Math.min(100, (current / target) * 100)
+        const remaining = Math.max(0, target - current)
+        const monthly = Number(g.monthly_contribution) || 0
+        const monthsLeft = monthly > 0 ? Math.ceil(remaining / monthly) : null
+        return (
+          <div key={g.id} className="card" style={{ padding: "20px 22px" }}>
+            <div style={{ fontWeight: 600, fontSize: 15, marginBottom: 4 }}>{g.name}</div>
+            <div style={{ fontSize: 22, fontWeight: 700, fontFamily: "var(--font-display)", marginBottom: 2 }}>
+              {FMT.money(current, ccy, { compact: true })}
+              <span className="muted" style={{ fontSize: 13, fontWeight: 400, marginLeft: 6 }}>/ {FMT.money(target, ccy, { compact: true })}</span>
+            </div>
+            <div style={{ height: 8, borderRadius: 99, background: "var(--line)", margin: "10px 0 6px", overflow: "hidden" }}>
+              <div style={{ height: "100%", width: pct + "%", borderRadius: 99, background: pct >= 100 ? "var(--gain)" : "var(--accent)", transition: "width 0.4s ease" }} />
+            </div>
+            <div style={{ display: "flex", justifyContent: "space-between", fontSize: 11, color: "var(--ink-3)" }}>
+              <span>{pct.toFixed(0)}%</span>
+              {monthsLeft != null && <span>{monthsLeft} {th ? "เดือน" : "mo"}</span>}
+            </div>
+          </div>
+        )
+      })}
+    </div>
+  )
+}
+
+// ─── Cash Tab ─────────────────────────────────────────────────────────────────
+function CashTab({ lang, ccy, portfolioId, cashAccounts, refreshCashAccounts, fxRate }) {
+  const th = lang === "th"
+  const FMT = LUMEN_FMT
+  const [showAdd, setShowAdd] = useState(false)
+  const [editing, setEditing] = useState(null)
+
+  const total = cashAccounts.reduce((s, a) => s + (a.currency === "USD" ? (a.balance || 0) * fxRate : (a.balance || 0)), 0)
+
+  return (
+    <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+        <div>
+          <div className="muted" style={{ fontSize: 12 }}>{th ? "รวมเงินสดทั้งหมด" : "Total cash"}</div>
+          <div style={{ fontSize: 24, fontWeight: 700, fontFamily: "var(--font-display)" }}>{FMT.money(total, ccy, { compact: true })}</div>
+        </div>
+        <button className="btn btn-outline btn-sm" onClick={() => setShowAdd(true)}>
+          <Icon name="plus" size={13} /> {th ? "เพิ่มบัญชี" : "Add account"}
+        </button>
+      </div>
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(240px, 1fr))", gap: 10 }}>
+        {cashAccounts.map(a => {
+          const bal = a.currency === "USD" ? (a.balance || 0) * fxRate : (a.balance || 0)
+          const isEmergency = a.icon === "shield" && a.target_balance > 0
+          const targetBal = isEmergency ? (a.currency === "USD" ? a.target_balance * fxRate : a.target_balance) : 0
+          const pct = isEmergency ? Math.min(100, (bal / targetBal) * 100) : 0
+          const full = isEmergency && bal >= targetBal
+          return (
+            <div key={a.id} style={{ display: "flex", flexDirection: "column", gap: 8, padding: "14px 16px", borderRadius: 12, border: `1px solid ${isEmergency ? (full ? "oklch(0.85 0.08 150)" : "oklch(0.85 0.08 60)") : "var(--line)"}`, background: "var(--bg)" }}>
+              <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+                <div style={{ width: 34, height: 34, borderRadius: 9, background: "var(--accent-soft)", color: "var(--accent-ink)", display: "grid", placeItems: "center", flexShrink: 0 }}>
+                  <Icon name={a.icon || "deposit"} size={15} />
+                </div>
+                <div style={{ flex: 1, minWidth: 0 }}>
+                  <div style={{ fontWeight: 600, fontSize: 13, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{a.label}</div>
+                  <div style={{ fontSize: 14, fontFamily: "var(--font-display)", fontWeight: 700 }}>{FMT.money(bal, ccy, { compact: true })}</div>
+                </div>
+                <div style={{ display: "flex", gap: 4 }}>
+                  <button onClick={() => setEditing(a)} style={{ background: "none", border: "none", cursor: "pointer", color: "var(--ink-3)", padding: "3px 6px", borderRadius: 6, fontSize: 14 }}>✎</button>
+                  <button onClick={async () => { if (!window.confirm(th ? "ลบบัญชีนี้?" : "Delete?")) return; await deleteCashAccount(a.id); refreshCashAccounts?.() }} style={{ background: "none", border: "none", cursor: "pointer", color: "var(--ink-4)", padding: "3px 5px", borderRadius: 6, fontSize: 16 }}>×</button>
+                </div>
+              </div>
+              {isEmergency && (
+                <div>
+                  <div style={{ height: 4, borderRadius: 2, background: "var(--line)", overflow: "hidden", marginBottom: 3 }}>
+                    <div style={{ height: "100%", width: `${pct}%`, borderRadius: 2, background: full ? "oklch(0.55 0.15 150)" : "oklch(0.65 0.15 60)" }} />
+                  </div>
+                  <div style={{ fontSize: 10.5, color: "var(--ink-3)" }}>
+                    {full ? `✓ ${th ? "เต็มเป้า" : "Target met"}` : `${pct.toFixed(0)}% ${th ? "ของเป้า" : "of"} ${FMT.money(targetBal, ccy, { compact: true })}`}
+                  </div>
+                </div>
+              )}
+            </div>
+          )
+        })}
+        {cashAccounts.length === 0 && (
+          <div style={{ gridColumn: "1/-1", padding: "32px 0", textAlign: "center" }}>
+            <p className="muted">{th ? "ยังไม่มีบัญชีเงินสด" : "No cash accounts yet"}</p>
+          </div>
+        )}
+      </div>
+      {(showAdd || editing) && (
+        <PortfolioCashModal lang={lang} ccy={ccy} portfolioId={portfolioId}
+          account={editing}
+          onClose={() => { setShowAdd(false); setEditing(null) }}
+          onSaved={async () => { setShowAdd(false); setEditing(null); await refreshCashAccounts?.() }}
+        />
+      )}
+    </div>
+  )
+}
+
+// Lightweight cash modal reused from Dashboard (same logic, no dependency on Dashboard)
+function PortfolioCashModal({ lang, ccy, portfolioId, account, onClose, onSaved }) {
+  const th = lang === "th"
+  const isEdit = account != null
+  const [form, setForm] = useState({
+    label: account?.label ?? "", balance: account?.balance != null ? String(account.balance) : "",
+    currency: account?.currency ?? "THB", icon: account?.icon ?? "deposit",
+    target_balance: account?.target_balance != null ? String(account.target_balance) : "",
+  })
+  const [saving, setSaving] = useState(false)
+  const [error, setError] = useState(null)
+  const set = (k, v) => setForm(f => ({ ...f, [k]: v }))
+  const ICONS = [
+    { k: "deposit", label: th ? "ทั่วไป" : "General" }, { k: "shield", label: th ? "สำรอง" : "Emergency" },
+    { k: "dividend", label: th ? "ปันผล" : "Dividend" }, { k: "home", label: th ? "บ้าน" : "Home" },
+    { k: "leaf", label: th ? "ระยะยาว" : "Long-term" }, { k: "currency", label: th ? "ต่างประเทศ" : "Foreign" },
+  ]
+  const handleSubmit = async (e) => {
+    e.preventDefault(); if (!portfolioId) return
+    setSaving(true); setError(null)
+    const { error } = await upsertCashAccount(portfolioId, {
+      ...(isEdit ? { id: account.id } : {}),
+      label: form.label.trim(), balance: parseFloat(form.balance) || 0,
+      currency: form.currency, icon: form.icon,
+      target_balance: form.icon === "shield" && form.target_balance ? parseFloat(form.target_balance) || null : null,
+    })
+    setSaving(false)
+    if (error) { setError(error.message); return }
+    onSaved()
+  }
+  return (
+    <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.45)", backdropFilter: "blur(4px)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 1000, padding: 16 }}
+      onClick={e => e.target === e.currentTarget && onClose()}>
+      <div style={{ background: "var(--bg)", borderRadius: 18, padding: 28, width: "100%", maxWidth: 440, boxShadow: "0 20px 60px rgba(0,0,0,0.2)" }}>
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 20 }}>
+          <h3 style={{ margin: 0, fontSize: 18 }}>{isEdit ? (th ? "แก้ไขบัญชี" : "Edit account") : (th ? "เพิ่มบัญชี" : "Add account")}</h3>
+          <button onClick={onClose} style={{ background: "none", border: "none", cursor: "pointer", fontSize: 20, color: "var(--ink-3)" }}>×</button>
+        </div>
+        <form onSubmit={handleSubmit} style={{ display: "flex", flexDirection: "column", gap: 14 }}>
+          {error && <div style={{ padding: "8px 12px", borderRadius: 8, background: "oklch(0.96 0.05 25)", color: "oklch(0.40 0.12 25)", fontSize: 13 }}>{error}</div>}
+          <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
+            <label style={{ fontSize: 11, fontWeight: 600, color: "var(--ink-2)", textTransform: "uppercase", letterSpacing: "0.06em" }}>{th ? "ชื่อบัญชี" : "Label"}</label>
+            <input required value={form.label} onChange={e => set("label", e.target.value)} style={inputStyle} />
+          </div>
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(6,1fr)", gap: 6 }}>
+            {ICONS.map(opt => (
+              <button key={opt.k} type="button" title={opt.label} onClick={() => set("icon", opt.k)}
+                style={{ display: "grid", placeItems: "center", aspectRatio: "1", borderRadius: 9, cursor: "pointer", border: form.icon === opt.k ? "1.5px solid var(--accent)" : "1.5px solid var(--line)", background: form.icon === opt.k ? "var(--accent-soft)" : "var(--bg-2)", color: form.icon === opt.k ? "var(--accent-ink)" : "var(--ink-3)" }}>
+                <Icon name={opt.k} size={16} />
+              </button>
+            ))}
+          </div>
+          <div style={{ display: "grid", gridTemplateColumns: "1fr 90px", gap: 10 }}>
+            <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
+              <label style={{ fontSize: 11, fontWeight: 600, color: "var(--ink-2)", textTransform: "uppercase", letterSpacing: "0.06em" }}>{th ? "ยอดคงเหลือ" : "Balance"}</label>
+              <CalcInput required value={form.balance} onChange={e => set("balance", e.target.value)} placeholder="0.00" style={inputStyle} />
+            </div>
+            <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
+              <label style={{ fontSize: 11, fontWeight: 600, color: "var(--ink-2)", textTransform: "uppercase", letterSpacing: "0.06em" }}>{th ? "สกุล" : "Ccy"}</label>
+              <select value={form.currency} onChange={e => set("currency", e.target.value)} style={inputStyle}>
+                <option value="THB">THB</option><option value="USD">USD</option>
+              </select>
+            </div>
+          </div>
+          {form.icon === "shield" && (
+            <div style={{ display: "flex", flexDirection: "column", gap: 4, padding: "10px 12px", borderRadius: 9, background: "oklch(0.97 0.03 60)", border: "1px solid oklch(0.88 0.06 60)" }}>
+              <label style={{ fontSize: 11, fontWeight: 600, color: "oklch(0.50 0.12 60)", textTransform: "uppercase", letterSpacing: "0.06em" }}>🛡 {th ? "งบฉุกเฉิน (เป้าหมาย)" : "Emergency target"}</label>
+              <CalcInput value={form.target_balance} onChange={e => set("target_balance", e.target.value)} placeholder={th ? "เช่น 90000" : "e.g. 90000"} style={inputStyle} />
+            </div>
+          )}
+          <div style={{ display: "flex", gap: 10, marginTop: 4 }}>
+            <button type="button" className="btn btn-outline" style={{ flex: 1 }} onClick={onClose}>{th ? "ยกเลิก" : "Cancel"}</button>
+            <button type="submit" className="btn" style={{ flex: 1 }} disabled={saving}>{saving ? "…" : (th ? "บันทึก" : "Save")}</button>
+          </div>
+        </form>
+      </div>
+    </div>
+  )
+}
+
+// ─── Categories Tab ───────────────────────────────────────────────────────────
+function CategoriesTab({ rows, lang, ccy, fxRate }) {
+  const th = lang === "th"
+  const FMT = LUMEN_FMT
+  const [mode, setMode] = useState("regionclass")
+  const [expanded, setExpanded] = useState(new Set())
+  const [sortKey, setSortKey] = useState("allocPct")
+  const [sortDir, setSortDir] = useState("desc")
+
+  const MODES = [
+    { k: "regionclass", label: th ? "ภูมิภาค + ประเภท" : "Region + class" },
+    { k: "class",       label: th ? "ประเภทสินทรัพย์" : "Asset class" },
+    { k: "region",      label: th ? "ภูมิภาค" : "Region" },
+  ]
+
+  const table = useMemo(() => {
+    if (rows.length === 0) return []
+    const keyOf = r => {
+      if (mode === "class") return r.cls || "Equity"
+      if (mode === "region") return r.region === "TH" ? (th ? "ไทย" : "Thailand") : (th ? "สหรัฐฯ" : "United States")
+      return r.cls === "Equity" ? (r.region === "TH" ? (th ? "หุ้นไทย" : "TH Equity") : (th ? "หุ้น US" : "US Equity")) : r.cls
+    }
+    const colors = ["var(--c1)", "var(--c2)", "var(--c3)", "var(--c4)", "var(--c5)", "var(--c6)", "var(--c7)"]
+    const map = {}
+    rows.forEach(r => {
+      const k = keyOf(r)
+      if (!map[k]) map[k] = { name: k, value: 0, costBasis: 0, pl: 0, holdings: [] }
+      map[k].value += r.value; map[k].costBasis += r.shares * r.cost; map[k].pl += r.pl; map[k].holdings.push(r)
+    })
+    const total = rows.reduce((s, r) => s + r.value, 0)
+    return Object.values(map).map((g, i) => ({
+      ...g, plPct: g.costBasis > 0 ? (g.pl / g.costBasis) * 100 : 0,
+      allocPct: total > 0 ? (g.value / total) * 100 : 0,
+      count: new Set(g.holdings.map(r => r.ticker)).size,
+      color: colors[i % colors.length],
+    }))
+  }, [rows, mode, th])
+
+  const sorted = useMemo(() => [...table].sort((a, b) => {
+    const cmp = (a[sortKey] ?? 0) - (b[sortKey] ?? 0)
+    return sortDir === "asc" ? cmp : -cmp
+  }), [table, sortKey, sortDir])
+
+  const toggleSort = k => { if (sortKey === k) setSortDir(d => d === "asc" ? "desc" : "asc"); else { setSortKey(k); setSortDir("desc") } }
+  const toggleExpand = name => setExpanded(prev => { const n = new Set(prev); n.has(name) ? n.delete(name) : n.add(name); return n })
+
+  const groupByTicker = (rs) => {
+    const m = new Map()
+    rs.forEach(r => {
+      if (!m.has(r.ticker)) m.set(r.ticker, { ...r })
+      else { const g = m.get(r.ticker); m.set(r.ticker, { ...g, value: g.value + r.value, pl: g.pl + r.pl, shares: g.shares + r.shares }) }
+    })
+    return [...m.values()]
+  }
+
+  const thStyle = k => ({ padding: "10px 14px", textAlign: "right", fontWeight: 600, fontSize: 10.5, letterSpacing: "0.06em", textTransform: "uppercase", color: sortKey === k ? "var(--accent-ink)" : "var(--ink-3)", cursor: "pointer", userSelect: "none" })
+
+  return (
+    <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
+      <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+        <select value={mode} onChange={e => setMode(e.target.value)}
+          style={{ padding: "6px 10px", borderRadius: 8, fontSize: 12, border: "1.5px solid var(--line)", background: "var(--bg)", color: "var(--ink)", outline: "none", cursor: "pointer" }}>
+          {MODES.map(m => <option key={m.k} value={m.k}>{m.label}</option>)}
+        </select>
+      </div>
+      <div className="card" style={{ padding: 0, overflow: "hidden" }}>
+        <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13 }}>
+          <thead>
+            <tr style={{ borderBottom: "1px solid var(--line)" }}>
+              <th style={{ padding: "10px 16px", textAlign: "left", fontWeight: 600, fontSize: 10.5, letterSpacing: "0.06em", textTransform: "uppercase", color: "var(--ink-3)" }}>{th ? "กลุ่ม" : "Category"}</th>
+              <th onClick={() => toggleSort("value")} style={thStyle("value")}>{th ? "มูลค่า / ต้นทุน" : "Value / Cost"} {sortKey === "value" ? (sortDir === "desc" ? "↓" : "↑") : ""}</th>
+              <th onClick={() => toggleSort("pl")} style={thStyle("pl")}>{th ? "กำไร/ขาดทุน" : "Gain"} {sortKey === "pl" ? (sortDir === "desc" ? "↓" : "↑") : ""}</th>
+              <th onClick={() => toggleSort("allocPct")} style={thStyle("allocPct")}>{th ? "สัดส่วน" : "Alloc."} {sortKey === "allocPct" ? (sortDir === "desc" ? "↓" : "↑") : ""}</th>
+            </tr>
+          </thead>
+          <tbody>
+            {sorted.map((g, gi) => {
+              const isExp = expanded.has(g.name)
+              return (
+                <Fragment key={g.name}>
+                  <tr onClick={() => g.holdings.length > 0 && toggleExpand(g.name)}
+                    style={{ borderBottom: isExp ? "none" : gi < sorted.length - 1 ? "1px solid var(--line)" : "none", cursor: g.holdings.length > 0 ? "pointer" : "default" }}
+                    onMouseEnter={e => e.currentTarget.style.background = "var(--bg-2)"}
+                    onMouseLeave={e => e.currentTarget.style.background = ""}>
+                    <td style={{ padding: "12px 16px" }}>
+                      <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+                        <div style={{ width: 4, height: 32, borderRadius: 2, background: g.color, flexShrink: 0 }} />
+                        <div style={{ width: 32, height: 32, borderRadius: 8, background: g.color + "22", display: "grid", placeItems: "center", flexShrink: 0 }}>
+                          <span style={{ fontSize: 12, fontWeight: 800, color: g.color }}>{g.name.slice(0, 2).toUpperCase()}</span>
+                        </div>
+                        <div>
+                          <div style={{ fontWeight: 600, fontSize: 13 }}>{g.name}</div>
+                          <div className="muted" style={{ fontSize: 10 }}>{g.count} {th ? "รายการ" : "items"}</div>
+                        </div>
+                        {g.holdings.length > 0 && <span style={{ marginLeft: "auto", color: "var(--ink-4)", fontSize: 11, transform: isExp ? "rotate(90deg)" : "none", display: "inline-block", transition: "transform 0.2s" }}>›</span>}
+                      </div>
+                    </td>
+                    <td style={{ padding: "12px 14px", textAlign: "right" }}>
+                      <div style={{ fontWeight: 500 }}>{FMT.money(g.value, ccy, { compact: true })}</div>
+                      <div className="muted" style={{ fontSize: 11, fontFamily: "var(--font-mono)" }}>{FMT.money(g.costBasis, ccy, { compact: true })}</div>
+                    </td>
+                    <td style={{ padding: "12px 14px", textAlign: "right" }}>
+                      <div style={{ fontWeight: 500, color: g.pl >= 0 ? "var(--gain)" : "var(--loss)" }}>{g.pl >= 0 ? "+" : ""}{FMT.money(g.pl, ccy, { compact: true })}</div>
+                      <div style={{ fontSize: 11, color: g.pl >= 0 ? "var(--gain)" : "var(--loss)", fontFamily: "var(--font-mono)" }}>{g.plPct >= 0 ? "+" : ""}{g.plPct.toFixed(1)}%</div>
+                    </td>
+                    <td style={{ padding: "12px 16px", textAlign: "right" }}>
+                      <div style={{ fontWeight: 700 }}>{g.allocPct.toFixed(1)}%</div>
+                      <div style={{ height: 3, borderRadius: 99, background: "var(--line)", marginTop: 3 }}>
+                        <div style={{ height: "100%", width: g.allocPct + "%", background: g.color, borderRadius: 99 }} />
+                      </div>
+                    </td>
+                  </tr>
+                  {isExp && groupByTicker(g.holdings).map((h, hi, arr) => (
+                    <tr key={h.ticker} style={{ background: "var(--bg-2)", borderBottom: hi === arr.length - 1 ? "1px solid var(--line)" : "none" }}>
+                      <td style={{ padding: "8px 16px 8px 58px" }}>
+                        <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                          <TickerLogo ticker={h.ticker} logoUrl={h.logo_url} region={h.region} cls={h.cls} size={24} />
+                          <div><div style={{ fontSize: 12, fontWeight: 500 }}>{h.ticker}</div><div className="muted" style={{ fontSize: 10 }}>{h.name}</div></div>
+                        </div>
+                      </td>
+                      <td style={{ padding: "8px 14px", textAlign: "right" }}>
+                        <div style={{ fontSize: 12 }}>{FMT.money(h.value, ccy, { compact: true })}</div>
+                        <div className="muted" style={{ fontSize: 10, fontFamily: "var(--font-mono)" }}>{FMT.money(h.shares * h.cost, ccy, { compact: true })}</div>
+                      </td>
+                      <td style={{ padding: "8px 14px", textAlign: "right" }}>
+                        <div style={{ fontSize: 12, color: h.pl >= 0 ? "var(--gain)" : "var(--loss)" }}>{h.pl >= 0 ? "+" : ""}{FMT.money(h.pl, ccy, { compact: true })}</div>
+                        <div style={{ fontSize: 10, color: h.pl >= 0 ? "var(--gain)" : "var(--loss)", fontFamily: "var(--font-mono)" }}>{h.plPct >= 0 ? "+" : ""}{h.plPct?.toFixed(1)}%</div>
+                      </td>
+                      <td style={{ padding: "8px 16px", textAlign: "right" }}>
+                        <div className="muted" style={{ fontSize: 11, fontFamily: "var(--font-mono)" }}>
+                          {rows.reduce((s, r) => s + r.value, 0) > 0 ? (h.value / rows.reduce((s, r) => s + r.value, 0) * 100).toFixed(1) : "0.0"}%
+                        </div>
+                      </td>
+                    </tr>
+                  ))}
+                </Fragment>
+              )
+            })}
+          </tbody>
+        </table>
       </div>
     </div>
   )
