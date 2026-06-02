@@ -121,7 +121,7 @@ export function ToolsPage({ t, lang, ccy, dataState, liveHoldings = [], prices =
   // ── Derive rows ──────────────────────────────────────────────────────────────
   const isLive = dataState === "live"
 
-  const { rows, total, cash } = useMemo(() => {
+  const { rows, total, cash, investableCash } = useMemo(() => {
     if (isLive) {
       const derived = deriveHoldings(liveHoldings, ccy, prices, fxRate)
       // cashTotal always in THB (deriveHoldings also returns THB values)
@@ -129,15 +129,22 @@ export function ToolsPage({ t, lang, ccy, dataState, liveHoldings = [], prices =
         const b = a.balance || 0, c = a.currency || 'THB'
         return s + (c === 'USD' ? b * fxRate : b)
       }, 0)
+      // investableCash = total cash minus emergency fund amounts
+      const investable = cashAccounts.reduce((s, a) => {
+        const balance = a.currency === 'USD' ? (a.balance || 0) * fxRate : (a.balance || 0)
+        const target = a.target_balance || 0
+        const emergency = Math.min(balance, target)
+        return s + (balance - emergency)
+      }, 0)
       const investTotal = derived.reduce((s, r) => s + r.value, 0)
-      return { rows: derived, total: investTotal + cashTotal, cash: cashTotal }
+      return { rows: derived, total: investTotal + cashTotal, cash: cashTotal, investableCash: investable }
     }
-    if (dataState === "empty") return { rows: [], total: 0, cash: 0 }
+    if (dataState === "empty") return { rows: [], total: 0, cash: 0, investableCash: 0 }
     const demo = LUMEN_DERIVE()
-    return { rows: demo.rows, total: demo.value + demo.cash, cash: demo.cash }
+    return { rows: demo.rows, total: demo.value + demo.cash, cash: demo.cash, investableCash: demo.cash }
   }, [isLive, liveHoldings, ccy, prices, fxRate, cashAccounts, dataState])
 
-  const currentByClass = useMemo(() => buildCurrentByClass(rows, cash), [rows, cash])
+  const currentByClass = useMemo(() => buildCurrentByClass(rows, investableCash), [rows, investableCash])
 
   // User types amount in display currency; convert to THB for internal calculations
   // (total, all values from deriveHoldings, are in THB)
