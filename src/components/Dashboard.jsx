@@ -1163,60 +1163,9 @@ function LiveDashboardPage({ t, lang, ccy, setRoute, liveHoldings, prices = {}, 
           })()}
         </div>
 
-        <div className="card col-span-7">
-          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 20 }}>
-            <h3 className="section-title">{t.dashboard.topMovers}</h3>
-            <button className="btn-ghost btn btn-sm" onClick={() => setRoute("portfolio")}>
-              {t.common.seeAll} <Icon name="chevron" size={12} />
-            </button>
-          </div>
-          <table className="table" style={{ marginTop: -8 }}>
-            <thead><tr>
-              <th>{t.portfolio.holding}</th>
-              <th></th>
-              <th className="num">{th ? "ราคา" : "Last"}</th>
-              <th className="num">{th ? "วันนี้" : "Today"}</th>
-              <th className="num">{t.portfolio.pl}</th>
-            </tr></thead>
-            <tbody>
-              {movers.map(r => {
-                const sym = toYahooSymbol(r.ticker, r.region || 'TH', r.cls || 'Equity')
-                const cutoff = Date.now() / 1000 - 30 * 86400
-                const closes = (holdingHistories[sym]?.series || []).filter(p => p.t >= cutoff).map(p => p.c).filter(Number.isFinite)
-                const sp = closes.length >= 2 ? closes : null
-                const spColor = (sp ? (closes[closes.length - 1] / closes[0] - 1) : r.changePct) >= 0 ? "var(--gain)" : "var(--loss)"
-                return (
-                  <tr key={r.ticker}>
-                    <td>
-                      <div className="ticker">
-                        <TickerLogo ticker={r.ticker} logoUrl={r.logo_url} region={r.region} cls={r.cls} size={30} />
-                        <div>
-                          <div style={{ fontWeight: 500 }}>{r.ticker}</div>
-                          <div className="muted" style={{ fontSize: 11 }}>{r.name}</div>
-                        </div>
-                      </div>
-                    </td>
-                    <td>{sp ? <Sparkline data={sp} stroke={spColor} fill={spColor} /> : <span className="muted" style={{ fontSize: 12 }}>—</span>}</td>
-                    <td className="num">{LUMEN_FMT.moneyNative(r.priceNative, r.nativeCcy)}</td>
-                    <td className="num">{r.hasLivePrice ? <Delta value={r.changePct} /> : <span className="muted" style={{ fontSize: 12 }}>—</span>}</td>
-                    <td className="num">
-                      {r.hasLivePrice
-                        ? <span style={{ color: r.pl >= 0 ? "var(--gain)" : "var(--loss)", fontSize: 12 }}>{r.pl >= 0 ? "+" : ""}{r.plPct.toFixed(1)}%</span>
-                        : <span className="muted" style={{ fontSize: 12 }}>—</span>}
-                    </td>
-                  </tr>
-                )
-              })}
-            </tbody>
-          </table>
-        </div>
-      </section>
-
-      {/* ── ROW 2.5: Allocation breakdown table ── */}
-      {allocTable.length > 0 && (
-        <section style={{ marginBottom: 16 }}>
-          <div className="card" style={{ padding: 0, overflow: "hidden" }}>
-            {/* Table header row */}
+        {/* Category breakdown table — col-7 right */}
+        {allocTable.length > 0 && (
+          <div className="card col-span-7" style={{ padding: 0, overflow: "hidden" }}>
             <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13 }}>
               <thead>
                 <tr style={{ borderBottom: "1px solid var(--line)" }}>
@@ -1339,8 +1288,59 @@ function LiveDashboardPage({ t, lang, ccy, setRoute, liveHoldings, prices = {}, 
               </tbody>
             </table>
           </div>
-        </section>
-      )}
+        )}
+      </section>
+
+      {/* ── ROW 2.5: Today's movers (full width) ── */}
+      <section style={{ marginBottom: 16 }}>
+        <div className="card">
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 20 }}>
+            <h3 className="section-title">{t.dashboard.topMovers}</h3>
+            <button className="btn-ghost btn btn-sm" onClick={() => setRoute("portfolio")}>
+              {t.common.seeAll} <Icon name="chevron" size={12} />
+            </button>
+          </div>
+          <table className="table" style={{ marginTop: -8 }}>
+            <thead><tr>
+              <th>{t.portfolio.holding}</th>
+              <th></th>
+              <th className="num">{th ? "ราคา" : "Last"}</th>
+              <th className="num">{th ? "วันนี้" : "Today"}</th>
+              <th className="num">{t.portfolio.pl}</th>
+            </tr></thead>
+            <tbody>
+              {movers.map(r => {
+                const sym = toYahooSymbol(r.ticker, r.region || 'TH', r.cls || 'Equity')
+                const cutoff = Date.now() / 1000 - 30 * 86400
+                const closes = (holdingHistories[sym]?.series || []).filter(p => p.t >= cutoff).map(p => p.c).filter(Number.isFinite)
+                const sp = closes.length >= 2 ? closes : null
+                const spColor = (sp ? (closes[closes.length - 1] / closes[0] - 1) : r.changePct) >= 0 ? "var(--gain)" : "var(--loss)"
+                return (
+                  <tr key={r.ticker}>
+                    <td>
+                      <div className="ticker">
+                        <TickerLogo ticker={r.ticker} logoUrl={r.logo_url} region={r.region} cls={r.cls} size={30} />
+                        <div>
+                          <div style={{ fontWeight: 500 }}>{r.ticker}</div>
+                          <div className="muted" style={{ fontSize: 11 }}>{r.name}</div>
+                        </div>
+                      </div>
+                    </td>
+                    <td>{sp ? <Sparkline data={sp} stroke={spColor} fill={spColor} /> : <span className="muted" style={{ fontSize: 12 }}>—</span>}</td>
+                    <td className="num">{LUMEN_FMT.moneyNative(r.priceNative, r.nativeCcy)}</td>
+                    <td className="num">{r.hasLivePrice ? <Delta value={r.changePct} /> : <span className="muted" style={{ fontSize: 12 }}>—</span>}</td>
+                    <td className="num">
+                      {r.hasLivePrice
+                        ? <span style={{ color: r.pl >= 0 ? "var(--gain)" : "var(--loss)", fontSize: 12 }}>{r.pl >= 0 ? "+" : ""}{r.plPct.toFixed(1)}%</span>
+                        : <span className="muted" style={{ fontSize: 12 }}>—</span>}
+                    </td>
+                  </tr>
+                )
+              })}
+            </tbody>
+          </table>
+        </div>
+      </section>
 
       {/* ── ROW 3: Goals + Insights ── */}
       <section className="grid grid-12" style={{ marginBottom: 16 }}>
