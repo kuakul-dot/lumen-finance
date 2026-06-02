@@ -557,6 +557,22 @@ function LiveDashboardPage({ t, lang, ccy, setRoute, liveHoldings, prices = {}, 
   const netWorth = totalValue + cashTotal
   const hasCash  = cashAccounts.length > 0
 
+  // Emergency-protected cash: portion of shield accounts up to their target.
+  // Only the EXCESS above target is investable; the rest is locked as buffer.
+  const { emergencyProtected, investableCash } = useMemo(() => {
+    let protected_ = 0, investable = 0
+    cashAccounts.forEach(a => {
+      const bal = (a.currency === 'USD' ? (a.balance || 0) * fxRate : (a.balance || 0))
+      const target = a.icon === 'shield' && a.target_balance
+        ? (a.currency === 'USD' ? a.target_balance * fxRate : a.target_balance)
+        : 0
+      const locked = Math.min(bal, target)
+      protected_ += locked
+      investable += bal - locked
+    })
+    return { emergencyProtected: protected_, investableCash: investable }
+  }, [cashAccounts, fxRate])
+
   // Allocation breakdown — selectable dimension
   const [allocMode, setAllocMode] = useState("regionclass")
   const ALLOC_MODES = [
@@ -732,13 +748,13 @@ function LiveDashboardPage({ t, lang, ccy, setRoute, liveHoldings, prices = {}, 
         }
       }
     }
-    // Idle cash — large uninvested balance
-    if (netWorth > 0 && cashTotal > 0) {
-      const cashPct = cashTotal / netWorth * 100
+    // Idle cash — only count investable portion (excludes emergency fund up to target)
+    if (netWorth > 0 && investableCash > 0) {
+      const cashPct = investableCash / netWorth * 100
       if (cashPct >= 15) {
         out.push({
-          title: th ? `เงินสด ${cashPct.toFixed(0)}% ของพอร์ตรวม` : `Cash is ${cashPct.toFixed(0)}% of net worth`,
-          body:  th ? `~${LUMEN_FMT.money(cashTotal, ccy, { compact: true })} ยังไม่ลงทุน — พิจารณานำไปลงทุน` : `~${LUMEN_FMT.money(cashTotal, ccy, { compact: true })} idle — consider deploying it`,
+          title: th ? `เงินสดพร้อมลงทุน ${cashPct.toFixed(0)}% ของพอร์ตรวม` : `Investable cash is ${cashPct.toFixed(0)}% of net worth`,
+          body:  th ? `~${LUMEN_FMT.money(investableCash, ccy, { compact: true })} ยังไม่ลงทุน — พิจารณานำไปลงทุน` : `~${LUMEN_FMT.money(investableCash, ccy, { compact: true })} idle — consider deploying it`,
           tone: cashPct >= 30 ? "warn" : "neutral"
         })
       }
@@ -1295,16 +1311,34 @@ function LiveDashboardPage({ t, lang, ccy, setRoute, liveHoldings, prices = {}, 
           <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(220px, 1fr))", gap: 8 }}>
             {cashAccounts.map(a => {
               const b = a.balance || 0, c = a.currency || 'THB'
-              // dispBal always in THB; LUMEN_FMT.money handles display conversion
               const dispBal = c === 'USD' ? b * fxRate : b
+              const isEmergency = a.icon === 'shield' && a.target_balance > 0
+              const targetBal = isEmergency ? (c === 'USD' ? a.target_balance * fxRate : a.target_balance) : 0
+              const pct = isEmergency ? Math.min(100, (dispBal / targetBal) * 100) : 0
+              const full = isEmergency && dispBal >= targetBal
+              const excess = isEmergency ? Math.max(0, dispBal - targetBal) : 0
               return (
-                <div key={a.id} style={{ display: "flex", alignItems: "center", gap: 12, padding: "10px 14px", borderRadius: 10, border: "1px solid var(--line)", background: "var(--bg)" }}>
-                  <div style={{ width: 32, height: 32, borderRadius: 8, background: "var(--accent-soft)", color: "var(--accent-ink)", display: "grid", placeItems: "center", flexShrink: 0 }}>
+                <div key={a.id} style={{ display: "flex", alignItems: "center", gap: 12, padding: "10px 14px", borderRadius: 10, border: `1px solid ${isEmergency ? (full ? "oklch(0.85 0.08 150)" : "oklch(0.85 0.08 60)") : "var(--line)"}`, background: "var(--bg)" }}>
+                  <div style={{ width: 32, height: 32, borderRadius: 8, background: isEmergency ? (full ? "oklch(0.94 0.06 150)" : "oklch(0.96 0.06 60)") : "var(--accent-soft)", color: isEmergency ? (full ? "oklch(0.40 0.12 150)" : "oklch(0.50 0.12 60)") : "var(--accent-ink)", display: "grid", placeItems: "center", flexShrink: 0 }}>
                     <Icon name={a.icon || "deposit"} size={14} />
                   </div>
                   <div style={{ flex: 1, minWidth: 0 }}>
                     <div style={{ fontWeight: 500, fontSize: 13, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{a.label}</div>
                     <div style={{ fontSize: 13, fontFamily: "var(--font-display)" }}>{LUMEN_FMT.money(dispBal, ccy, { compact: true })}</div>
+                    {isEmergency && (
+                      <div style={{ marginTop: 5 }}>
+                        {/* Progress bar */}
+                        <div style={{ height: 4, borderRadius: 2, background: "var(--line)", overflow: "hidden", marginBottom: 3 }}>
+                          <div style={{ height: "100%", width: `${pct}%`, borderRadius: 2, background: full ? "oklch(0.55 0.15 150)" : "oklch(0.65 0.15 60)", transition: "width 0.4s ease" }} />
+                        </div>
+                        <div style={{ fontSize: 10.5, color: "var(--ink-3)" }}>
+                          {full
+                            ? <>✓ {th ? "เต็มเป้า" : "Target met"} · {excess > 0 && <span style={{ color: "oklch(0.40 0.12 150)", fontWeight: 600 }}>{th ? `เกิน ${LUMEN_FMT.money(excess, ccy, { compact: true })} — พร้อมลงทุน` : `+${LUMEN_FMT.money(excess, ccy, { compact: true })} investable`}</span>}</>
+                            : <>{th ? `${pct.toFixed(0)}% ของเป้า ${LUMEN_FMT.money(targetBal, ccy, { compact: true })}` : `${pct.toFixed(0)}% of ${LUMEN_FMT.money(targetBal, ccy, { compact: true })} target`}</>
+                          }
+                        </div>
+                      </div>
+                    )}
                   </div>
                   <button onClick={() => setShowCashModal(a)} style={{ background: "none", border: "none", cursor: "pointer", color: "var(--ink-3)", padding: "3px 6px", borderRadius: 5, fontSize: 14 }}>✎</button>
                   <button onClick={async () => { if (!window.confirm(th ? "ลบบัญชีนี้?" : "Delete this account?")) return; await deleteCashAccount(a.id); refreshCashAccounts() }} style={{ background: "none", border: "none", cursor: "pointer", color: "var(--ink-4)", padding: "3px 5px", borderRadius: 5, fontSize: 16 }}>×</button>
@@ -1347,10 +1381,11 @@ function CashAccountModal({ lang, ccy, portfolioId, account, onClose, onSaved })
   const th = lang === "th"
   const isEdit = account != null
   const [form, setForm] = useState({
-    label:    account?.label    ?? '',
-    balance:  account?.balance != null ? String(account.balance) : '',
-    currency: account?.currency ?? 'THB',
-    icon:     account?.icon     ?? 'deposit',
+    label:          account?.label    ?? '',
+    balance:        account?.balance != null ? String(account.balance) : '',
+    currency:       account?.currency ?? 'THB',
+    icon:           account?.icon     ?? 'deposit',
+    target_balance: account?.target_balance != null ? String(account.target_balance) : '',
   })
   const [saving, setSaving] = useState(false)
   const [error,  setError]  = useState(null)
@@ -1371,10 +1406,13 @@ function CashAccountModal({ lang, ccy, portfolioId, account, onClose, onSaved })
     setSaving(true); setError(null)
     const payload = {
       ...(isEdit ? { id: account.id } : {}),
-      label:    form.label.trim(),
-      balance:  parseFloat(form.balance) || 0,
-      currency: form.currency,
-      icon:     form.icon,
+      label:          form.label.trim(),
+      balance:        parseFloat(form.balance) || 0,
+      currency:       form.currency,
+      icon:           form.icon,
+      target_balance: (form.icon === 'shield' && form.target_balance)
+        ? (parseFloat(form.target_balance) || null)
+        : null,
     }
     const { error } = await upsertCashAccount(portfolioId, payload)
     setSaving(false)
@@ -1449,6 +1487,22 @@ function CashAccountModal({ lang, ccy, portfolioId, account, onClose, onSaved })
               </select>
             </div>
           </div>
+          {/* Emergency target — only shown for shield (Emergency) icon accounts */}
+          {form.icon === 'shield' && (
+            <div style={{ display: "flex", flexDirection: "column", gap: 5, padding: "12px 14px", borderRadius: 10, background: "oklch(0.97 0.03 60)", border: "1px solid oklch(0.88 0.06 60)" }}>
+              <label style={{ fontSize: 11, fontWeight: 600, color: "oklch(0.50 0.12 60)", letterSpacing: "0.06em", textTransform: "uppercase" }}>
+                🛡 {th ? "งบฉุกเฉินที่ตั้งไว้ (เป้าหมาย)" : "Emergency fund target"}
+              </label>
+              <input type="number" step="any" min="0" value={form.target_balance} onChange={e => set('target_balance', e.target.value)}
+                placeholder={th ? "เช่น 90000 (3-6 เดือนค่าใช้จ่าย)" : "e.g. 90000 (3-6 months expenses)"}
+                style={{ padding: "10px 12px", borderRadius: 8, fontSize: 14, border: "1.5px solid oklch(0.82 0.08 60)", background: "var(--bg)", color: "var(--ink)", outline: "none" }} />
+              <div style={{ fontSize: 11, color: "oklch(0.55 0.10 60)" }}>
+                {th
+                  ? "ยอดไม่เกินเป้าจะไม่ถูกนับเป็นเงินพร้อมลงทุน — เกินเป้าจะแนะนำให้ไปลงทุน"
+                  : "Balance up to target is protected and excluded from investable cash — excess above target will be flagged for deployment"}
+              </div>
+            </div>
+          )}
           <div style={{ display: "flex", gap: 10, marginTop: 4 }}>
             <button type="button" className="btn btn-outline" style={{ flex: 1 }} onClick={onClose}>
               {th ? "ยกเลิก" : "Cancel"}
