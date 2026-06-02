@@ -609,6 +609,63 @@ function LiveDashboardPage({ t, lang, ccy, setRoute, liveHoldings, prices = {}, 
     }))
   }, [rows, th, allocMode, cashTotal])
 
+  // Allocation table — same grouping as donut but enriched with cost basis + P/L
+  const [expandedCats, setExpandedCats] = useState(new Set())
+  const [allocSortKey, setAllocSortKey] = useState("allocPct")
+  const [allocSortDir, setAllocSortDir] = useState("desc")
+
+  const toggleCat = name => setExpandedCats(prev => {
+    const next = new Set(prev)
+    next.has(name) ? next.delete(name) : next.add(name)
+    return next
+  })
+
+  const allocTable = useMemo(() => {
+    if (rows.length === 0 && cashTotal <= 0) return []
+    const keyOf = r => {
+      if (allocMode === "class")   return r.cls || "Equity"
+      if (allocMode === "region")  return r.region === "TH" ? (th ? "ไทย" : "Thailand") : (th ? "สหรัฐฯ" : "United States")
+      if (allocMode === "holding") return r.ticker
+      return r.cls === "Equity"
+        ? (r.region === "TH" ? (th ? "หุ้นไทย" : "TH Equity") : (th ? "หุ้น US" : "US Equity"))
+        : r.cls
+    }
+    const map = {}
+    rows.forEach(r => {
+      const k = keyOf(r)
+      if (!map[k]) map[k] = { name: k, value: 0, costBasis: 0, pl: 0, holdings: [] }
+      map[k].value    += r.value
+      map[k].costBasis += r.shares * r.cost  // per-share cost × shares = total cost basis
+      map[k].pl       += r.pl
+      map[k].holdings.push(r)
+    })
+    if (cashTotal > 0) {
+      const cashKey = th ? "เงินสด" : "Cash"
+      map[cashKey] = { name: cashKey, value: cashTotal, costBasis: cashTotal, pl: 0, holdings: [], _cash: true }
+    }
+    const denom = hasCash ? netWorth : totalValue
+    return Object.values(map).map(g => ({
+      ...g,
+      plPct:    g.costBasis > 0 ? (g.pl / g.costBasis) * 100 : 0,
+      allocPct: denom > 0 ? (g.value / denom) * 100 : 0,
+      count:    new Set(g.holdings.map(r => r.ticker)).size,
+      color:    allocClass.find(a => a.name === g.name)?.color || (g._cash ? "oklch(0.82 0.04 230)" : "var(--ink-4)"),
+    }))
+  }, [rows, allocMode, th, cashTotal, hasCash, netWorth, totalValue, allocClass])
+
+  const sortedAllocTable = useMemo(() => {
+    return [...allocTable].sort((a, b) => {
+      const av = a[allocSortKey], bv = b[allocSortKey]
+      const cmp = typeof av === "string" ? av.localeCompare(bv) : (av ?? 0) - (bv ?? 0)
+      return allocSortDir === "asc" ? cmp : -cmp
+    })
+  }, [allocTable, allocSortKey, allocSortDir])
+
+  const setAllocSort = key => {
+    if (allocSortKey === key) setAllocSortDir(d => d === "asc" ? "desc" : "asc")
+    else { setAllocSortKey(key); setAllocSortDir("desc") }
+  }
+
   // Top movers — group same-ticker lots first, then sort by |changePct|
   const movers = useMemo(() => {
     const grouped = groupRowsByTicker(rows)
@@ -1138,6 +1195,138 @@ function LiveDashboardPage({ t, lang, ccy, setRoute, liveHoldings, prices = {}, 
           </table>
         </div>
       </section>
+
+      {/* ── ROW 2.5: Allocation breakdown table ── */}
+      {allocTable.length > 0 && (
+        <section style={{ marginBottom: 16 }}>
+          <div className="card" style={{ padding: 0, overflow: "hidden" }}>
+            {/* Table header row */}
+            <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13 }}>
+              <thead>
+                <tr style={{ borderBottom: "1px solid var(--line)" }}>
+                  <th style={{ padding: "12px 20px", textAlign: "left", fontWeight: 600, fontSize: 11, letterSpacing: "0.06em", textTransform: "uppercase", color: "var(--ink-3)", width: "40%" }}>
+                    {th ? "กลุ่ม" : "Category"}
+                  </th>
+                  <th onClick={() => setAllocSort("value")} style={{ padding: "12px 16px", textAlign: "right", fontWeight: 600, fontSize: 11, letterSpacing: "0.06em", textTransform: "uppercase", color: allocSortKey === "value" ? "var(--accent-ink)" : "var(--ink-3)", cursor: "pointer", userSelect: "none", width: "25%" }}>
+                    {th ? "มูลค่า / ต้นทุน" : "Value / Invested"} {allocSortKey === "value" ? (allocSortDir === "desc" ? "↓" : "↑") : ""}
+                  </th>
+                  <th onClick={() => setAllocSort("pl")} style={{ padding: "12px 16px", textAlign: "right", fontWeight: 600, fontSize: 11, letterSpacing: "0.06em", textTransform: "uppercase", color: allocSortKey === "pl" ? "var(--accent-ink)" : "var(--ink-3)", cursor: "pointer", userSelect: "none", width: "20%" }}>
+                    {th ? "กำไร/ขาดทุน" : "Gain"} {allocSortKey === "pl" ? (allocSortDir === "desc" ? "↓" : "↑") : ""}
+                  </th>
+                  <th onClick={() => setAllocSort("allocPct")} style={{ padding: "12px 20px", textAlign: "right", fontWeight: 600, fontSize: 11, letterSpacing: "0.06em", textTransform: "uppercase", color: allocSortKey === "allocPct" ? "var(--accent-ink)" : "var(--ink-3)", cursor: "pointer", userSelect: "none", width: "15%" }}>
+                    {th ? "สัดส่วน" : "Allocation"} {allocSortKey === "allocPct" ? (allocSortDir === "desc" ? "↓" : "↑") : ""}
+                  </th>
+                </tr>
+              </thead>
+              <tbody>
+                {sortedAllocTable.map((g, gi) => {
+                  const expanded = expandedCats.has(g.name)
+                  const isLast = gi === sortedAllocTable.length - 1
+                  return (
+                    <>
+                      {/* Category row */}
+                      <tr key={g.name}
+                        onClick={() => !g._cash && g.holdings.length > 0 && toggleCat(g.name)}
+                        style={{ borderBottom: (expanded || isLast) ? "none" : "1px solid var(--line)", cursor: g._cash || g.holdings.length === 0 ? "default" : "pointer", transition: "background 0.1s" }}
+                        onMouseEnter={e => { if (!g._cash) e.currentTarget.style.background = "var(--bg-2)" }}
+                        onMouseLeave={e => { e.currentTarget.style.background = "" }}>
+                        {/* Name */}
+                        <td style={{ padding: "14px 20px" }}>
+                          <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
+                            {/* Color bar */}
+                            <div style={{ width: 4, height: 36, borderRadius: 2, background: g.color, flexShrink: 0 }} />
+                            <div style={{ width: 36, height: 36, borderRadius: 10, background: g.color + "22", display: "grid", placeItems: "center", flexShrink: 0 }}>
+                              <span style={{ fontSize: 16 }}>
+                                {g._cash ? "💵" : g.name.includes("TH") || g.name.includes("ไทย") ? "🇹🇭" : g.name.includes("US") || g.name.includes("สหรัฐ") ? "🇺🇸" : g.name === "Crypto" ? "₿" : g.name === "Bond" || g.name === "พันธบัตร" ? "📄" : g.name === "Commodity" || g.name === "ทองคำ" ? "🥇" : "📊"}
+                              </span>
+                            </div>
+                            <div>
+                              <div style={{ fontWeight: 600, fontSize: 13 }}>{g.name}</div>
+                              {!g._cash && <div className="muted" style={{ fontSize: 11, marginTop: 1 }}>{g.count} {th ? "รายการ" : g.count === 1 ? "item" : "items"}</div>}
+                            </div>
+                            {!g._cash && g.holdings.length > 0 && (
+                              <span style={{ marginLeft: "auto", color: "var(--ink-4)", fontSize: 11, transition: "transform 0.2s", transform: expanded ? "rotate(90deg)" : "none", display: "inline-block" }}>›</span>
+                            )}
+                          </div>
+                        </td>
+                        {/* Value / Invested */}
+                        <td style={{ padding: "14px 16px", textAlign: "right" }}>
+                          <div style={{ fontWeight: 500, fontFamily: "var(--font-display)", fontSize: 14 }}>
+                            {LUMEN_FMT.money(g.value, ccy, { compact: true })}
+                          </div>
+                          {!g._cash && g.costBasis > 0 && (
+                            <div className="muted" style={{ fontSize: 11, fontFamily: "var(--font-mono)", marginTop: 2 }}>
+                              {LUMEN_FMT.money(g.costBasis, ccy, { compact: true })}
+                            </div>
+                          )}
+                        </td>
+                        {/* Gain */}
+                        <td style={{ padding: "14px 16px", textAlign: "right" }}>
+                          {g._cash || g.costBasis === 0 ? (
+                            <span className="muted" style={{ fontSize: 12 }}>—</span>
+                          ) : (
+                            <>
+                              <div style={{ fontWeight: 500, color: g.pl >= 0 ? "var(--gain)" : "var(--loss)", fontSize: 13 }}>
+                                {g.pl >= 0 ? "+" : ""}{LUMEN_FMT.money(g.pl, ccy, { compact: true })}
+                              </div>
+                              <div style={{ fontSize: 11, color: g.pl >= 0 ? "var(--gain)" : "var(--loss)", fontFamily: "var(--font-mono)", marginTop: 2, display: "flex", alignItems: "center", justifyContent: "flex-end", gap: 3 }}>
+                                <span style={{ fontSize: 8 }}>{g.pl >= 0 ? "▲" : "▼"}</span>
+                                {Math.abs(g.plPct).toFixed(2)}%
+                              </div>
+                            </>
+                          )}
+                        </td>
+                        {/* Allocation % */}
+                        <td style={{ padding: "14px 20px", textAlign: "right" }}>
+                          <div style={{ fontWeight: 600, fontSize: 14, fontFamily: "var(--font-display)" }}>
+                            {g.allocPct.toFixed(2)}%
+                          </div>
+                          {/* Mini bar */}
+                          <div style={{ height: 3, borderRadius: 99, background: "var(--line)", marginTop: 4, overflow: "hidden" }}>
+                            <div style={{ height: "100%", width: `${g.allocPct}%`, background: g.color, borderRadius: 99 }} />
+                          </div>
+                        </td>
+                      </tr>
+                      {/* Expanded holdings rows */}
+                      {expanded && g.holdings.map((h, hi) => (
+                        <tr key={h.ticker + hi}
+                          style={{ background: "var(--bg-2)", borderBottom: hi === g.holdings.length - 1 ? "1px solid var(--line)" : "none" }}>
+                          <td style={{ padding: "10px 20px 10px 72px" }}>
+                            <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+                              <TickerLogo ticker={h.ticker} logoUrl={h.logo_url} region={h.region} cls={h.cls} size={26} />
+                              <div>
+                                <div style={{ fontWeight: 500, fontSize: 12 }}>{h.ticker}</div>
+                                <div className="muted" style={{ fontSize: 10 }}>{h.name}</div>
+                              </div>
+                            </div>
+                          </td>
+                          <td style={{ padding: "10px 16px", textAlign: "right" }}>
+                            <div style={{ fontSize: 12, fontFamily: "var(--font-display)" }}>{LUMEN_FMT.money(h.value, ccy, { compact: true })}</div>
+                            <div className="muted" style={{ fontSize: 10, fontFamily: "var(--font-mono)", marginTop: 1 }}>{LUMEN_FMT.money(h.shares * h.cost, ccy, { compact: true })}</div>
+                          </td>
+                          <td style={{ padding: "10px 16px", textAlign: "right" }}>
+                            {h.pl != null && h.costBasis !== 0 ? (
+                              <>
+                                <div style={{ fontSize: 12, color: h.pl >= 0 ? "var(--gain)" : "var(--loss)" }}>{h.pl >= 0 ? "+" : ""}{LUMEN_FMT.money(h.pl, ccy, { compact: true })}</div>
+                                <div style={{ fontSize: 10, fontFamily: "var(--font-mono)", color: h.pl >= 0 ? "var(--gain)" : "var(--loss)", marginTop: 1 }}>{h.plPct >= 0 ? "+" : ""}{h.plPct?.toFixed(1)}%</div>
+                              </>
+                            ) : <span className="muted" style={{ fontSize: 11 }}>—</span>}
+                          </td>
+                          <td style={{ padding: "10px 20px", textAlign: "right" }}>
+                            <div className="muted" style={{ fontSize: 12, fontFamily: "var(--font-mono)" }}>
+                              {(hasCash ? netWorth : totalValue) > 0 ? (h.value / (hasCash ? netWorth : totalValue) * 100).toFixed(1) : "0.0"}%
+                            </div>
+                          </td>
+                        </tr>
+                      ))}
+                    </>
+                  )
+                })}
+              </tbody>
+            </table>
+          </div>
+        </section>
+      )}
 
       {/* ── ROW 3: Goals + Insights ── */}
       <section className="grid grid-12" style={{ marginBottom: 16 }}>
