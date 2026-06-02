@@ -222,27 +222,46 @@ export function ToolsPage({ t, lang, ccy, dataState, liveHoldings = [], prices =
       if (s.name === "Cash") return
       const candidates = s.candidates || []
       if (candidates.length === 0) return
-      // Tolerance band: skip classes whose current weight is within `band`
-      // percentage points of target (avoids churn on already-balanced classes)
       const driftPP = s.curPct - s.tgtPct
       if (Math.abs(driftPP) < band) return
 
+      // Compute within-class weight and target for each candidate
+      const classTotal = candidates.reduce((sum, c) => sum + c.value, 0)
+      const withContext = candidates.map(c => {
+        const currentWt = classTotal > 0 ? c.value / classTotal : 0
+        // Use hybrid per-ticker target if set, otherwise equal weight within class
+        const hybridTarget = effHybrid[c.ticker]
+        const classTarget = s.tgt > 0 ? (hybridTarget != null ? hybridTarget / s.tgt : 1 / candidates.length) : 1 / candidates.length
+        return { ...c, withinClassPct: currentWt * 100, withinClassTarget: classTarget * 100, drift: currentWt - classTarget }
+      })
+
       if (s.delta > 0) {
-        // Underweight → buy (reserve est. fees so the total outlay fits budget)
-        const sorted = [...candidates].sort((a, b) => a.value - b.value)
-        const split = Math.min(2, sorted.length)
-        sorted.slice(0, split).forEach(c => {
-          const amt = s.delta / split
-          const effPrice = c.price * (1 + FEE_RATE(c.region))   // price incl. fee reserve (THB)
+        // Underweight → buy most underweight holdings first
+        const sorted = [...withContext].sort((a, b) => a.drift - b.drift)  // most underweight first
+        let remaining = s.delta
+        for (const c of sorted.slice(0, Math.min(3, sorted.length))) {
+          if (remaining <= 10) break
+          // Allocate proportionally to degree of underweight, min 1 share worth
+          const share = sorted.length === 1 ? 1 : Math.max(0.2, (-c.drift + 0.01) / sorted.slice(0, Math.min(3, sorted.length)).reduce((s, x) => s + Math.max(0.01, -x.drift + 0.01), 0))
+          const amt = Math.min(remaining, s.delta * share)
+          const effPrice = c.price * (1 + FEE_RATE(c.region))
           const sharesNeeded = sizeShares(amt, effPrice, c.region)
-          if (sharesNeeded > 0) {
-            out.push({ action: "Buy", ticker: c.ticker, name: c.name, shares: sharesNeeded, priceNative: c.priceNative, nativeCcy: c.nativeCcy, amount: sharesNeeded * c.price, cls: s.name, region: c.region, logoUrl: c.logo_url, assetClass: c.cls })
-          }
-        })
+          if (sharesNeeded <= 0) continue
+          const actualAmt = sharesNeeded * c.price
+          out.push({
+            action: "Buy", ticker: c.ticker, name: c.name,
+            shares: sharesNeeded, priceNative: c.priceNative, nativeCcy: c.nativeCcy,
+            amount: actualAmt, cls: s.name, region: c.region, logoUrl: c.logo_url, assetClass: c.cls,
+            withinClassPct: +c.withinClassPct.toFixed(1),
+            withinClassTarget: +c.withinClassTarget.toFixed(1),
+            plPct: c.plPct != null ? +c.plPct.toFixed(1) : null,
+            peers: sorted.filter(x => x.ticker !== c.ticker).map(x => ({ ticker: x.ticker, withinClassPct: +x.withinClassPct.toFixed(1) })),
+          })
+          remaining -= actualAmt
+        }
       } else if (allowSales) {
-        // Overweight → sell the largest lot, capping each candidate at the
-        // shares actually held so we never suggest selling more than we own.
-        const sorted = [...candidates].sort((a, b) => b.value - a.value)
+        // Overweight → sell most overweight holdings first
+        const sorted = [...withContext].sort((a, b) => b.drift - a.drift)  // most overweight first
         let remaining = Math.abs(s.delta)
         for (const c of sorted) {
           if (remaining <= 0) break
@@ -251,13 +270,21 @@ export function ToolsPage({ t, lang, ccy, dataState, liveHoldings = [], prices =
           const shares = Math.min(wanted, held)
           if (shares <= 0) continue
           const amount = shares * c.price
-          out.push({ action: "Sell", ticker: c.ticker, name: c.name, shares, priceNative: c.priceNative, nativeCcy: c.nativeCcy, amount, cls: s.name, region: c.region, logoUrl: c.logo_url, assetClass: c.cls })
+          out.push({
+            action: "Sell", ticker: c.ticker, name: c.name,
+            shares, priceNative: c.priceNative, nativeCcy: c.nativeCcy,
+            amount, cls: s.name, region: c.region, logoUrl: c.logo_url, assetClass: c.cls,
+            withinClassPct: +c.withinClassPct.toFixed(1),
+            withinClassTarget: +c.withinClassTarget.toFixed(1),
+            plPct: c.plPct != null ? +c.plPct.toFixed(1) : null,
+            peers: sorted.filter(x => x.ticker !== c.ticker).map(x => ({ ticker: x.ticker, withinClassPct: +x.withinClassPct.toFixed(1) })),
+          })
           remaining -= amount
         }
       }
     })
     return out
-  }, [suggestions, allowSales, rows, total, showResult, band])
+  }, [suggestions, allowSales, rows, total, showResult, band, effHybrid])
 
   // cashRemaining in THB (depInTHB minus buy/sell amounts which are also THB)
   const cashRemaining = Math.max(0, depInTHB - trades.filter(tr => tr.action === "Buy").reduce((a, b) => a + b.amount, 0)
@@ -335,10 +362,16 @@ export function ToolsPage({ t, lang, ccy, dataState, liveHoldings = [], prices =
     const tradesPayload = trades.map(t => ({
       action: t.action,
       ticker: t.ticker,
+      name: t.name,
       shares: t.shares,
       priceNative: t.priceNative,
       nativeCcy: t.nativeCcy,
       amount: Math.round(t.amount),
+      cls: t.cls,
+      withinClassPct: t.withinClassPct,    // current weight within class (%)
+      withinClassTarget: t.withinClassTarget, // target weight within class (%)
+      plPct: t.plPct,                      // unrealized P/L %
+      peers: t.peers,                      // other holdings in same class
     }))
     ai.run({
       lang,

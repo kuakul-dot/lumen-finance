@@ -242,9 +242,18 @@ function buildRebalancePrompt(portfolio, rb, lang) {
   const driftSummary = (rb.drift || []).map(d =>
     `${d.name}: เป้า ${d.targetPct}%, ปัจจุบัน ${d.nowPct}%, หลังปรับ ${d.afterPct}% (ส่วนต่าง ${d.diffPct >= 0 ? '+' : ''}${d.diffPct}%)`
   ).join('\n')
-  const tradeSummary = (rb.trades || []).map(t =>
-    `${t.action === 'Sell' ? 'ขาย' : 'ซื้อ'} ${t.ticker} ${t.shares} หุ้น @ ${t.priceNative} ${t.nativeCcy} (≈ ฿${Math.round(t.amount).toLocaleString()})`
-  ).join('\n')
+  const tradeSummary = (rb.trades || []).map(t => {
+    const action = t.action === 'Sell' ? 'ขาย' : 'ซื้อ'
+    const line = `${action} ${t.ticker} (${t.name || t.ticker}) ${t.shares} หุ้น @ ${t.priceNative} ${t.nativeCcy} ≈ ฿${Math.round(t.amount).toLocaleString()}`
+    const ctx = []
+    if (t.withinClassPct != null && t.withinClassTarget != null)
+      ctx.push(`น้ำหนักในกลุ่ม ${t.cls}: ปัจจุบัน ${t.withinClassPct}% → เป้า ${t.withinClassTarget}% (drift ${(t.withinClassPct - t.withinClassTarget).toFixed(1)}%)`)
+    if (t.plPct != null)
+      ctx.push(`P/L: ${t.plPct >= 0 ? '+' : ''}${t.plPct}%`)
+    if (t.peers && t.peers.length > 0)
+      ctx.push(`หุ้นอื่นในกลุ่มเดียวกัน: ${t.peers.map(p => `${p.ticker} (${p.withinClassPct}%)`).join(', ')}`)
+    return ctx.length ? `${line}\n  └ ${ctx.join(' · ')}` : line
+  }).join('\n')
   const modeText = rb.mode === 'withdraw' ? 'ถอนเงินออก' : 'เติมเงินเข้า'
   const cashRemainingTxt = typeof rb.cashRemaining === 'number'
     ? `เงินสดคงเหลือหลังเทรด: ฿${Math.round(rb.cashRemaining).toLocaleString()}`
@@ -268,19 +277,25 @@ ${driftSummary || '(ไม่มี)'}
 ${tradeSummary || '(ไม่มี)'}
 ${cashRemainingTxt}
 
-กรุณาอธิบาย markdown 4 หัวข้อ:
+กรุณาอธิบาย markdown 5 หัวข้อ:
 
 ## เหตุผลของแผน (Why)
-ทำไมระบบแนะนำ trade เหล่านี้ — bullet 2-3 ข้อ โยงกับ drift และ target
+ทำไมระบบเลือก trade เหล่านี้ — โยงกับ drift, target และ weight ภายในกลุ่ม bullet 2-3 ข้อ
+
+## วิเคราะห์รายเทรด (Per-trade)
+สำหรับแต่ละ trade อธิบาย 1 bullet ว่า:
+- ทำไมเลือก ticker นี้ (เทียบกับ peers ในกลุ่มเดียวกัน ถ้ามี)
+- ข้อดี/ข้อควรระวังเฉพาะตัว เช่น P/L, timing, concentration
+- หากมี peer ที่อาจพิจารณาแทนได้ → ระบุพร้อมเหตุผลสั้น ๆ
 
 ## ผลกระทบต่อพอร์ต (Impact)
-หลัง execute trades จะเกิดอะไร — เช่น risk concentration ลด, FX exposure เปลี่ยน, dividend stream เปลี่ยนแปลง
+หลัง execute: risk concentration, FX exposure, dividend stream — bullet 2-3 ข้อ
 
 ## ทางเลือกที่อาจพิจารณา (Alternatives)
-2-3 ทางเลือกที่แตกต่างจากแผนระบบ — เช่น "ขายตัวอื่นแทน", "ใช้ DCA แทน lump-sum", "เลื่อนทำเดือนหน้า"
+2 ทางเลือก เช่น DCA แทน lump-sum, เลื่อน, ขายตัวอื่นแทน
 
 ## ข้อควรระวัง (Watch-outs)
-สิ่งที่ต้องคิดก่อนกดทำ — ค่าธรรมเนียม, ภาษี (capital gains TH withholding), market timing, FX timing — bullet 2-3 ข้อ
+ค่าธรรมเนียม, ภาษี withholding, FX timing — bullet 2-3 ข้อ
 
 ลงท้ายด้วย: "บทวิเคราะห์นี้สร้างโดย AI เพื่อการศึกษาเท่านั้น ไม่ใช่คำแนะนำการลงทุน"
 
