@@ -119,10 +119,13 @@ export function useAiAnalysis() {
     }
   }
 
+  // Retry the last analysis with the same payload (no re-fetch of fundamentals/TA)
+  const retry = () => { if (payload) run(payload) }
+
   return {
     open, setOpen,
     provider, history, loading, chatLoading, chatInput, setChatInput, error,
     canChat: !!payload && !loading && history.length > 0,
-    run, ask, close, reset,
+    run, ask, close, reset, retry,
   }
 }

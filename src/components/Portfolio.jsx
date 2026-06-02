@@ -685,7 +685,7 @@ function LivePortfolioPage({ t, lang, ccy, portfolio, liveHoldings, prices = {},
           loading={ai.loading} error={ai.error} provider={ai.provider}
           history={ai.history} chatInput={ai.chatInput} chatLoading={ai.chatLoading}
           onChatInput={ai.setChatInput} onSend={ai.ask} canChat={ai.canChat}
-          onClose={ai.close} onRetry={() => {}} />
+          onClose={ai.close} onRetry={ai.retry} />
       )}
 
       {notesHolding && (
