@@ -443,14 +443,13 @@ function groupRowsByTicker(rows) {
 // ─── Allocation table category icon ──────────────────────────────────────────
 // Uses SVG/Icon for crisp rendering — no emoji (flags render as text on Windows)
 function AllocCategoryIcon({ name, color, isCash }) {
-  const s = { width: 18, height: 18, stroke: color, fill: "none", strokeWidth: 2, strokeLinecap: "round", strokeLinejoin: "round" }
+  const s = { width: 22, height: 22, stroke: color, fill: "none", strokeWidth: 1.8, strokeLinecap: "round", strokeLinejoin: "round" }
   if (isCash)
-    // wallet / deposit icon
     return <svg viewBox="0 0 24 24" style={s}><rect x="2" y="7" width="20" height="14" rx="2"/><path d="M16 11h2M2 7l5-4h10l5 4"/></svg>
   if (name.includes("TH") || name.includes("ไทย"))
-    return <span style={{ fontSize: 11, fontWeight: 700, color, letterSpacing: "-0.03em" }}>TH</span>
+    return <span style={{ fontSize: 13, fontWeight: 800, color, letterSpacing: "-0.03em" }}>TH</span>
   if (name.includes("US") || name.includes("สหรัฐ"))
-    return <span style={{ fontSize: 11, fontWeight: 700, color, letterSpacing: "-0.03em" }}>US</span>
+    return <span style={{ fontSize: 13, fontWeight: 800, color, letterSpacing: "-0.03em" }}>US</span>
   if (name === "Crypto")
     // simple ₿ bitcoin SVG path
     return <svg viewBox="0 0 24 24" style={s}><path d="M9 8h5a2 2 0 0 1 0 4H9m5 0h1a2 2 0 0 1 0 4H9m0-8v8m3-10v2m0 8v2M7 8h1m0 8H7"/></svg>
