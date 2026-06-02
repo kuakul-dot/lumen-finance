@@ -2,7 +2,7 @@
 import { PageHead, Delta, Icon, TickerLogo } from './Nav'
 import { Sparkline } from './Charts'
 import { LUMEN_FMT, LUMEN_DERIVE } from '../data'
-import { addHolding, updateHolding, deleteHolding, deriveHoldings, addTransaction, syncHoldingsFromTransactions, rebuildHolding, rebuildAllHoldings, updateHoldingMeta, getTransactions, getAllTransactions, computeRealized, updateTransaction, deleteTransaction, deleteTransactionsByTicker, applySplit, getGoals, upsertGoal, deleteGoal, upsertCashAccount, deleteCashAccount } from '../lib/db'
+import { addHolding, updateHolding, deleteHolding, deriveHoldings, addTransaction, syncHoldingsFromTransactions, rebuildHolding, rebuildAllHoldings, updateHoldingMeta, getTransactions, getAllTransactions, computeRealized, updateTransaction, deleteTransaction, deleteTransactionsByTicker, applySplit, upsertCashAccount, deleteCashAccount } from '../lib/db'
 import { fetchSplits, toYahooSymbol, fetchHistory } from '../lib/prices'
 import { computeTA } from '../lib/ta'
 import { AiAnalysisModal } from './AiModal'
@@ -415,12 +415,6 @@ function LivePortfolioPage({ t, lang, ccy, portfolio, liveHoldings, prices = {},
         <button className={tab === "holdings" ? "on" : ""} onClick={() => setTab("holdings")}>
           {th ? "หลักทรัพย์" : "Holdings"} {allGrouped.length > 0 && <span style={{ opacity: 0.6, marginLeft: 4 }}>{allGrouped.length}</span>}
         </button>
-        <button className={tab === "dividends" ? "on" : ""} onClick={() => setTab("dividends")}>
-          {th ? "ปันผล" : "Dividends"}
-        </button>
-        <button className={tab === "goals" ? "on" : ""} onClick={() => setTab("goals")}>
-          {th ? "เป้าหมาย" : "Goals"}
-        </button>
         <button className={tab === "cash" ? "on" : ""} onClick={() => setTab("cash")}>
           {th ? "เงินสด" : "Cash"} {cashAccounts.length > 0 && <span style={{ opacity: 0.6, marginLeft: 4 }}>{cashAccounts.length}</span>}
         </button>
@@ -434,10 +428,6 @@ function LivePortfolioPage({ t, lang, ccy, portfolio, liveHoldings, prices = {},
 
       {tab === "transactions" ? (
         <TransactionsTab transactions={transactions} holdings={liveHoldings} loading={txLoading} lang={lang} ccy={ccy} fxRate={fxRate} onReload={async () => { await loadTransactions(); await refreshHoldings?.() }} portfolioId={portfolio?.id} />
-      ) : tab === "dividends" ? (
-        <DividendsTab rows={rows} lang={lang} ccy={ccy} fxRate={fxRate} />
-      ) : tab === "goals" ? (
-        <GoalsTab lang={lang} ccy={ccy} portfolioId={portfolio?.id} userId={session?.user?.id} liveHoldings={liveHoldings} prices={prices} fxRate={fxRate} />
       ) : tab === "cash" ? (
         <CashTab lang={lang} ccy={ccy} portfolioId={portfolio?.id} cashAccounts={cashAccounts} refreshCashAccounts={refreshCashAccounts} fxRate={fxRate} />
       ) : tab === "categories" ? (
@@ -2607,136 +2597,6 @@ function ImportPDFModal({ lang, portfolioId, onClose, onImported }) {
   )
 }
 
-// ─── Dividends Tab ───────────────────────────────────────────────────────────
-function DividendsTab({ rows, lang, ccy, fxRate }) {
-  const th = lang === "th"
-  const FMT = LUMEN_FMT
-  const divRows = useMemo(() => {
-    return [...rows]
-      .filter(r => r.divYield > 0)
-      .map(r => ({
-        ...r,
-        annualDiv: r.value * (r.divYield / 100),
-        perShare: r.priceNative * (r.divYield / 100) / (r.divFrequency || 1),
-      }))
-      .sort((a, b) => b.annualDiv - a.annualDiv)
-  }, [rows])
-
-  const totalAnnual = divRows.reduce((s, r) => s + r.annualDiv, 0)
-  const totalValue  = rows.reduce((s, r) => s + r.value, 0)
-  const blendedYield = totalValue > 0 ? (totalAnnual / totalValue) * 100 : 0
-
-  if (divRows.length === 0)
-    return <div className="card empty"><p className="muted">{th ? "ไม่มีหลักทรัพย์ที่จ่ายปันผล" : "No dividend-paying holdings"}</p></div>
-
-  return (
-    <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
-      {/* Summary */}
-      <div className="card" style={{ display: "grid", gridTemplateColumns: "repeat(3,1fr)", gap: 16 }}>
-        <div>
-          <div className="label-up" style={{ fontSize: 10, marginBottom: 4 }}>{th ? "ปันผลรายปี (คาดการณ์)" : "Est. annual dividend"}</div>
-          <div style={{ fontSize: 22, fontWeight: 700, fontFamily: "var(--font-display)" }}>{FMT.money(totalAnnual, ccy, { compact: true })}</div>
-        </div>
-        <div>
-          <div className="label-up" style={{ fontSize: 10, marginBottom: 4 }}>{th ? "Yield รวม" : "Blended yield"}</div>
-          <div style={{ fontSize: 22, fontWeight: 700, fontFamily: "var(--font-display)" }}>{blendedYield.toFixed(2)}%</div>
-        </div>
-        <div>
-          <div className="label-up" style={{ fontSize: 10, marginBottom: 4 }}>{th ? "หลักทรัพย์จ่ายปันผล" : "Dividend payers"}</div>
-          <div style={{ fontSize: 22, fontWeight: 700, fontFamily: "var(--font-display)" }}>{divRows.length}</div>
-        </div>
-      </div>
-      {/* Table */}
-      <div className="card" style={{ padding: 0, overflow: "hidden" }}>
-        <table className="table">
-          <thead><tr>
-            <th>{th ? "หลักทรัพย์" : "Holding"}</th>
-            <th className="num">{th ? "มูลค่า" : "Value"}</th>
-            <th className="num">Yield</th>
-            <th className="num">{th ? "ปันผล/ปี (คาด)" : "Est. annual"}</th>
-            <th className="num">{th ? "ต่อครั้ง/หุ้น" : "Per share/period"}</th>
-            <th className="num">{th ? "จ่ายต่อปี" : "Freq."}</th>
-          </tr></thead>
-          <tbody>
-            {divRows.map(r => (
-              <tr key={r.ticker}>
-                <td>
-                  <div className="ticker">
-                    <TickerLogo ticker={r.ticker} logoUrl={r.logo_url} region={r.region} cls={r.cls} size={28} />
-                    <div>
-                      <div style={{ fontWeight: 500 }}>{r.ticker}</div>
-                      <div className="muted" style={{ fontSize: 11 }}>{r.name}</div>
-                    </div>
-                  </div>
-                </td>
-                <td className="num">{FMT.money(r.value, ccy, { compact: true })}</td>
-                <td className="num" style={{ color: "var(--gain)", fontWeight: 500 }}>{r.divYield.toFixed(2)}%</td>
-                <td className="num" style={{ fontWeight: 600 }}>{FMT.money(r.annualDiv, ccy, { compact: true })}</td>
-                <td className="num muted">{r.perShare > 0 ? FMT.moneyNative(r.perShare, r.nativeCcy) : "—"}</td>
-                <td className="num muted">{r.divFrequency}×</td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      </div>
-    </div>
-  )
-}
-
-// ─── Goals Tab ────────────────────────────────────────────────────────────────
-function GoalsTab({ lang, ccy, portfolioId, userId, liveHoldings, prices, fxRate }) {
-  const th = lang === "th"
-  const FMT = LUMEN_FMT
-  const [goals, setGoals] = useState([])
-  const [loading, setLoading] = useState(true)
-
-  useEffect(() => {
-    if (!userId) { setLoading(false); return }
-    getGoals(userId).then(g => { setGoals(g || []); setLoading(false) }).catch(() => setLoading(false))
-  }, [userId])
-
-  if (!userId) return (
-    <div className="card empty">
-      <p className="muted">{th ? "กรุณาลงชื่อเข้าใช้เพื่อดูเป้าหมาย" : "Sign in to view goals"}</p>
-    </div>
-  )
-  if (loading) return <div className="card empty"><p className="muted">{th ? "กำลังโหลด…" : "Loading…"}</p></div>
-  if (goals.length === 0) return (
-    <div className="card empty">
-      <p className="muted" style={{ marginBottom: 12 }}>{th ? "ยังไม่มีเป้าหมาย" : "No goals yet"}</p>
-    </div>
-  )
-
-  return (
-    <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(280px, 1fr))", gap: 14 }}>
-      {goals.map(g => {
-        const current = Number(g.current_amount) || 0
-        const target = Number(g.target_amount) || 1
-        const pct = Math.min(100, (current / target) * 100)
-        const remaining = Math.max(0, target - current)
-        const monthly = Number(g.monthly_contribution) || 0
-        const monthsLeft = monthly > 0 ? Math.ceil(remaining / monthly) : null
-        return (
-          <div key={g.id} className="card" style={{ padding: "20px 22px" }}>
-            <div style={{ fontWeight: 600, fontSize: 15, marginBottom: 4 }}>{g.name}</div>
-            <div style={{ fontSize: 22, fontWeight: 700, fontFamily: "var(--font-display)", marginBottom: 2 }}>
-              {FMT.money(current, ccy, { compact: true })}
-              <span className="muted" style={{ fontSize: 13, fontWeight: 400, marginLeft: 6 }}>/ {FMT.money(target, ccy, { compact: true })}</span>
-            </div>
-            <div style={{ height: 8, borderRadius: 99, background: "var(--line)", margin: "10px 0 6px", overflow: "hidden" }}>
-              <div style={{ height: "100%", width: pct + "%", borderRadius: 99, background: pct >= 100 ? "var(--gain)" : "var(--accent)", transition: "width 0.4s ease" }} />
-            </div>
-            <div style={{ display: "flex", justifyContent: "space-between", fontSize: 11, color: "var(--ink-3)" }}>
-              <span>{pct.toFixed(0)}%</span>
-              {monthsLeft != null && <span>{monthsLeft} {th ? "เดือน" : "mo"}</span>}
-            </div>
-          </div>
-        )
-      })}
-    </div>
-  )
-}
-
 // ─── Cash Tab ─────────────────────────────────────────────────────────────────
 function CashTab({ lang, ccy, portfolioId, cashAccounts, refreshCashAccounts, fxRate }) {
   const th = lang === "th"
@@ -3052,7 +2912,6 @@ function DemoPortfolioPage({ t, lang, ccy, setRoute }) {
       if (filter === "US") return r.region === "US" && r.cls !== "Crypto"
       if (filter === "Crypto") return r.cls === "Crypto"
       if (filter === "Bonds") return r.cls === "Bond"
-      if (filter === "Commodity") return r.cls === "Commodity"
       return true
     })
     return [...list].sort((a, b) => {
@@ -3072,7 +2931,6 @@ function DemoPortfolioPage({ t, lang, ccy, setRoute }) {
     { id: "TH",        label: th ? "หุ้นไทย"  : "TH stocks", count: rows.filter(r => r.region === "TH").length },
     { id: "US",        label: th ? "หุ้น US"  : "US stocks", count: rows.filter(r => r.region === "US" && r.cls !== "Crypto").length },
     { id: "Bonds",     label: th ? "พันธบัตร" : "Bonds",     count: rows.filter(r => r.cls === "Bond").length },
-    { id: "Commodity", label: th ? "ทองคำ"    : "Gold",      count: rows.filter(r => r.cls === "Commodity").length },
     { id: "Crypto",    label: th ? "คริปโต"   : "Crypto",    count: rows.filter(r => r.cls === "Crypto").length },
   ]
 
