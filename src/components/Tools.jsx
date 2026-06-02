@@ -524,6 +524,37 @@ export function ToolsPage({ t, lang, ccy, dataState, liveHoldings = [], prices =
         }
       />
 
+      {/* Rebalancing Rules Guide */}
+      <div className="card" style={{ marginBottom: 24, background: "oklch(0.98 0.02 200)", border: "1px solid oklch(0.85 0.05 200)" }}>
+        <h4 style={{ fontSize: 14, fontWeight: 600, marginBottom: 12, display: "flex", alignItems: "center", gap: 8 }}>
+          <span style={{ fontSize: 16 }}>📋</span>
+          {th ? "กฎการปรับสมดุล" : "Rebalancing Rules"}
+        </h4>
+        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 16, fontSize: 13 }}>
+          <div>
+            <div style={{ fontWeight: 500, marginBottom: 6, color: "oklch(0.35 0.10 200)" }}>
+              📅 {th ? "กฎปฏิทิน (Annual)" : "Calendar Rule (Annual)"}
+            </div>
+            <div className="muted" style={{ lineHeight: 1.6, fontSize: 12 }}>
+              {th ? "ปรับพอร์ต 1 ครั้งต่อปี แม้ว่าเบี่ยงเล็กน้อย" : "Rebalance once per year, even if drift is small"}
+            </div>
+          </div>
+          <div>
+            <div style={{ fontWeight: 500, marginBottom: 6, color: "oklch(0.35 0.10 50)" }}>
+              📊 {th ? "กฎเบี่ยง (±5%)" : "Drift Rule (±5%)"}
+            </div>
+            <div className="muted" style={{ lineHeight: 1.6, fontSize: 12 }}>
+              {th ? "ปรับเมื่อสัดส่วนเบี่ยงไป >5% จากเป้า" : "Rebalance when allocation drifts >5% from target"}
+            </div>
+          </div>
+        </div>
+        <div style={{ marginTop: 12, paddingTop: 12, borderTop: "1px solid oklch(0.80 0.03 200)", fontSize: 12, color: "oklch(0.45 0.08 200)" }}>
+          {th
+            ? "💡 ระบบจะเตือนคุณถ้าเบี่ยงมากกว่า 5% หรือปรับไม่ได้เกิน 1 ปี"
+            : "💡 System alerts you if drift >5% OR over 1 year since last rebalance"}
+        </div>
+      </div>
+
       {/* Tool cards */}
       <div className="grid grid-3" style={{ marginBottom: 24, gap: 12 }}>
         <ToolCard active title={t.tools.rebalance} sub={t.tools.rebalanceSub} icon="filter" />
