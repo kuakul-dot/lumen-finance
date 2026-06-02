@@ -35,6 +35,16 @@ function loadBand() {
   return 5   // default ±5 percentage-point tolerance
 }
 
+const LAST_REBALANCE_KEY = "lumen_last_rebalance_date"
+function loadLastRebalance() {
+  try { const v = localStorage.getItem(LAST_REBALANCE_KEY); return v ? new Date(v) : null } catch {}
+  return null
+}
+
+function saveLastRebalance(date = new Date()) {
+  try { localStorage.setItem(LAST_REBALANCE_KEY, date.toISOString()) } catch {}
+}
+
 // ── Helpers ──────────────────────────────────────────────────────────────────
 function buildCurrentByClass(rows, cash) {
   const map = { "TH Equity": 0, "US Equity": 0, "Bonds": 0, "Gold": 0, "Crypto": 0, "Cash": cash }
@@ -90,6 +100,7 @@ export function ToolsPage({ t, lang, ccy, dataState, liveHoldings = [], prices =
   const [band,       setBand]       = useState(loadBand)   // tolerance (percentage points)
   const [copied,     setCopied]     = useState(false)
   const [openRow,    setOpenRow]    = useState(null)   // which drift row is expanded to show ฿ amounts
+  const [lastRebalance, setLastRebalance] = useState(loadLastRebalance)
   // ── AI rebalance explainer (optional — hides when /api/analyze 503s) ──
   const ai = useAiAnalysis()
   const [aiAvailable, setAiAvailable] = useState(false)
@@ -205,6 +216,16 @@ export function ToolsPage({ t, lang, ccy, dataState, liveHoldings = [], prices =
     const delta = targetValue - u.current
     return { name: u.key, current: u.current, target: targetValue, delta, curPct: total > 0 ? (u.current / total) * 100 : 0, tgtPct: u.tgt * 100, candidates: u.candidates }
   }), [units, newTotal, total])
+
+  // ── Rebalance recommendation logic ────────────────────────────────────────────
+  const maxDrift = useMemo(() => {
+    return suggestions.reduce((max, s) => Math.max(max, Math.abs(s.curPct - s.tgtPct)), 0)
+  }, [suggestions])
+
+  const daysSinceRebalance = lastRebalance ? Math.floor((Date.now() - lastRebalance.getTime()) / (1000 * 60 * 60 * 24)) : null
+  const isOverdue = daysSinceRebalance !== null && daysSinceRebalance >= 365
+  const isDriftHigh = maxDrift > 5
+  const needsRebalance = isOverdue || isDriftHigh
 
   // ── Suggested trades ─────────────────────────────────────────────────────────
   // Share sizing: US holdings (e.g. Dime) support fractional shares → keep 4
@@ -426,6 +447,57 @@ export function ToolsPage({ t, lang, ccy, dataState, liveHoldings = [], prices =
     })
   }
 
+  // Review portfolio and ask AI if rebalancing is needed
+  const reviewForRebalance = () => {
+    const stocksTotal = Math.round(total - cash)
+    const groupedStocks = rows.map(r => ({
+      ticker: r.ticker, region: r.region, cls: r.cls,
+      valueTHB: Math.round(r.value),
+      pctOfNetWorth: total > 0 ? +((r.value / total) * 100).toFixed(1) : 0,
+      pctOfStocks: stocksTotal > 0 ? +((r.value / stocksTotal) * 100).toFixed(1) : 0,
+    }))
+    const cashList = cashAccounts.map(a => ({
+      currency: a.currency || 'THB',
+      balanceTHB: Math.round((a.currency === 'USD' ? (Number(a.balance) || 0) * fxRate : (Number(a.balance) || 0))),
+    }))
+    const driftPayload = suggestions.map(s => ({
+      name: s.name,
+      targetPct: +s.tgtPct.toFixed(1),
+      nowPct: +s.curPct.toFixed(1),
+      diffPct: +(s.curPct - s.tgtPct).toFixed(1),
+    }))
+    ai.run({
+      lang,
+      kind: 'portfolioReview',
+      portfolio: {
+        counts: {
+          stocksTotal: groupedStocks.length,
+          stocksTH: groupedStocks.filter(s => s.region === 'TH').length,
+          stocksUS: groupedStocks.filter(s => s.region !== 'TH').length,
+          cashAccounts: cashList.length,
+        },
+        totals: {
+          netWorthTHB: Math.round(total),
+          stocksTHB: stocksTotal,
+          cashTHB: Math.round(cash),
+        },
+        stocks: groupedStocks,
+        cash: cashList,
+      },
+      rebalanceHealth: {
+        maxDrift: +maxDrift.toFixed(1),
+        lastRebalanceDate: lastRebalance ? lastRebalance.toLocaleDateString(th ? 'th-TH' : 'en-US') : (th ? "ไม่เคยปรับ" : "Never"),
+        daysSinceRebalance,
+        isOverdue,
+        isDriftHigh,
+        recommendations: {
+          calendarRule: isOverdue ? (th ? "ครบ 1 ปีแล้ว ควรปรับ" : "1+ year since last rebalance - time to adjust") : (th ? "ยังไม่ถึง 1 ปี" : "Less than 1 year"),
+          driftRule: isDriftHigh ? (th ? `เบี่ยงมากกว่า 5% (สูงสุด ${maxDrift.toFixed(1)}%)` : `Drifted >5% from target (max ${maxDrift.toFixed(1)}%)`) : (th ? "เบี่ยงน้อยกว่า 5% (ยังปลอดภัย)" : "Within 5% tolerance"),
+        },
+      },
+    })
+  }
+
   if (dataState === "empty") {
     return (
       <div className="shell fade-in">
@@ -548,6 +620,40 @@ export function ToolsPage({ t, lang, ccy, dataState, liveHoldings = [], prices =
 
         {/* Results panel */}
         <div className="col-span-7" style={{ display: "grid", gap: 16 }}>
+          {/* Rebalance recommendation banner */}
+          {needsRebalance && (
+            <div className="card" style={{
+              padding: 16,
+              background: isDriftHigh ? "oklch(0.96 0.08 50)" : "oklch(0.95 0.06 200)",
+              border: `1.5px solid ${isDriftHigh ? "oklch(0.65 0.20 50)" : "oklch(0.60 0.15 200)"}`,
+            }}>
+              <div style={{ display: "flex", alignItems: "flex-start", gap: 12 }}>
+                <div style={{ fontSize: 20, flexShrink: 0 }}>⚠️</div>
+                <div style={{ flex: 1 }}>
+                  <div style={{ fontSize: 14, fontWeight: 600, marginBottom: 4, color: isDriftHigh ? "oklch(0.42 0.15 50)" : "oklch(0.35 0.12 200)" }}>
+                    {th ? "ควรปรับพอร์ต" : "Time to rebalance"}
+                  </div>
+                  <div style={{ fontSize: 12.5, color: isDriftHigh ? "oklch(0.45 0.12 50)" : "oklch(0.40 0.10 200)", lineHeight: 1.6, marginBottom: 12 }}>
+                    {isOverdue ? (
+                      <>
+                        {th ? `ปรับครั้งล่าสุด: ${daysSinceRebalance} วันที่แล้ว` : `Last rebalanced: ${daysSinceRebalance} days ago`}
+                        <br />
+                      </>
+                    ) : null}
+                    {isDriftHigh ? (
+                      <>
+                        {th ? `สัดส่วนเบี่ยงไป ${maxDrift.toFixed(1)}% จากเป้า` : `Portfolio drifted ${maxDrift.toFixed(1)}% from target`}
+                      </>
+                    ) : null}
+                  </div>
+                  <button className="btn btn-sm" onClick={reviewForRebalance} disabled={ai.loading}>
+                    <Icon name="spark" size={13} /> {ai.loading ? (th ? "กำลังวิเคราะห์…" : "Analyzing…") : (th ? "วิเคราะห์ด้วย AI" : "Review with AI")}
+                  </button>
+                </div>
+              </div>
+            </div>
+          )}
+
           {/* Target editor */}
           {editTargets && (
             <div className="card" style={{ border: "1.5px solid var(--accent)" }}>
@@ -801,13 +907,18 @@ export function ToolsPage({ t, lang, ccy, dataState, liveHoldings = [], prices =
                 </tbody>
               </table>
             )}
-            <div style={{ display: "flex", gap: 8, marginTop: 16, justifyContent: "flex-end" }}>
-              <button className="btn btn-outline btn-sm" onClick={downloadCSV} disabled={!showResult || trades.length === 0}>
-                {th ? "ส่งออก CSV" : "Export CSV"}
+            <div style={{ display: "flex", gap: 8, marginTop: 16, justifyContent: "space-between", flexWrap: "wrap" }}>
+              <button className="btn btn-outline btn-sm" onClick={() => { saveLastRebalance(); setLastRebalance(new Date()); setShowResult(false) }} disabled={!showResult || trades.length === 0}>
+                <Icon name="check" size={13} /> {th ? "บันทึกปรับแล้ว" : "Mark as done"}
               </button>
-              <button className="btn btn-sm" onClick={copyTrades} disabled={!showResult || trades.length === 0}>
-                {copied ? (th ? "คัดลอกแล้ว ✓" : "Copied ✓") : (th ? "คัดลอกรายการ" : "Copy trades")}
-              </button>
+              <div style={{ display: "flex", gap: 8 }}>
+                <button className="btn btn-outline btn-sm" onClick={downloadCSV} disabled={!showResult || trades.length === 0}>
+                  {th ? "ส่งออก CSV" : "Export CSV"}
+                </button>
+                <button className="btn btn-sm" onClick={copyTrades} disabled={!showResult || trades.length === 0}>
+                  {copied ? (th ? "คัดลอกแล้ว ✓" : "Copied ✓") : (th ? "คัดลอกรายการ" : "Copy trades")}
+                </button>
+              </div>
             </div>
           </div>
         </div>

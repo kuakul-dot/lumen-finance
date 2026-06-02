@@ -43,6 +43,7 @@ export default async function handler(request) {
   const portfolio = body?.portfolio || {}
   const kind = body?.kind || 'overview'
   const extra = body?.rebalance || null
+  const rebalanceHealth = body?.rebalanceHealth || null
   const holding = body?.holding || null
   const fundamentals = body?.fundamentals || null
   const ta = body?.ta || null
@@ -57,6 +58,7 @@ export default async function handler(request) {
   let prompt
   if (isFollowUp)                prompt = buildFollowUpPrompt(portfolio, lang)
   else if (kind === 'rebalance') prompt = buildRebalancePrompt(portfolio, extra, lang)
+  else if (kind === 'portfolioReview') prompt = buildPortfolioReviewPrompt(portfolio, rebalanceHealth, lang)
   else if (kind === 'holding')   prompt = buildHoldingPrompt(portfolio, holding, fundamentals, ta, lang)
   else                           prompt = buildPrompt(portfolio, lang)
   const messages = [{ role: 'user', content: prompt }, ...history]
@@ -313,6 +315,71 @@ ${tradeSummary || '(none)'}
 ${cashRemainingTxt}
 
 Reply in markdown with sections: ## Why, ## Impact, ## Alternatives, ## Watch-outs (each 2-3 bullets). End with: "This is an AI-generated analysis for education only — not investment advice." Use "might/consider"; never recommend specific buys/sells outside the plan.`
+}
+
+// Portfolio health review — does the user need to rebalance?
+// Returns recommendations based on calendar-based (1 year) and drift-based (±5%) rules.
+function buildPortfolioReviewPrompt(portfolio, health, lang) {
+  health = health || {}
+  const totals = portfolio?.totals || {}
+  const counts = portfolio?.counts || {}
+  const driftSummary = (health.recommendations?.calendarRule || '') + '\n' + (health.recommendations?.driftRule || '')
+
+  return lang === 'th'
+    ? `คุณคือผู้ช่วยวิเคราะห์ว่าพอร์ตการลงทุนของผู้ใช้ควรปรับ (rebalance) หรือไม่ ตอบเป็นภาษาไทยลื่นๆ ไม่ใช่ที่ปรึกษาทางการเงิน
+
+ภาพรวมพอร์ต:
+- Net worth ฿${(totals.netWorthTHB || 0).toLocaleString()} (หุ้น ฿${(totals.stocksTHB || 0).toLocaleString()}, เงินสด ฿${(totals.cashTHB || 0).toLocaleString()})
+- หลักทรัพย์ทั้งหมด ${counts.stocksTotal || 0} (TH ${counts.stocksTH || 0}, US ${counts.stocksUS || 0})
+
+สถานะการปรับพอร์ต:
+- สัดส่วนเบี่ยงไปสูงสุด: ${health.maxDrift || 0}% จากเป้า
+- ปรับครั้งล่าสุด: ${health.lastRebalanceDate || "ไม่เคยปรับ"}
+- วันที่ผ่านมา: ${health.daysSinceRebalance || 0} วัน
+- ความเร่งด่วน (Overdue): ${health.isOverdue ? 'ใช่ (ครบ 1 ปีแล้ว)' : 'ไม่ยัง'}
+- เบี่ยงมากกว่า 5%: ${health.isDriftHigh ? 'ใช่' : 'ไม่'}
+
+กฎการปรับ:
+- กฎปฏิทิน: ${health.recommendations?.calendarRule || '?'}
+- กฎเบี่ยง: ${health.recommendations?.driftRule || '?'}
+
+โปรดวิเคราะห์กระชับใน 3 หัวข้อ:
+
+## สถานะพอร์ต
+ว่าพอร์ตอยู่ในสภาพไหน — ชั้นดีหรือต้องปรับ bullet 2-3 ข้อ
+
+## ควรปรับหรือไม่
+ตอบตรงประเด็น: "ควรปรับแล้ว" หรือ "ยังไม่ต้องปรับ" พร้อมเหตุผล (อ้างอิงกฎปฏิทินและเบี่ยง)
+
+## สิ่งที่ควรทำต่อไป
+1. ถ้าควรปรับ: ลองตั้ง tolerance band 5% แล้วกด Calculate เพื่อดูแผนการปรับ
+2. ถ้ายังไม่ต้อง: เช็คพอร์ตอีกครั้งเมื่อไหร่ (bullet 1-2 ข้อ เช่น "อีก X เดือน" หรือ "เมื่อใด drift เกิน Y%")
+
+ห้ามแนะนำซื้อ-ขาย ใช้คำว่า "ควร/อาจพิจารณา"`
+    : `You are a portfolio rebalance health checker. Reply in English concisely.
+
+Portfolio: net worth ฿${(totals.netWorthTHB || 0).toLocaleString()}, ${counts.stocksTotal || 0} holdings.
+Max drift: ${health.maxDrift || 0}% from target
+Last rebalance: ${health.lastRebalanceDate || "Never"}
+Days since: ${health.daysSinceRebalance || 0}
+Status: ${health.isOverdue ? '1+ year' : 'under 1 year'} · ${health.isDriftHigh ? 'drifted >5%' : 'within 5%'}
+
+Rules:
+- Calendar: ${health.recommendations?.calendarRule || '?'}
+- Drift: ${health.recommendations?.driftRule || '?'}
+
+Reply in 3 sections:
+## Portfolio Health
+Current state (2-3 bullets).
+
+## Should you rebalance?
+Answer directly: "Yes, time to rebalance" or "Not yet" with reasons.
+
+## Next step
+If yes: Set tolerance band to 5%, click Calculate, see the plan.
+If no: When to check next (1-2 bullets, e.g. "in X months" or "when drift exceeds Y%").
+
+Never recommend specific buys/sells; use "might/consider".`
 }
 
 // Compact prompt for follow-up turns — the AI already saw the full data on
