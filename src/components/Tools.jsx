@@ -301,6 +301,18 @@ export function ToolsPage({ t, lang, ccy, dataState, liveHoldings = [], prices =
   const cashRemaining = Math.max(0, depInTHB - trades.filter(tr => tr.action === "Buy").reduce((a, b) => a + b.amount, 0)
                                              + trades.filter(tr => tr.action === "Sell").reduce((a, b) => a + b.amount, 0))
 
+  // Actual post-trade delta per suggestion name — used to compute realistic AFTER %.
+  // In hybrid mode trades are keyed by ticker (= suggestion name); in class mode by cls.
+  const tradeDeltas = useMemo(() => {
+    const d = {}
+    trades.forEach(t => {
+      const key = targetMode === "hybrid" ? t.ticker : t.cls
+      if (!key) return
+      d[key] = (d[key] || 0) + (t.action === "Sell" ? -1 : 1) * t.amount
+    })
+    return d
+  }, [trades, targetMode])
+
   // Target classes you allocate to but hold nothing in — can't be rebalanced into
   const missingClasses = useMemo(() => {
     const has = {
@@ -367,7 +379,7 @@ export function ToolsPage({ t, lang, ccy, dataState, liveHoldings = [], prices =
       name: s.name,
       targetPct: +s.tgtPct.toFixed(1),
       nowPct: +s.curPct.toFixed(1),
-      afterPct: newTotal > 0 ? +((s.target / newTotal) * 100).toFixed(1) : 0,
+      afterPct: newTotal > 0 ? +((s.current + (tradeDeltas[s.name] || 0)) / newTotal * 100).toFixed(1) : 0,
       diffPct: +(s.curPct - s.tgtPct).toFixed(1),
     }))
     const tradesPayload = trades.map(t => ({
@@ -664,7 +676,8 @@ export function ToolsPage({ t, lang, ccy, dataState, liveHoldings = [], prices =
             </div>
             <div>
               {suggestions.map(s => {
-                const after = newTotal > 0 ? (s.target / newTotal) * 100 : 0
+                const tradeDelta = tradeDeltas[s.name] || 0
+                const after = newTotal > 0 ? (s.current + tradeDelta) / newTotal * 100 : 0
                 const before = s.curPct
                 const drift = before - s.tgtPct
                 return (
@@ -694,7 +707,7 @@ export function ToolsPage({ t, lang, ccy, dataState, liveHoldings = [], prices =
               {(() => {
                 const sumTgt = suggestions.reduce((s, x) => s + x.tgtPct, 0)
                 const sumNow = suggestions.reduce((s, x) => s + x.curPct, 0)
-                const sumAfter = suggestions.reduce((s, x) => s + (newTotal > 0 ? (x.target / newTotal) * 100 : 0), 0)
+                const sumAfter = suggestions.reduce((s, x) => s + (newTotal > 0 ? (x.current + (tradeDeltas[x.name] || 0)) / newTotal * 100 : 0), 0)
                 return (
                   <div style={{ display: "grid", gridTemplateColumns: "minmax(96px,150px) 42px 1fr 56px 60px 50px", alignItems: "center", gap: 10, padding: "8px 0 2px", borderTop: "2px solid var(--line)", marginTop: 2 }}>
                     <div className="label-up" style={{ fontSize: 9 }}>{th ? "รวม" : "Total"}</div>
