@@ -1083,7 +1083,7 @@ function LiveDashboardPage({ t, lang, ccy, setRoute, liveHoldings, prices = {}, 
 
       {/* ── ROW 2: Allocation + Top Movers ── */}
       <section className="grid grid-12" style={{ marginBottom: 16 }}>
-        <div className="card col-span-7">
+        <div className="card col-span-5">
           <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 20, gap: 8 }}>
             <h3 className="section-title">{t.dashboard.allocation}</h3>
             <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
@@ -1163,7 +1163,7 @@ function LiveDashboardPage({ t, lang, ccy, setRoute, liveHoldings, prices = {}, 
           })()}
         </div>
 
-        <div className="card col-span-5">
+        <div className="card col-span-7">
           <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 20 }}>
             <h3 className="section-title">{t.dashboard.topMovers}</h3>
             <button className="btn-ghost btn btn-sm" onClick={() => setRoute("portfolio")}>
