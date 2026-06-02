@@ -526,32 +526,39 @@ export function ToolsPage({ t, lang, ccy, dataState, liveHoldings = [], prices =
 
       {/* Rebalancing Rules Guide */}
       <div className="card" style={{ marginBottom: 24, background: "oklch(0.98 0.02 200)", border: "1px solid oklch(0.85 0.05 200)" }}>
-        <h4 style={{ fontSize: 14, fontWeight: 600, marginBottom: 12, display: "flex", alignItems: "center", gap: 8 }}>
+        <h4 style={{ fontSize: 14, fontWeight: 600, marginBottom: 14, display: "flex", alignItems: "center", gap: 8 }}>
           <span style={{ fontSize: 16 }}>📋</span>
-          {th ? "กฎการปรับสมดุล" : "Rebalancing Rules"}
+          {th ? "กฎการปรับสมดุล (เมื่อควรปรับ?)" : "Rebalancing Rules (When to rebalance?)"}
         </h4>
-        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 16, fontSize: 13 }}>
-          <div>
-            <div style={{ fontWeight: 500, marginBottom: 6, color: "oklch(0.35 0.10 200)" }}>
-              📅 {th ? "กฎปฏิทิน (Annual)" : "Calendar Rule (Annual)"}
+        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 12, fontSize: 12 }}>
+          <div style={{ padding: "10px 12px", borderRadius: 10, background: "white", border: "1px solid oklch(0.88 0.04 200)" }}>
+            <div style={{ fontWeight: 600, marginBottom: 6, color: "oklch(0.35 0.10 200)", fontSize: 13 }}>
+              📅 {th ? "กฎปฏิทิน" : "Calendar"}
             </div>
-            <div className="muted" style={{ lineHeight: 1.6, fontSize: 12 }}>
-              {th ? "ปรับพอร์ต 1 ครั้งต่อปี แม้ว่าเบี่ยงเล็กน้อย" : "Rebalance once per year, even if drift is small"}
+            <div className="muted" style={{ lineHeight: 1.6 }}>
+              {th ? "ปรับอย่างน้อย 1 ครั้ง/ปี แม้ว่าสัดส่วนยังใกล้เป้า เพื่อ reset ฐาน" : "Rebalance at least once per year even if drift is small, to reset your baseline"}
             </div>
           </div>
-          <div>
-            <div style={{ fontWeight: 500, marginBottom: 6, color: "oklch(0.35 0.10 50)" }}>
-              📊 {th ? "กฎเบี่ยง (±5%)" : "Drift Rule (±5%)"}
+          <div style={{ padding: "10px 12px", borderRadius: 10, background: "white", border: "1px solid oklch(0.88 0.04 50)" }}>
+            <div style={{ fontWeight: 600, marginBottom: 6, color: "oklch(0.40 0.14 50)", fontSize: 13 }}>
+              📊 {th ? "กฎเบี่ยง ±5%" : "Drift ±5%"}
             </div>
-            <div className="muted" style={{ lineHeight: 1.6, fontSize: 12 }}>
-              {th ? "ปรับเมื่อสัดส่วนเบี่ยงไป >5% จากเป้า" : "Rebalance when allocation drifts >5% from target"}
+            <div className="muted" style={{ lineHeight: 1.6 }}>
+              {th ? "ปรับทันทีเมื่อกลุ่มสินทรัพย์ใดเบี่ยงไป >5% จากเป้าหมาย (วัดที่ระดับ Class ไม่ใช่รายหุ้น)" : "Act immediately if any asset class drifts >5% from target — measured at class level, not per holding"}
+            </div>
+          </div>
+          <div style={{ padding: "10px 12px", borderRadius: 10, background: "white", border: "1px solid oklch(0.88 0.04 150)" }}>
+            <div style={{ fontWeight: 600, marginBottom: 6, color: "oklch(0.40 0.10 150)", fontSize: 13 }}>
+              💰 {th ? "เติมเงิน (Cash-flow)" : "Cash-flow"}
+            </div>
+            <div className="muted" style={{ lineHeight: 1.6 }}>
+              {th ? "ใช้เงินฝากใหม่ซื้อกลุ่มที่ขาด แทนการขาย ช่วยลดภาษีและค่าธรรมเนียม" : "Use new deposits to buy underweight classes instead of selling — reduces tax and fees"}
             </div>
           </div>
         </div>
-        <div style={{ marginTop: 12, paddingTop: 12, borderTop: "1px solid oklch(0.80 0.03 200)", fontSize: 12, color: "oklch(0.45 0.08 200)" }}>
-          {th
-            ? "💡 ระบบจะเตือนคุณถ้าเบี่ยงมากกว่า 5% หรือปรับไม่ได้เกิน 1 ปี"
-            : "💡 System alerts you if drift >5% OR over 1 year since last rebalance"}
+        <div style={{ marginTop: 12, paddingTop: 10, borderTop: "1px solid oklch(0.88 0.03 200)", fontSize: 11.5, color: "oklch(0.45 0.08 200)", display: "flex", gap: 16, flexWrap: "wrap" }}>
+          <span>⚠️ {th ? "Tolerance band คือ threshold ที่ระดับ Class (TH Equity, US Equity, Bonds...)" : "Tolerance band filters at Class level, not individual holdings"}</span>
+          <span>🚫 {th ? "ถ้ากลุ่มสมดุล → ไม่แนะนำแม้รายหุ้นเบี่ยง" : "If class is balanced, no trades suggested even if individual holdings drift"}</span>
         </div>
       </div>
 
@@ -626,19 +633,36 @@ export function ToolsPage({ t, lang, ccy, dataState, liveHoldings = [], prices =
           </label>
 
           {/* Tolerance band */}
-          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12, marginTop: 20 }}>
-            <div>
-              <div style={{ fontSize: 13, fontWeight: 500 }}>{th ? "ช่วงคลาดเคลื่อนที่ยอมรับ" : "Tolerance band"}</div>
-              <div className="muted" style={{ fontSize: 11 }}>
-                {th ? "ไม่ปรับถ้าเบี่ยงจากเป้าน้อยกว่านี้ (0 = ปรับทุกครั้ง)" : "Skip classes within this drift from target (0 = always)"}
+          <div style={{ marginTop: 20 }}>
+            <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12 }}>
+              <div style={{ fontSize: 13, fontWeight: 500 }}>{th ? "Tolerance Band (ขั้นต่ำที่ต้องปรับ)" : "Tolerance Band (min drift to trigger)"}</div>
+              <div style={{ display: "flex", alignItems: "center", gap: 4, flexShrink: 0 }}>
+                <CalcInput value={band}
+                  onChange={e => { setBand(Math.max(0, Math.min(50, parseFloat(e.target.value) || 0))); setShowResult(false) }}
+                  style={{ width: 56, padding: "6px 8px", borderRadius: 8, border: "1px solid var(--line)", background: "var(--bg)", fontSize: 14, textAlign: "right" }} />
+                <span className="muted" style={{ fontSize: 13 }}>%</span>
               </div>
             </div>
-            <div style={{ display: "flex", alignItems: "center", gap: 4, flexShrink: 0 }}>
-              <CalcInput value={band}
-                onChange={e => { setBand(Math.max(0, Math.min(50, parseFloat(e.target.value) || 0))); setShowResult(false) }}
-                style={{ width: 56, padding: "6px 8px", borderRadius: 8, border: "1px solid var(--line)", background: "var(--bg)", fontSize: 14, textAlign: "right" }} />
-              <span className="muted" style={{ fontSize: 13 }}>%</span>
+            <div style={{ marginTop: 8, padding: "8px 10px", borderRadius: 8, background: "var(--bg-2)", fontSize: 11.5, lineHeight: 1.7 }}>
+              {band === 0
+                ? <span style={{ color: "var(--gain)", fontWeight: 500 }}>
+                    {th ? "0% = ปรับทุกกลุ่มที่เบี่ยงแม้เพียงเล็กน้อย" : "0% = trade every class with any drift"}
+                  </span>
+                : <span className="muted">
+                    {th
+                      ? <>วัดที่ระดับ <strong>Class</strong> เช่น TH Equity, US Equity, Bonds — ถ้าเบี่ยง <strong>&lt; {band}%</strong> จะข้ามกลุ่มนั้น · เบี่ยง <strong>≥ {band}%</strong> ถึงแนะนำซื้อ/ขาย</>
+                      : <>Measured at <strong>Class</strong> level (TH Equity, US Equity, Bonds...) — classes drifting <strong>&lt; {band}%</strong> are skipped · only <strong>≥ {band}%</strong> triggers a trade</>
+                    }
+                  </span>
+              }
             </div>
+            {band > 0 && (
+              <div style={{ marginTop: 6, fontSize: 11, color: "var(--ink-3)" }}>
+                {th
+                  ? `💡 ถ้าไม่มีคำสั่งซื้อขาย → ลดเป็น 0% เพื่อดูทุกรายการ`
+                  : `💡 No trades showing? Set to 0% to see all suggestions`}
+              </div>
+            )}
           </div>
 
           <div style={{ display: "flex", gap: 10, marginTop: 24 }}>
