@@ -155,7 +155,7 @@ function LivePortfolioPage({ t, lang, ccy, portfolio, liveHoldings, prices = {},
     if (filter === "all") return rows
     return rows.filter(r =>
       filter === "TH"     ? r.region === "TH"  :
-      filter === "US"     ? r.region === "US"  :
+      filter === "US"     ? (r.region === "US" && r.cls !== "Crypto") :
       filter === "ETF"    ? r.cls === "ETF"    :
       filter === "Bond"   ? r.cls === "Bond"   :
       filter === "Crypto" ? r.cls === "Crypto" : true)
@@ -190,7 +190,7 @@ function LivePortfolioPage({ t, lang, ccy, portfolio, liveHoldings, prices = {},
   const filterDefs = useMemo(() => [
     { id: "all",    label: th ? "ทั้งหมด" : "All",       count: allGrouped.length },
     { id: "TH",     label: th ? "หุ้นไทย" : "TH",        count: allGrouped.filter(r => r.region === "TH").length },
-    { id: "US",     label: th ? "หุ้น US" : "US",        count: allGrouped.filter(r => r.region === "US").length },
+    { id: "US",     label: th ? "หุ้น US" : "US",        count: allGrouped.filter(r => r.region === "US" && r.cls !== "Crypto").length },
     { id: "ETF",    label: "ETF",                         count: allGrouped.filter(r => r.cls === "ETF").length },
     { id: "Bond",   label: th ? "พันธบัตร" : "Bonds",    count: allGrouped.filter(r => r.cls === "Bond").length },
     { id: "Crypto", label: th ? "คริปโต" : "Crypto",     count: allGrouped.filter(r => r.cls === "Crypto").length },
@@ -200,7 +200,7 @@ function LivePortfolioPage({ t, lang, ccy, portfolio, liveHoldings, prices = {},
     let list = rows
     if (filter !== "all") list = list.filter(r => {
       if (filter === "TH")     return r.region === "TH"
-      if (filter === "US")     return r.region === "US"
+      if (filter === "US")     return r.region === "US" && r.cls !== "Crypto"
       if (filter === "ETF")    return r.cls === "ETF"
       if (filter === "Bond")   return r.cls === "Bond"
       if (filter === "Crypto") return r.cls === "Crypto"
@@ -2598,7 +2598,7 @@ function DemoPortfolioPage({ t, lang, ccy, setRoute }) {
     if (q) list = list.filter(r => (r.ticker + r.name).toLowerCase().includes(q.toLowerCase()))
     if (filter !== "all") list = list.filter(r => {
       if (filter === "TH") return r.region === "TH"
-      if (filter === "US") return r.region === "US"
+      if (filter === "US") return r.region === "US" && r.cls !== "Crypto"
       if (filter === "Crypto") return r.cls === "Crypto"
       if (filter === "Bonds") return r.cls === "Bond"
       if (filter === "Commodity") return r.cls === "Commodity"
@@ -2619,7 +2619,7 @@ function DemoPortfolioPage({ t, lang, ccy, setRoute }) {
   const filters = [
     { id: "all",       label: th ? "ทั้งหมด"  : "All",       count: rows.length },
     { id: "TH",        label: th ? "หุ้นไทย"  : "TH stocks", count: rows.filter(r => r.region === "TH").length },
-    { id: "US",        label: th ? "หุ้น US"  : "US stocks", count: rows.filter(r => r.region === "US").length },
+    { id: "US",        label: th ? "หุ้น US"  : "US stocks", count: rows.filter(r => r.region === "US" && r.cls !== "Crypto").length },
     { id: "Bonds",     label: th ? "พันธบัตร" : "Bonds",     count: rows.filter(r => r.cls === "Bond").length },
     { id: "Commodity", label: th ? "ทองคำ"    : "Gold",      count: rows.filter(r => r.cls === "Commodity").length },
     { id: "Crypto",    label: th ? "คริปโต"   : "Crypto",    count: rows.filter(r => r.cls === "Crypto").length },

@@ -15,10 +15,20 @@ export function Brand() {
 export function TickerLogo({ ticker = "", logoUrl, region, cls, size = 34 }) {
   const base = String(ticker).replace(/\.BK$/i, "").toUpperCase()
   const isThai = region === "TH"
+  const isCrypto = cls === "Crypto"
+  // For crypto tickers like BTC-USD, strip the quote currency to get the base coin
+  const cryptoBase = isCrypto ? base.replace(/[-/](USD|USDT|USDC|BTC|ETH|BNB)$/i, "").toLowerCase() : ""
   const candidates = []
   if (logoUrl) candidates.push(logoUrl)
-  if (base) candidates.push(`/api/logo?ticker=${encodeURIComponent(base)}&region=${isThai ? "TH" : "US"}`)
-  if (!isThai && base) candidates.push(`https://assets.parqet.com/logos/symbol/${encodeURIComponent(base)}?format=png&size=64`)
+  if (isCrypto && cryptoBase) {
+    // Open-source crypto icons (spothq) — covers BTC, ETH, and hundreds of others
+    candidates.push(`https://raw.githubusercontent.com/spothq/cryptocurrency-icons/master/128/color/${cryptoBase}.png`)
+    // LiveCoinWatch CDN as second fallback
+    candidates.push(`https://lcw.nyc3.cdn.digitaloceanspaces.com/production/currencies/64/${cryptoBase}.png`)
+  } else {
+    if (base) candidates.push(`/api/logo?ticker=${encodeURIComponent(base)}&region=${isThai ? "TH" : "US"}`)
+    if (!isThai && base) candidates.push(`https://assets.parqet.com/logos/symbol/${encodeURIComponent(base)}?format=png&size=64`)
+  }
 
   const key = candidates.join("|")
   const [idx, setIdx] = useState(0)
