@@ -1,5 +1,6 @@
 import { useState, useMemo, useEffect, useCallback } from 'react'
 import { PageHead, Delta, Icon, TickerLogo } from './Nav'
+import { CalcInput } from './CalcInput'
 import { LineChart, Donut, BarChart } from './Charts'
 import { LUMEN_FMT, LUMEN_DERIVE, LUMEN_HISTORY, LUMEN_BENCH } from '../data'
 import { deriveHoldings, getTransactions, getSnapshots, getAllTransactions, upsertSnapshots, buildSnapshotSeries, addTransaction, updateTransaction, deleteTransaction } from '../lib/db'
@@ -1208,8 +1209,8 @@ function AnalyticsDiv2({ t, lang, ccy, rows, totalValue, dataState, liveHoldings
                       <div style={{ fontWeight: 500, fontSize: 13 }}>{row.ticker || '—'}</div>
                       {row.note && <div className="muted" style={{ fontSize: 10 }}>{row.note}</div>}
                     </div>
-                    <input
-                      type="number" step="0.01" value={row.editedAmount} disabled={row.markedDelete}
+                    <CalcInput
+                      value={row.editedAmount} disabled={row.markedDelete}
                       onChange={e => setEditModal(prev => prev.map((r, j) => j === i ? { ...r, editedAmount: e.target.value } : r))}
                       style={{ padding: "4px 6px", fontSize: 13, fontFamily: "var(--font-mono)", textAlign: "right", border: "1px solid var(--line)", borderRadius: 6, background: "var(--bg-2)", color: "var(--ink)", width: "100%" }}
                     />
@@ -1271,7 +1272,7 @@ function SyncRow({ s, th, FMT, ccy, onChange }) {
         <div style={{ fontSize: 10, color: "var(--ink-4)", marginBottom: 3 }}>
           {th ? "สุทธิ (แก้ได้)" : "Net (edit)"}
         </div>
-        <input type="number" step="0.01" value={s.editedNet}
+        <CalcInput value={s.editedNet}
           onChange={e => onChange({ editedNet: parseFloat(e.target.value) || 0 })}
           style={{ width: "100%", padding: "4px 6px", fontSize: 13, fontFamily: "var(--font-mono)", textAlign: "right", border: "1px solid var(--line)", borderRadius: 6, background: "var(--bg-2)", color: "var(--ink)" }} />
       </div>

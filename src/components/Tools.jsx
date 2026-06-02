@@ -1,6 +1,7 @@
 import { useState, useMemo, useEffect } from 'react'
 import { PageHead, Icon, TickerLogo } from './Nav'
 import { AiAnalysisModal } from './AiModal'
+import { CalcInput } from './CalcInput'
 import { useAiAnalysis } from '../lib/useAiAnalysis'
 import { LUMEN_FMT, LUMEN_DERIVE, LUMEN_TARGETS, LUMEN_FX } from '../data'
 import { deriveHoldings } from '../lib/db'
@@ -474,7 +475,7 @@ export function ToolsPage({ t, lang, ccy, dataState, liveHoldings = [], prices =
               </div>
             </div>
             <div style={{ display: "flex", alignItems: "center", gap: 4, flexShrink: 0 }}>
-              <input type="number" min="0" max="50" step="1" value={band}
+              <CalcInput value={band}
                 onChange={e => { setBand(Math.max(0, Math.min(50, parseFloat(e.target.value) || 0))); setShowResult(false) }}
                 style={{ width: 56, padding: "6px 8px", borderRadius: 8, border: "1px solid var(--line)", background: "var(--bg)", fontSize: 14, textAlign: "right" }} />
               <span className="muted" style={{ fontSize: 13 }}>%</span>
@@ -528,7 +529,7 @@ export function ToolsPage({ t, lang, ccy, dataState, liveHoldings = [], prices =
                         <input type="range" min="0" max="100" step="1" value={(v * 100).toFixed(0)}
                           onChange={e => setTargetPct(k, e.target.value)} style={{ width: "100%", accentColor: "var(--accent)" }} />
                         <div style={{ display: "flex", alignItems: "center", gap: 4 }}>
-                          <input type="number" min="0" max="100" step="1" value={(v * 100).toFixed(0)}
+                          <CalcInput value={(v * 100).toFixed(0)}
                             onChange={e => setTargetPct(k, e.target.value)}
                             style={{ width: 50, padding: "4px 6px", borderRadius: 6, border: "1px solid var(--line)", background: "var(--bg)", fontSize: 13, textAlign: "right" }} />
                           <span className="muted" style={{ fontSize: 12 }}>%</span>
@@ -552,7 +553,7 @@ export function ToolsPage({ t, lang, ccy, dataState, liveHoldings = [], prices =
                             <input type="range" min="0" max="100" step="1" value={w.toFixed(0)}
                               onChange={e => setTickerWeight(tr.ticker, e.target.value)} style={{ width: "100%", accentColor: "var(--accent)" }} />
                             <div style={{ display: "flex", alignItems: "center", gap: 4 }}>
-                              <input type="number" min="0" max="100" step="1" value={w.toFixed(0)}
+                              <CalcInput value={w.toFixed(0)}
                                 onChange={e => setTickerWeight(tr.ticker, e.target.value)}
                                 style={{ width: 46, padding: "4px 6px", borderRadius: 6, border: "1px solid var(--line)", background: "var(--bg)", fontSize: 13, textAlign: "right" }} />
                               <span className="muted" style={{ fontSize: 12 }}>%</span>
@@ -574,7 +575,7 @@ export function ToolsPage({ t, lang, ccy, dataState, liveHoldings = [], prices =
                       style={{ width: "100%", accentColor: "var(--accent)" }}
                     />
                     <div style={{ display: "flex", alignItems: "center", gap: 4 }}>
-                      <input type="number" min="0" max="100" step="1" value={(v * 100).toFixed(0)}
+                      <CalcInput value={(v * 100).toFixed(0)}
                         onChange={e => setTargetPct(k, e.target.value)}
                         style={{ width: 50, padding: "4px 6px", borderRadius: 6, border: "1px solid var(--line)", background: "var(--bg)", fontSize: 13, textAlign: "right" }}
                       />

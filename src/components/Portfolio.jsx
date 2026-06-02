@@ -8,6 +8,7 @@ import { computeTA } from '../lib/ta'
 import { AiAnalysisModal } from './AiModal'
 import { useAiAnalysis } from '../lib/useAiAnalysis'
 import { TradingViewChart } from './TradingViewChart'
+import { CalcInput } from './CalcInput'
 
 export function PortfolioPage({ t, lang, ccy, setRoute, dataState, portfolio, liveHoldings = [], prices = {}, refreshHoldings, loadingData, dataError, retryLoad, fxRate = 36 }) {
   const [showAdd, setShowAdd] = useState(false)
@@ -981,12 +982,12 @@ function AddHoldingModal({ lang, portfolioId, onClose, onSaved }) {
           {/* Shares + Cost + Currency */}
           <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 80px", gap: 12 }}>
             <Field label={th ? "จำนวนหุ้น" : "Shares"}>
-              <input required type="number" step="any" min="0" value={form.shares}
+              <CalcInput required value={form.shares}
                      onChange={e => set('shares', e.target.value)}
                      placeholder="0" style={inputStyle} />
             </Field>
             <Field label={th ? "ราคาทุน/หุ้น" : "Cost price/share"}>
-              <input required type="number" step="any" min="0" value={form.cost_price}
+              <CalcInput required value={form.cost_price}
                      onChange={e => set('cost_price', e.target.value)}
                      placeholder="0.00" style={inputStyle} />
             </Field>
@@ -1001,7 +1002,7 @@ function AddHoldingModal({ lang, portfolioId, onClose, onSaved }) {
           {/* Dividend yield + Frequency */}
           <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
             <Field label={th ? "อัตราปันผล % (ไม่บังคับ)" : "Dividend yield % (optional)"}>
-              <input type="number" step="any" min="0" max="100" value={form.div_yield}
+              <CalcInput value={form.div_yield}
                      onChange={e => set('div_yield', e.target.value)}
                      placeholder="0.00" style={inputStyle} />
             </Field>
@@ -1018,12 +1019,12 @@ function AddHoldingModal({ lang, portfolioId, onClose, onSaved }) {
           {/* Fee + Tax */}
           <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
             <Field label={th ? "ค่าธรรมเนียม (ไม่บังคับ)" : "Fee (optional)"}>
-              <input type="number" step="any" min="0" value={form.fee}
+              <CalcInput value={form.fee}
                      onChange={e => set('fee', e.target.value)}
                      placeholder="0.00" style={inputStyle} />
             </Field>
             <Field label={th ? "ภาษี / อากร (ไม่บังคับ)" : "Tax / Duty (optional)"}>
-              <input type="number" step="any" min="0" value={form.tax}
+              <CalcInput value={form.tax}
                      onChange={e => set('tax', e.target.value)}
                      placeholder="0.00" style={inputStyle} />
             </Field>
@@ -1162,11 +1163,11 @@ function EditHoldingModal({ lang, holding, onClose, onSaved }) {
           {/* Shares + Cost + Currency */}
           <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 80px", gap: 12 }}>
             <Field label={th ? "จำนวนหุ้น" : "Shares"}>
-              <input required type="number" step="any" min="0" value={form.shares}
+              <CalcInput required value={form.shares}
                      onChange={e => set('shares', e.target.value)} placeholder="0" style={inputStyle} />
             </Field>
             <Field label={th ? "ราคาทุน/หุ้น" : "Cost price/share"}>
-              <input required type="number" step="any" min="0" value={form.cost_price}
+              <CalcInput required value={form.cost_price}
                      onChange={e => set('cost_price', e.target.value)} placeholder="0.00" style={inputStyle} />
             </Field>
             <Field label={th ? "สกุล" : "Ccy"}>
@@ -1180,7 +1181,7 @@ function EditHoldingModal({ lang, holding, onClose, onSaved }) {
           {/* Dividend yield + Frequency */}
           <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
             <Field label={th ? "อัตราปันผล % (ไม่บังคับ)" : "Dividend yield % (optional)"}>
-              <input type="number" step="any" min="0" max="100" value={form.div_yield}
+              <CalcInput value={form.div_yield}
                      onChange={e => set('div_yield', e.target.value)}
                      placeholder="0.00" style={inputStyle} />
             </Field>
@@ -1295,21 +1296,21 @@ function SellModal({ lang, ccy, holding, portfolioId, onClose, onSaved }) {
           )}
           <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
             <Field label={th ? "จำนวนหุ้นที่ขาย" : "Shares to sell"}>
-              <input type="number" step={isUS ? "any" : "1"} min="0" max={heldShares} value={form.shares}
+              <CalcInput value={form.shares}
                      onChange={e => set('shares', e.target.value)} style={inputStyle} />
             </Field>
             <Field label={(th ? "ราคาขาย/หุ้น " : "Sell price/share ") + `(${nativeCcy})`}>
-              <input type="number" step="any" min="0" value={form.price}
+              <CalcInput value={form.price}
                      onChange={e => set('price', e.target.value)} placeholder="0.00" style={inputStyle} />
             </Field>
           </div>
           <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
             <Field label={th ? "ค่าธรรมเนียม (ไม่บังคับ)" : "Fee (optional)"}>
-              <input type="number" step="any" min="0" value={form.fee}
+              <CalcInput value={form.fee}
                      onChange={e => set('fee', e.target.value)} placeholder="0.00" style={inputStyle} />
             </Field>
             <Field label={th ? "ภาษี (ไม่บังคับ)" : "Tax (optional)"}>
-              <input type="number" step="any" min="0" value={form.tax}
+              <CalcInput value={form.tax}
                      onChange={e => set('tax', e.target.value)} placeholder="0.00" style={inputStyle} />
             </Field>
           </div>
@@ -2076,11 +2077,11 @@ function EditTransactionModal({ tx, holding, lang, onClose, onSaved }) {
           {/* Shares + Price */}
           <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
             <Field label={th ? "จำนวนหุ้น" : "Shares"}>
-              <input type="number" step="any" min="0" value={form.shares}
+              <CalcInput value={form.shares}
                      onChange={e => set('shares', e.target.value)} placeholder="0" style={inputStyle} />
             </Field>
             <Field label={th ? "ราคา/หุ้น" : "Price/share"}>
-              <input type="number" step="any" min="0" value={form.price}
+              <CalcInput value={form.price}
                      onChange={e => set('price', e.target.value)} placeholder="0.00" style={inputStyle} />
             </Field>
           </div>
@@ -2088,7 +2089,7 @@ function EditTransactionModal({ tx, holding, lang, onClose, onSaved }) {
           {/* Amount + Currency */}
           <div style={{ display: "grid", gridTemplateColumns: "1fr 80px", gap: 12 }}>
             <Field label={th ? "มูลค่ารวม (คำนวณอัตโนมัติหากเว้นว่าง)" : "Total amount (auto if blank)"}>
-              <input type="number" step="any" min="0" value={form.amount}
+              <CalcInput value={form.amount}
                      onChange={e => set('amount', e.target.value)} placeholder={th ? "คำนวณอัตโนมัติ" : "Auto"} style={inputStyle} />
             </Field>
             <Field label={th ? "สกุล" : "Ccy"}>
@@ -2102,12 +2103,12 @@ function EditTransactionModal({ tx, holding, lang, onClose, onSaved }) {
           {/* Fee + Tax */}
           <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
             <Field label={th ? "ค่าธรรมเนียม (ไม่บังคับ)" : "Fee (optional)"}>
-              <input type="number" step="any" min="0" value={form.fee}
+              <CalcInput value={form.fee}
                      onChange={e => set('fee', e.target.value)}
                      placeholder="0.00" style={inputStyle} />
             </Field>
             <Field label={th ? "ภาษี / อากร (ไม่บังคับ)" : "Tax / Duty (optional)"}>
-              <input type="number" step="any" min="0" value={form.tax}
+              <CalcInput value={form.tax}
                      onChange={e => set('tax', e.target.value)}
                      placeholder="0.00" style={inputStyle} />
             </Field>

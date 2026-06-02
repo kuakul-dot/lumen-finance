@@ -1,5 +1,6 @@
 import { useState, useEffect, useMemo } from 'react'
 import { PageHead, Icon } from './Nav'
+import { CalcInput } from './CalcInput'
 import { LineChart } from './Charts'
 import { GoalRing } from './Dashboard'
 import { LUMEN_FMT, LUMEN_GOALS } from '../data'
@@ -475,17 +476,17 @@ function GoalModal({ lang, userId, ccy, goal, onClose, onSaved }) {
 
           <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
             <GField label={`${th ? "เป้าหมาย" : "Target"} (${ccy})`}>
-              <input required type="number" step="any" min="0" value={form.target}
+              <CalcInput required value={form.target}
                 onChange={e => set('target', e.target.value)} placeholder="0" style={iStyle} />
             </GField>
             <GField label={`${th ? "ออมแล้ว" : "Saved so far"} (${ccy})`}>
-              <input type="number" step="any" min="0" value={form.current}
+              <CalcInput value={form.current}
                 onChange={e => set('current', e.target.value)} placeholder="0" style={iStyle} />
             </GField>
           </div>
 
           <GField label={`${th ? "ออมต่อเดือน" : "Monthly contribution"} (${ccy})`}>
-            <input type="number" step="any" min="0" value={form.monthly_contribution}
+            <CalcInput value={form.monthly_contribution}
               onChange={e => set('monthly_contribution', e.target.value)}
               placeholder="0" style={{ ...iStyle, maxWidth: 200 }} />
           </GField>

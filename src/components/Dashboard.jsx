@@ -1,5 +1,6 @@
 import { useState, useMemo, useEffect, useRef } from 'react'
 import { PageHead, Delta, Icon, TickerLogo } from './Nav'
+import { CalcInput } from './CalcInput'
 import { Sparkline, LineChart, Donut } from './Charts'
 import { AiAnalysisModal } from './AiModal'
 import { useAiAnalysis } from '../lib/useAiAnalysis'
@@ -1473,8 +1474,8 @@ function CashAccountModal({ lang, ccy, portfolioId, account, onClose, onSaved })
               <label style={{ fontSize: 11, fontWeight: 600, color: "var(--ink-2)", letterSpacing: "0.06em", textTransform: "uppercase" }}>
                 {th ? "ยอดคงเหลือ" : "Balance"}
               </label>
-              <input required type="number" step="any" min="0" value={form.balance} onChange={e => set('balance', e.target.value)} placeholder="0.00"
-                style={{ padding: "10px 12px", borderRadius: 8, fontSize: 14, border: "1.5px solid var(--line)", background: "var(--bg)", color: "var(--ink)", outline: "none" }} />
+              <CalcInput required value={form.balance} onChange={e => set('balance', e.target.value)} placeholder="0.00"
+                style={{ padding: "10px 12px", borderRadius: 8, fontSize: 14, border: "1.5px solid var(--line)", background: "var(--bg)", color: "var(--ink)", outline: "none", width: "100%", boxSizing: "border-box" }} />
             </div>
             <div style={{ display: "flex", flexDirection: "column", gap: 5 }}>
               <label style={{ fontSize: 11, fontWeight: 600, color: "var(--ink-2)", letterSpacing: "0.06em", textTransform: "uppercase" }}>
@@ -1493,9 +1494,9 @@ function CashAccountModal({ lang, ccy, portfolioId, account, onClose, onSaved })
               <label style={{ fontSize: 11, fontWeight: 600, color: "oklch(0.50 0.12 60)", letterSpacing: "0.06em", textTransform: "uppercase" }}>
                 🛡 {th ? "งบฉุกเฉินที่ตั้งไว้ (เป้าหมาย)" : "Emergency fund target"}
               </label>
-              <input type="number" step="any" min="0" value={form.target_balance} onChange={e => set('target_balance', e.target.value)}
+              <CalcInput value={form.target_balance} onChange={e => set('target_balance', e.target.value)}
                 placeholder={th ? "เช่น 90000 (3-6 เดือนค่าใช้จ่าย)" : "e.g. 90000 (3-6 months expenses)"}
-                style={{ padding: "10px 12px", borderRadius: 8, fontSize: 14, border: "1.5px solid oklch(0.82 0.08 60)", background: "var(--bg)", color: "var(--ink)", outline: "none" }} />
+                style={{ padding: "10px 12px", borderRadius: 8, fontSize: 14, border: "1.5px solid oklch(0.82 0.08 60)", background: "var(--bg)", color: "var(--ink)", outline: "none", width: "100%", boxSizing: "border-box" }} />
               <div style={{ fontSize: 11, color: "oklch(0.55 0.10 60)" }}>
                 {th
                   ? "ยอดไม่เกินเป้าจะไม่ถูกนับเป็นเงินพร้อมลงทุน — เกินเป้าจะแนะนำให้ไปลงทุน"
