@@ -467,3 +467,24 @@ export function Icon({ name, size = 18 }) {
     default: return null
   }
 }
+
+// Shared allocation category icon — SVG-based so it renders identically on all platforms.
+// Used by Dashboard and Portfolio Categories tab.
+export function AllocCategoryIcon({ name, color, isCash }) {
+  const s = { width: 22, height: 22, stroke: color, fill: "none", strokeWidth: 1.8, strokeLinecap: "round", strokeLinejoin: "round" }
+  if (isCash)
+    return <svg viewBox="0 0 24 24" style={s}><rect x="2" y="7" width="20" height="14" rx="2"/><path d="M16 11h2M2 7l5-4h10l5 4"/></svg>
+  if (name.includes("TH") || name.includes("ไทย"))
+    return <span style={{ fontSize: 13, fontWeight: 800, color, letterSpacing: "-0.03em" }}>TH</span>
+  if (name.includes("US") || name.includes("สหรัฐ"))
+    return <span style={{ fontSize: 13, fontWeight: 800, color, letterSpacing: "-0.03em" }}>US</span>
+  if (name === "Crypto")
+    return <svg viewBox="0 0 24 24" style={s}><path d="M9 8h5a2 2 0 0 1 0 4H9m5 0h1a2 2 0 0 1 0 4H9m0-8v8m3-10v2m0 8v2M7 8h1m0 8H7"/></svg>
+  if (name === "Bond" || name.includes("พันธบัตร"))
+    return <svg viewBox="0 0 24 24" style={s}><path d="M4 4h10a4 4 0 0 1 4 4v10H8a4 4 0 0 1-4-4Z"/><path d="M4 14a4 4 0 0 1 4-4h10"/></svg>
+  if (name === "Commodity" || name.includes("ทองคำ"))
+    return <svg viewBox="0 0 24 24" style={s}><polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/></svg>
+  if (name === "ETF")
+    return <svg viewBox="0 0 24 24" style={s}><line x1="3" y1="20" x2="21" y2="20"/><rect x="5" y="11" width="3" height="8"/><rect x="11" y="6" width="3" height="13"/><rect x="17" y="13" width="3" height="6"/></svg>
+  return <svg viewBox="0 0 24 24" style={s}><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/></svg>
+}

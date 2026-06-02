@@ -1,5 +1,5 @@
 ﻿import { useState, useMemo, useEffect, useCallback, useRef, Fragment } from 'react'
-import { PageHead, Delta, Icon, TickerLogo } from './Nav'
+import { PageHead, Delta, Icon, TickerLogo, AllocCategoryIcon } from './Nav'
 import { Sparkline } from './Charts'
 import { LUMEN_FMT, LUMEN_DERIVE } from '../data'
 import { addHolding, updateHolding, deleteHolding, deriveHoldings, addTransaction, syncHoldingsFromTransactions, rebuildHolding, rebuildAllHoldings, updateHoldingMeta, getTransactions, getAllTransactions, computeRealized, updateTransaction, deleteTransaction, deleteTransactionsByTicker, applySplit, upsertCashAccount, deleteCashAccount } from '../lib/db'
@@ -2762,6 +2762,7 @@ function CategoriesTab({ rows, lang, ccy, fxRate }) {
     { k: "regionclass", label: th ? "ภูมิภาค + ประเภท" : "Region + class" },
     { k: "class",       label: th ? "ประเภทสินทรัพย์" : "Asset class" },
     { k: "region",      label: th ? "ภูมิภาค" : "Region" },
+    { k: "sector",      label: th ? "กลุ่มอุตสาหกรรม" : "By sector" },
   ]
 
   const table = useMemo(() => {
@@ -2769,6 +2770,7 @@ function CategoriesTab({ rows, lang, ccy, fxRate }) {
     const keyOf = r => {
       if (mode === "class") return r.cls || "Equity"
       if (mode === "region") return r.region === "TH" ? (th ? "ไทย" : "Thailand") : (th ? "สหรัฐฯ" : "United States")
+      if (mode === "sector") return r.sector && r.sector !== "—" ? r.sector : (th ? "ไม่ระบุกลุ่ม" : "Unassigned")
       return r.cls === "Equity" ? (r.region === "TH" ? (th ? "หุ้นไทย" : "TH Equity") : (th ? "หุ้น US" : "US Equity")) : r.cls
     }
     const colors = ["var(--c1)", "var(--c2)", "var(--c3)", "var(--c4)", "var(--c5)", "var(--c6)", "var(--c7)"]
@@ -2836,8 +2838,8 @@ function CategoriesTab({ rows, lang, ccy, fxRate }) {
                     <td style={{ padding: "12px 16px" }}>
                       <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
                         <div style={{ width: 4, height: 32, borderRadius: 2, background: g.color, flexShrink: 0 }} />
-                        <div style={{ width: 32, height: 32, borderRadius: 8, background: g.color + "22", display: "grid", placeItems: "center", flexShrink: 0 }}>
-                          <span style={{ fontSize: 12, fontWeight: 800, color: g.color }}>{g.name.slice(0, 2).toUpperCase()}</span>
+                        <div style={{ width: 36, height: 36, borderRadius: 10, background: g.color + "22", display: "grid", placeItems: "center", flexShrink: 0, overflow: "hidden" }}>
+                          <AllocCategoryIcon name={g.name} color={g.color} />
                         </div>
                         <div>
                           <div style={{ fontWeight: 600, fontSize: 13 }}>{g.name}</div>
