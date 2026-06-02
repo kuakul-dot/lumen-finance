@@ -1287,10 +1287,10 @@ function LiveDashboardPage({ t, lang, ccy, setRoute, liveHoldings, prices = {}, 
                           </div>
                         </td>
                       </tr>
-                      {/* Expanded holdings rows */}
-                      {expanded && g.holdings.map((h, hi) => (
-                        <tr key={h.ticker + hi}
-                          style={{ background: "var(--bg-2)", borderBottom: hi === g.holdings.length - 1 ? "1px solid var(--line)" : "none" }}>
+                      {/* Expanded holdings rows — grouped by ticker so lots are merged */}
+                      {expanded && groupRowsByTicker(g.holdings).map((h, hi, arr) => (
+                        <tr key={h.ticker}
+                          style={{ background: "var(--bg-2)", borderBottom: hi === arr.length - 1 ? "1px solid var(--line)" : "none" }}>
                           <td style={{ padding: "10px 20px 10px 72px" }}>
                             <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
                               <TickerLogo ticker={h.ticker} logoUrl={h.logo_url} region={h.region} cls={h.cls} size={26} />
