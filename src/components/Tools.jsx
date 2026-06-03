@@ -251,18 +251,26 @@ export function ToolsPage({ t, lang, ccy, dataState, liveHoldings = [], prices =
     const out = {}
     suggestions.forEach(s => {
       if (!s.candidates || s.candidates.length === 0) return
-      const classTotal = s.candidates.reduce((sum, c) => sum + c.value, 0)
-      const n = s.candidates.length
-      out[s.name] = s.candidates.map(c => {
-        // Within-class target: use per-ticker hybrid weight if set; else equal split
+      // Merge multiple lots of the same ticker into one grouped row
+      const grouped = {}
+      s.candidates.forEach(c => {
+        if (!grouped[c.ticker]) {
+          grouped[c.ticker] = { ...c, value: 0, shares: 0 }
+        }
+        grouped[c.ticker].value  += c.value
+        grouped[c.ticker].shares += (c.shares || 0)
+      })
+      const tickers = Object.values(grouped)
+      const classTotal = tickers.reduce((sum, c) => sum + c.value, 0)
+      out[s.name] = tickers.map(c => {
+        // Within-class target: use per-ticker hybrid weight if set; else proportional
         const tgtWithin = hybridWeightPct(c)  // % within class (0-100)
         const curWithin = classTotal > 0 ? (c.value / classTotal) * 100 : 0
         const drift = curWithin - tgtWithin
-        // Effective portfolio % and target
         const curPct = total > 0 ? (c.value / total) * 100 : 0
-        const tgtPct = s.tgtPct * (tgtWithin / 100)  // class% × within%
+        const tgtPct = s.tgtPct * (tgtWithin / 100)
         return { ...c, curWithin, tgtWithin, drift, curPct, tgtPct }
-      }).sort((a, b) => b.curWithin - a.curWithin)
+      }).sort((a, b) => b.value - a.value)   // sort by value desc
     })
     return out
   }, [suggestions, hybridWeightPct, total])
@@ -1026,11 +1034,14 @@ export function ToolsPage({ t, lang, ccy, dataState, liveHoldings = [], prices =
                       return (
                         <div key={h.ticker}
                           style={{ display: "grid", gridTemplateColumns: "minmax(96px,150px) 42px 1fr 56px 60px 50px", alignItems: "center", gap: 10, padding: "4px 0 4px 12px", background: "var(--bg-2)", borderTop: hi === 0 ? "none" : "1px solid var(--line)" }}>
-                          {/* Ticker name + logo */}
+                          {/* Ticker name + logo + value */}
                           <div style={{ display: "flex", alignItems: "center", gap: 7, minWidth: 0 }}>
-                            <div style={{ width: 3, height: 20, background: "var(--line)", borderRadius: 2, flexShrink: 0 }} />
+                            <div style={{ width: 3, height: 28, background: "var(--line)", borderRadius: 2, flexShrink: 0 }} />
                             <TickerLogo ticker={h.ticker} logoUrl={h.logo_url} region={h.region} cls={h.cls} size={20} />
-                            <span style={{ fontSize: 11.5, fontWeight: 500, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{h.ticker}</span>
+                            <div style={{ minWidth: 0 }}>
+                              <div style={{ fontSize: 11.5, fontWeight: 500, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{h.ticker}</div>
+                              <div className="mono muted" style={{ fontSize: 9.5 }}>{FMT.money(h.value, ccy, { compact: true })}</div>
+                            </div>
                           </div>
                           {/* Within-class target */}
                           <div className="mono muted" style={{ fontSize: 10 }}>→{h.tgtWithin.toFixed(0)}%*</div>
