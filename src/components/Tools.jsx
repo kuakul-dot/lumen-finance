@@ -121,6 +121,9 @@ export function ToolsPage({ t, lang, ccy, dataState, liveHoldings = [], prices =
   })
   const [tickerWeights, setTickerWeights] = useState(() => { try { return JSON.parse(localStorage.getItem("lumen_rebalance_ticker_weights") || "{}") } catch { return {} } })
 
+  // Auto-switch to Class+Holding view when using hybrid mode for better UX
+  const effectiveDriftLevel = targetMode === "hybrid" ? "class+holding" : driftLevel
+
   // Persist to localStorage
   useEffect(() => { saveTargets(targets) }, [targets])
   useEffect(() => { try { localStorage.setItem(BAND_STORAGE_KEY, String(band)) } catch {} }, [band])
@@ -805,6 +808,11 @@ export function ToolsPage({ t, lang, ccy, dataState, liveHoldings = [], prices =
 
           {/* Tolerance band */}
           <div style={{ marginTop: 20 }}>
+            {targetMode === "hybrid" && (
+              <div style={{ marginBottom: 12, padding: "8px 12px", borderRadius: 8, background: "var(--gain-soft)", fontSize: 11.5, color: "var(--gain)", lineHeight: 1.5 }}>
+                💡 {th ? "Hybrid mode: Tolerance band ใช้กับแต่ละหุ้น (ไม่ใช่แค่ Class ระดับ)" : "Hybrid mode: Tolerance band applies per-ticker, not just at class level"}
+              </div>
+            )}
             <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8, marginBottom: 10 }}>
               <div style={{ fontSize: 13, fontWeight: 500 }}>{th ? "Tolerance Band" : "Tolerance Band"}</div>
               <div className="segmented" style={{ flexShrink: 0 }}>
@@ -911,13 +919,20 @@ export function ToolsPage({ t, lang, ccy, dataState, liveHoldings = [], prices =
           {editTargets && (
             <div className="card" style={{ border: "1.5px solid var(--accent)" }}>
               <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 14, gap: 8, flexWrap: "wrap" }}>
-                <div className="segmented" style={{ flexWrap: "wrap" }}>
-                  <button className={targetMode === "class" ? "on" : ""} onClick={() => setTargetMode("class")} style={{ fontSize: 12 }}>
-                    {th ? "ตามกลุ่ม" : "By class"}
-                  </button>
-                  <button className={targetMode === "hybrid" ? "on" : ""} onClick={() => setTargetMode("hybrid")} style={{ fontSize: 12 }}>
-                    {th ? "กลุ่ม+รายตัว" : "Class + holding"}
-                  </button>
+                <div style={{ display: "flex", alignItems: "center", gap: 12, flexWrap: "wrap" }}>
+                  <div className="segmented" style={{ flexWrap: "wrap" }}>
+                    <button className={targetMode === "class" ? "on" : ""} onClick={() => setTargetMode("class")} style={{ fontSize: 12 }}>
+                      {th ? "ตามกลุ่ม" : "By class"}
+                    </button>
+                    <button className={targetMode === "hybrid" ? "on" : ""} onClick={() => setTargetMode("hybrid")} style={{ fontSize: 12 }}>
+                      {th ? "กลุ่ม+รายตัว" : "Class + holding"}
+                    </button>
+                  </div>
+                  {targetMode === "hybrid" && (
+                    <span style={{ fontSize: 11, color: "var(--gain)", fontWeight: 500, padding: "4px 8px", borderRadius: 6, background: "var(--gain-soft)" }}>
+                      {th ? "ดูละเอียดต่อหุ้น ✓" : "Per-ticker analysis ✓"}
+                    </span>
+                  )}
                 </div>
                 <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
                   <span className={"chip " + (targetError ? "chip-loss" : "chip-gain")} style={{ fontSize: 11 }}>
@@ -1020,19 +1035,26 @@ export function ToolsPage({ t, lang, ccy, dataState, liveHoldings = [], prices =
           <div className="card">
             <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 4, gap: 8 }}>
               <h3 className="section-title" style={{ margin: 0 }}>{th ? "เป้าหมาย vs. หลังปรับ" : "Target vs. after rebalance"}</h3>
-              <div className="segmented" style={{ flexShrink: 0 }}>
-                <button className={driftLevel === "class" ? "on" : ""} style={{ fontSize: 11, padding: "4px 10px" }}
-                  onClick={() => setDriftLevel("class")}>
-                  {th ? "ตามกลุ่ม" : "Class"}
-                </button>
-                <button className={driftLevel === "class+holding" ? "on" : ""} style={{ fontSize: 11, padding: "4px 10px" }}
-                  onClick={() => setDriftLevel("class+holding")}>
-                  {th ? "กลุ่ม+รายตัว" : "Class + Holding"}
-                </button>
+              <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+                {targetMode === "hybrid" && (
+                  <span style={{ fontSize: 10.5, color: "var(--gain)", fontWeight: 500, display: "flex", alignItems: "center", gap: 4 }}>
+                    💚 {th ? "Hybrid mode" : "Hybrid mode"}
+                  </span>
+                )}
+                <div className="segmented" style={{ flexShrink: 0 }}>
+                  <button className={effectiveDriftLevel === "class" ? "on" : ""} style={{ fontSize: 11, padding: "4px 10px" }}
+                    onClick={() => setDriftLevel("class")} disabled={targetMode === "hybrid"}>
+                    {th ? "ตามกลุ่ม" : "Class"}
+                  </button>
+                  <button className={effectiveDriftLevel === "class+holding" ? "on" : ""} style={{ fontSize: 11, padding: "4px 10px" }}
+                    onClick={() => setDriftLevel("class+holding")}>
+                    {th ? "กลุ่ม+รายตัว" : "Class + Holding"}
+                  </button>
+                </div>
               </div>
             </div>
             <p className="muted" style={{ fontSize: 11.5, margin: "0 0 14px", lineHeight: 1.5 }}>
-              {driftLevel === "class+holding"
+              {effectiveDriftLevel === "class+holding"
                 ? (th
                     ? "แถวกลุ่ม = % ของพอร์ตรวม · แถวรายตัว = % ภายในกลุ่ม · 🔴 = เกินเป้า · 🟢 = ต่ำกว่าเป้า"
                     : "Class rows = % of total · Holding rows = % within class · 🔴 = overweight · 🟢 = underweight")
@@ -1055,7 +1077,7 @@ export function ToolsPage({ t, lang, ccy, dataState, liveHoldings = [], prices =
                 const after = newTotal > 0 ? (s.current + tradeDelta) / newTotal * 100 : 0
                 const before = s.curPct
                 const drift = before - s.tgtPct
-                const holdingRows = driftLevel === "class+holding" ? (holdingDriftByClass[s.name] || []) : []
+                const holdingRows = effectiveDriftLevel === "class+holding" ? (holdingDriftByClass[s.name] || []) : []
                 return (
                   <div key={s.name}>
                     {/* Class row */}
@@ -1147,9 +1169,12 @@ export function ToolsPage({ t, lang, ccy, dataState, liveHoldings = [], prices =
                 )
               })()}
               {/* Footnote for Class+Holding view */}
-              {driftLevel === "class+holding" && (
+              {effectiveDriftLevel === "class+holding" && (
                 <div style={{ marginTop: 8, fontSize: 10.5, color: "var(--ink-4)", lineHeight: 1.6 }}>
                   <span style={{ fontFamily: "var(--font-mono)" }}>→X%*</span> {th ? "= สัดส่วนปัจจุบันภายในกลุ่ม (ไม่ใช่ % พอร์ตรวม) · ส่วนต่างแสดงเมื่อเบี่ยง ≥ tolerance band" : "= current proportion within class (not % of total portfolio) · drift shown only when ≥ tolerance band"}
+                  {targetMode === "hybrid" && (
+                    <> · {th ? "✓ Hybrid mode enabled: trades will respect per-ticker targets" : "✓ Hybrid mode enabled: trades will respect per-ticker targets"}</>
+                  )}
                   {targetMode !== "hybrid"
                     ? <> · {th ? "⚠ Class mode = ระบบซื้อตามสัดส่วนปัจจุบันในกลุ่ม ไม่ใช่จาก % ที่แสดง — ใช้ Hybrid mode เพื่อกำหนดเป้าต่างกันในแต่ละหุ้น" : "⚠ Class mode: buys are distributed proportionally within the class, not by this % — use Hybrid mode (Edit targets) to set per-ticker targets"}</>
                     : null
