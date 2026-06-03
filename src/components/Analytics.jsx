@@ -864,14 +864,39 @@ function AnalyticsDiv2({ t, lang, ccy, rows, totalValue, dataState, liveHoldings
   async function handleSync() {
     setSyncModal('loading')
     try {
+      // Build full ticker metadata: live holdings first, then any ticker in Buy/Sell history
+      // (covers tickers that were fully sold — they still deserve dividend lookups)
+      const tickerMeta = {}
+      liveHoldings.forEach(h => { if (!tickerMeta[h.ticker]) tickerMeta[h.ticker] = h })
+      transactions.forEach(tx => {
+        if ((tx.type === 'Buy' || tx.type === 'Sell') && tx.ticker && !tickerMeta[tx.ticker]) {
+          // Infer region from currency; asset_class defaults to Equity (most dividend payers)
+          const region = (tx.currency === 'USD' || tx.currency === 'usd') ? 'US' : 'TH'
+          tickerMeta[tx.ticker] = { ticker: tx.ticker, region, asset_class: 'Equity', logo_url: null }
+        }
+      })
+
       let history = divHistory
       if (!history) {
-        const syms = liveHoldings
+        const syms = Object.values(tickerMeta)
           .map(h => toYahooSymbol(h.ticker, h.region || 'TH', h.asset_class || 'Equity'))
           .filter((v, i, a) => a.indexOf(v) === i).join(',')
         history = await fetch(`/api/dividends?symbols=${encodeURIComponent(syms)}`).then(r => r.json())
         setDivHistory(history)
+      } else {
+        // If divHistory was cached from live-holdings-only fetch, re-fetch to include sold tickers
+        const cachedSyms = new Set(Object.keys(history))
+        const allSyms = Object.values(tickerMeta)
+          .map(h => toYahooSymbol(h.ticker, h.region || 'TH', h.asset_class || 'Equity'))
+          .filter((v, i, a) => a.indexOf(v) === i)
+        const missing = allSyms.filter(s => !cachedSyms.has(s))
+        if (missing.length > 0) {
+          const extra = await fetch(`/api/dividends?symbols=${encodeURIComponent(missing.join(','))}`).then(r => r.json())
+          history = { ...history, ...extra }
+          setDivHistory(history)
+        }
       }
+
       const nowSec = Date.now() / 1000
       const divTxs = transactions.filter(tx => tx.type === 'Dividend')
       // Convert Yahoo Unix timestamp → "YYYY-MM-DD" string (add 12 h to handle midnight-UTC edge)
@@ -902,9 +927,6 @@ function AnalyticsDiv2({ t, lang, ccy, rows, totalValue, dataState, liveHoldings
         }
         return Math.max(0, s)
       }
-      // One entry per ticker (region/symbol metadata)
-      const tickerMeta = {}
-      liveHoldings.forEach(h => { if (!tickerMeta[h.ticker]) tickerMeta[h.ticker] = h })
       const suggestions = []
       Object.values(tickerMeta).forEach(h => {
         const sym = toYahooSymbol(h.ticker, h.region || 'TH', h.asset_class || 'Equity');
