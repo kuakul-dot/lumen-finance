@@ -34,6 +34,11 @@ function loadBand() {
   try { const v = parseFloat(localStorage.getItem(BAND_STORAGE_KEY)); if (!isNaN(v)) return v } catch {}
   return 5   // default ±5 percentage-point tolerance
 }
+const BAND_MODE_STORAGE_KEY = "lumen_rebalance_band_mode"
+function loadBandMode() {
+  try { const v = localStorage.getItem(BAND_MODE_STORAGE_KEY); if (v === "5/25" || v === "flat") return v } catch {}
+  return "flat"
+}
 
 const LAST_REBALANCE_KEY = "lumen_last_rebalance_date"
 function loadLastRebalance() {
@@ -99,7 +104,8 @@ export function ToolsPage({ t, lang, ccy, dataState, liveHoldings = [], prices =
   const [selectedAccountIds, setSelectedAccountIds] = useState(new Set())
   const [editTargets, setEditTargets] = useState(false)
   const [targets,    setTargets]    = useState(loadTargets)
-  const [band,       setBand]       = useState(loadBand)   // tolerance (percentage points)
+  const [band,       setBand]       = useState(loadBand)   // tolerance (percentage points, flat mode)
+  const [bandMode,   setBandMode]   = useState(loadBandMode)  // "flat" | "5/25"
   const [copied,     setCopied]     = useState(false)
   const [openRow,    setOpenRow]    = useState(null)   // which drift row is expanded to show ฿ amounts
   const [driftLevel, setDriftLevel] = useState("class")  // "class" | "class+holding"
@@ -118,6 +124,7 @@ export function ToolsPage({ t, lang, ccy, dataState, liveHoldings = [], prices =
   // Persist to localStorage
   useEffect(() => { saveTargets(targets) }, [targets])
   useEffect(() => { try { localStorage.setItem(BAND_STORAGE_KEY, String(band)) } catch {} }, [band])
+  useEffect(() => { try { localStorage.setItem(BAND_MODE_STORAGE_KEY, bandMode) } catch {} }, [bandMode])
   useEffect(() => { try { localStorage.setItem("lumen_rebalance_mode", targetMode) } catch {} }, [targetMode])
   useEffect(() => { try { localStorage.setItem("lumen_rebalance_ticker_weights", JSON.stringify(tickerWeights)) } catch {} }, [tickerWeights])
 
@@ -167,6 +174,15 @@ export function ToolsPage({ t, lang, ccy, dataState, liveHoldings = [], prices =
     next.has(id) ? next.delete(id) : next.add(id)
     return next
   })
+
+  // ── 5/25 rule: effectiveBand per class ───────────────────────────────────────
+  // flat mode  → always returns `band` (the user-set %)
+  // 5/25 mode  → min(5, tgtPct × 25%) — smaller threshold for small allocations
+  //              e.g. Bonds 5%: min(5, 1.25) = 1.25pp  |  TH Equity 25%: min(5, 6.25) = 5pp
+  const effectiveBand = (tgtPct) => {
+    if (bandMode === "5/25") return Math.min(5, tgtPct * 0.25)
+    return band
+  }
 
   // User types amount in display currency; convert to THB for internal calculations
   // (total, all values from deriveHoldings, are in THB)
@@ -282,7 +298,8 @@ export function ToolsPage({ t, lang, ccy, dataState, liveHoldings = [], prices =
 
   const daysSinceRebalance = lastRebalance ? Math.floor((Date.now() - lastRebalance.getTime()) / (1000 * 60 * 60 * 24)) : null
   const isOverdue = daysSinceRebalance !== null && daysSinceRebalance >= 365
-  const isDriftHigh = maxDrift > 5
+  // isDriftHigh uses per-class effectiveBand so 5/25 triggers correctly for small allocations
+  const isDriftHigh = suggestions.some(s => Math.abs(s.curPct - s.tgtPct) > effectiveBand(s.tgtPct))
   const needsRebalance = isOverdue || isDriftHigh
 
   // ── Suggested trades ─────────────────────────────────────────────────────────
@@ -310,7 +327,7 @@ export function ToolsPage({ t, lang, ccy, dataState, liveHoldings = [], prices =
     }
 
     // ── PASS 1: compute sells (unlimited by budget) ───────────────────────────
-    const sellSuggestions = suggestions.filter(s => s.name !== "Cash" && s.delta < 0 && Math.abs(s.curPct - s.tgtPct) >= band && allowSales)
+    const sellSuggestions = suggestions.filter(s => s.name !== "Cash" && s.delta < 0 && Math.abs(s.curPct - s.tgtPct) >= effectiveBand(s.tgtPct) && allowSales)
     sellSuggestions.forEach(s => {
       const rich = enrichCandidates(s.candidates || [], s).sort((a, b) => b.drift - a.drift)
       let remaining = Math.abs(s.delta)
@@ -342,7 +359,7 @@ export function ToolsPage({ t, lang, ccy, dataState, liveHoldings = [], prices =
 
     // Sort underweight classes by drift (most underweight first = highest priority)
     const buySuggestions = suggestions
-      .filter(s => s.name !== "Cash" && s.delta > 0 && Math.abs(s.curPct - s.tgtPct) >= band && (s.candidates || []).length > 0)
+      .filter(s => s.name !== "Cash" && s.delta > 0 && Math.abs(s.curPct - s.tgtPct) >= effectiveBand(s.tgtPct) && (s.candidates || []).length > 0)
       .sort((a, b) => (a.curPct - a.tgtPct) - (b.curPct - b.tgtPct))  // most negative = most underweight first
 
     for (const s of buySuggestions) {
@@ -378,7 +395,7 @@ export function ToolsPage({ t, lang, ccy, dataState, liveHoldings = [], prices =
     }
 
     return out
-  }, [suggestions, allowSales, rows, total, showResult, band, effHybrid, tickerWeights, depInTHB, mode])
+  }, [suggestions, allowSales, rows, total, showResult, band, bandMode, effHybrid, tickerWeights, depInTHB, mode])
 
   // cashRemaining in THB (depInTHB minus buy/sell amounts which are also THB)
   const cashRemaining = Math.max(0, depInTHB - trades.filter(tr => tr.action === "Buy").reduce((a, b) => a + b.amount, 0)
@@ -779,33 +796,60 @@ export function ToolsPage({ t, lang, ccy, dataState, liveHoldings = [], prices =
 
           {/* Tolerance band */}
           <div style={{ marginTop: 20 }}>
-            <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12 }}>
-              <div style={{ fontSize: 13, fontWeight: 500 }}>{th ? "Tolerance Band (ขั้นต่ำที่ต้องปรับ)" : "Tolerance Band (min drift to trigger)"}</div>
-              <div style={{ display: "flex", alignItems: "center", gap: 4, flexShrink: 0 }}>
-                <CalcInput value={band}
-                  onChange={e => { setBand(Math.max(0, Math.min(50, parseFloat(e.target.value) || 0))); setShowResult(false) }}
-                  style={{ width: 56, padding: "6px 8px", borderRadius: 8, border: "1px solid var(--line)", background: "var(--bg)", fontSize: 14, textAlign: "right" }} />
-                <span className="muted" style={{ fontSize: 13 }}>%</span>
+            <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8, marginBottom: 10 }}>
+              <div style={{ fontSize: 13, fontWeight: 500 }}>{th ? "Tolerance Band" : "Tolerance Band"}</div>
+              <div className="segmented" style={{ flexShrink: 0 }}>
+                <button className={bandMode === "flat" ? "on" : ""} style={{ fontSize: 11, padding: "4px 10px" }}
+                  onClick={() => { setBandMode("flat"); setShowResult(false) }}>
+                  {th ? "กำหนดเอง" : "Flat %"}
+                </button>
+                <button className={bandMode === "5/25" ? "on" : ""} style={{ fontSize: 11, padding: "4px 10px" }}
+                  onClick={() => { setBandMode("5/25"); setShowResult(false) }}>
+                  5/25 Rule
+                </button>
               </div>
             </div>
-            <div style={{ marginTop: 8, padding: "8px 10px", borderRadius: 8, background: "var(--bg-2)", fontSize: 11.5, lineHeight: 1.7 }}>
-              {band === 0
-                ? <span style={{ color: "var(--gain)", fontWeight: 500 }}>
-                    {th ? "0% = ปรับทุกกลุ่มที่เบี่ยงแม้เพียงเล็กน้อย" : "0% = trade every class with any drift"}
+
+            {bandMode === "flat" ? (
+              <>
+                <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                  <CalcInput value={band}
+                    onChange={e => { setBand(Math.max(0, Math.min(50, parseFloat(e.target.value) || 0))); setShowResult(false) }}
+                    style={{ width: 56, padding: "6px 8px", borderRadius: 8, border: "1px solid var(--line)", background: "var(--bg)", fontSize: 14, textAlign: "right" }} />
+                  <span className="muted" style={{ fontSize: 13 }}>%</span>
+                  <span className="muted" style={{ fontSize: 11.5 }}>
+                    {band === 0
+                      ? (th ? "ปรับทุกกลุ่มที่เบี่ยงแม้เล็กน้อย" : "all drifts trigger")
+                      : (th ? `เบี่ยง < ${band}% ข้าม · ≥ ${band}% ปรับ` : `skip < ${band}%, trade ≥ ${band}%`)}
                   </span>
-                : <span className="muted">
-                    {th
-                      ? <>วัดที่ระดับ <strong>Class</strong> เช่น TH Equity, US Equity, Bonds — ถ้าเบี่ยง <strong>&lt; {band}%</strong> จะข้ามกลุ่มนั้น · เบี่ยง <strong>≥ {band}%</strong> ถึงแนะนำซื้อ/ขาย</>
-                      : <>Measured at <strong>Class</strong> level (TH Equity, US Equity, Bonds...) — classes drifting <strong>&lt; {band}%</strong> are skipped · only <strong>≥ {band}%</strong> triggers a trade</>
-                    }
-                  </span>
-              }
-            </div>
-            {band > 0 && (
-              <div style={{ marginTop: 6, fontSize: 11, color: "var(--ink-3)" }}>
-                {th
-                  ? `💡 ถ้าไม่มีคำสั่งซื้อขาย → ลดเป็น 0% เพื่อดูทุกรายการ`
-                  : `💡 No trades showing? Set to 0% to see all suggestions`}
+                </div>
+                {band > 0 && (
+                  <div style={{ marginTop: 6, fontSize: 11, color: "var(--ink-3)" }}>
+                    💡 {th ? "ไม่มีคำสั่ง? ลด 0% เพื่อดูทั้งหมด" : "No trades? Set 0% to see all suggestions"}
+                  </div>
+                )}
+              </>
+            ) : (
+              <div style={{ background: "var(--bg-2)", borderRadius: 8, padding: "10px 12px" }}>
+                <div style={{ fontSize: 11.5, marginBottom: 8, lineHeight: 1.6 }} className="muted">
+                  {th
+                    ? <>กฎ 5/25: trigger เมื่อ <strong>min(5%, เป้า × 25%)</strong> — กลุ่มเล็กปรับง่ายกว่า</>
+                    : <>5/25 rule: triggers at <strong>min(5%, target × 25%)</strong> — smaller allocations get tighter bands</>}
+                </div>
+                <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "3px 12px" }}>
+                  {Object.entries(targets).map(([k, v]) => {
+                    const tgt = v * 100
+                    const eb = Math.min(5, tgt * 0.25)
+                    return (
+                      <div key={k} style={{ display: "flex", justifyContent: "space-between", fontSize: 11, fontFamily: "var(--font-mono)" }}>
+                        <span style={{ color: "var(--ink-2)" }}>{k}</span>
+                        <span style={{ color: eb < 5 ? "var(--accent-ink)" : "var(--ink-3)" }}>
+                          {tgt.toFixed(0)}% → ±{eb.toFixed(2)}%
+                        </span>
+                      </div>
+                    )
+                  })}
+                </div>
               </div>
             )}
           </div>
@@ -1024,17 +1068,19 @@ export function ToolsPage({ t, lang, ccy, dataState, liveHoldings = [], prices =
                       <div className="mono muted" style={{ fontSize: 10.5, textAlign: "right" }}>{before.toFixed(1)}%</div>
                       <div className="mono" style={{ fontSize: 10.5, textAlign: "right", fontWeight: 500 }}>{after.toFixed(1)}%</div>
                       <div style={{ textAlign: "right" }}>
-                        {Math.abs(drift) > 1 && (
+                        {Math.abs(drift) >= effectiveBand(s.tgtPct) ? (
                           <span className={"chip " + (drift > 0 ? "chip-loss" : "chip-gain")} style={{ fontSize: 9.5 }}>
                             {drift > 0 ? "+" : ""}{drift.toFixed(1)}%
                           </span>
-                        )}
+                        ) : Math.abs(drift) > 0.5 ? (
+                          <span className="muted" style={{ fontSize: 9.5 }}>{drift > 0 ? "+" : ""}{drift.toFixed(1)}%</span>
+                        ) : null}
                       </div>
                     </div>
                     {/* Holding sub-rows (Class+Holding view) */}
                     {holdingRows.map((h, hi) => {
                       const hDrift = h.drift  // within-class drift
-                      const exceedsBand = Math.abs(hDrift) >= band
+                      const exceedsBand = Math.abs(hDrift) >= effectiveBand(h.tgtWithin)
                       return (
                         <div key={h.ticker}
                           style={{ display: "grid", gridTemplateColumns: "minmax(96px,150px) 42px 1fr 56px 60px 50px", alignItems: "center", gap: 10, padding: "4px 0 4px 12px", background: "var(--bg-2)", borderTop: hi === 0 ? "none" : "1px solid var(--line)" }}>
