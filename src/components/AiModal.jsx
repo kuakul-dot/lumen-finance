@@ -108,26 +108,57 @@ export function AiAnalysisModal({
   )
 }
 
-// Minimal markdown renderer for ## headings, * / - bullets, **bold**
+// Minimal markdown renderer for ## headings, * / - bullets, **bold**, and | tables |
 export function Markdownish({ text }) {
   const blocks = []
   let listBuf = null
+  let tableBuf = null   // array of string[] rows
+
+  const flushList  = () => { if (listBuf)  { blocks.push({ t: 'list',  items: listBuf  }); listBuf  = null } }
+  const flushTable = () => { if (tableBuf) { blocks.push({ t: 'table', rows:  tableBuf }); tableBuf = null } }
+
   text.split('\n').forEach((raw) => {
     const line = raw.trimEnd()
-    if (/^\s*$/.test(line)) { if (listBuf) { blocks.push({ t: 'list', items: listBuf }); listBuf = null } ; return }
+
+    // Blank line — flush buffers
+    if (/^\s*$/.test(line)) { flushList(); flushTable(); return }
+
+    // Heading
     if (/^##\s+/.test(line)) {
-      if (listBuf) { blocks.push({ t: 'list', items: listBuf }); listBuf = null }
+      flushList(); flushTable()
       blocks.push({ t: 'h', text: line.replace(/^##\s+/, '') }); return
     }
-    if (/^\s*[-*]\s+/.test(line)) { ;(listBuf = listBuf || []).push(line.replace(/^\s*[-*]\s+/, '')); return }
-    if (listBuf) { blocks.push({ t: 'list', items: listBuf }); listBuf = null }
+
+    // Table row  (starts with |)
+    if (/^\s*\|/.test(line)) {
+      flushList()
+      const cols = line.split('|').slice(1, -1).map(c => c.trim())
+      // Skip separator rows like |---|:---:|---|
+      if (!cols.every(c => /^[-:\s]+$/.test(c))) {
+        tableBuf = (tableBuf || [])
+        tableBuf.push(cols)
+      }
+      return
+    }
+
+    // Bullet list
+    if (/^\s*[-*]\s+/.test(line)) {
+      flushTable()
+      ;(listBuf = listBuf || []).push(line.replace(/^\s*[-*]\s+/, ''))
+      return
+    }
+
+    // Plain paragraph
+    flushList(); flushTable()
     blocks.push({ t: 'p', text: line })
   })
-  if (listBuf) blocks.push({ t: 'list', items: listBuf })
+  flushList(); flushTable()
+
   const inline = (s) => {
     const parts = s.split(/(\*\*[^*]+\*\*)/g)
     return parts.map((p, i) => p.startsWith('**') ? <strong key={i}>{p.slice(2, -2)}</strong> : <span key={i}>{p}</span>)
   }
+
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
       {blocks.map((b, i) => {
@@ -137,6 +168,33 @@ export function Markdownish({ text }) {
             {b.items.map((it, j) => <li key={j}>{inline(it)}</li>)}
           </ul>
         )
+        if (b.t === 'table') {
+          const [header, ...body] = b.rows
+          return (
+            <table key={i} style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12 }}>
+              {header && (
+                <thead>
+                  <tr>
+                    {header.map((h, j) => (
+                      <th key={j} style={{ padding: '5px 8px', textAlign: 'left', borderBottom: '2px solid var(--line)', fontWeight: 600, fontSize: 11, color: 'var(--ink-2)', letterSpacing: '0.04em', whiteSpace: 'nowrap' }}>
+                        {h}
+                      </th>
+                    ))}
+                  </tr>
+                </thead>
+              )}
+              <tbody>
+                {body.map((row, ri) => (
+                  <tr key={ri} style={{ borderBottom: '1px solid var(--line)' }}>
+                    {row.map((cell, ci) => (
+                      <td key={ci} style={{ padding: '5px 8px', fontSize: 12, verticalAlign: 'top' }}>{inline(cell)}</td>
+                    ))}
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          )
+        }
         return <p key={i} style={{ margin: 0 }}>{inline(b.text)}</p>
       })}
     </div>

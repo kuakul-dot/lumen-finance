@@ -109,10 +109,21 @@ function buildHoldingPrompt(portfolio, h, fund, ta, lang) {
   const regionLabel = h.region === 'TH' ? 'หุ้นไทย' : 'หุ้น US'
   const enRegion = h.region === 'TH' ? 'Thai' : 'US'
 
-  // Build fundamentals block (only if we got data from Yahoo)
+  // Build fundamentals block (only if we got data from Yahoo/FMP)
   const fundBlock = fund ? formatFundamentals(fund, lang) : null
   // Build TA block (only if we got enough price history)
   const taBlock = ta ? formatTA(ta, lang) : null
+
+  // When no live fundamental data, instruct AI to draw on its training knowledge
+  const noFundNote = fund ? null : h.region === 'TH'
+    ? `⚠️ ไม่มีข้อมูลงบการเงินแบบ real-time (หุ้นไทยใน SET มักไม่ครบใน Yahoo Finance)
+ให้ใช้ความรู้จาก training data เกี่ยวกับ ${h.ticker} (${h.name || ''}) ดังนี้:
+- ธุรกิจหลักและ sector ของบริษัท
+- ขนาด (large-cap / mid-cap) และสถานะในตลาด SET
+- ประวัติเงินปันผล / ความสม่ำเสมอของ dividend
+- ปัจจัยเสี่ยงและโอกาสที่รู้จาก public record
+- ตัวเลขใดๆ ที่ระบุต้องบอกว่า "จาก training data ณ วันที่รู้จัก" ไม่ใช่ real-time`
+    : `⚠️ No real-time fundamental data available. Use training knowledge about ${h.ticker} (${h.name || ''}): describe the business, sector, rough valuation context, dividend history, and key risks. Label any figures as "from training data, not real-time".`
 
   return lang === 'th'
     ? `คุณคือผู้ช่วยวิเคราะห์การลงทุนรายตัว ทำหน้าที่ "เพื่อนผู้รู้" — ไม่ใช่ที่ปรึกษาทางการเงิน ห้ามแนะนำซื้อ-ขายเด็ดขาด
@@ -131,6 +142,7 @@ function buildHoldingPrompt(portfolio, h, fund, ta, lang) {
 หุ้นกลุ่ม "${h.cls}" อื่นในพอร์ตนี้:
 ${sameClass.length ? sameClass.map(s => `- ${s.ticker} (${s.region}) · ${s.pctOfStocks}% · ${s.plPct != null ? (s.plPct >= 0 ? '+' : '') + s.plPct + '%' : 'n/a'}`).join('\n') : '(ไม่มี)'}
 ${fundBlock ? '\n' + fundBlock : ''}
+${noFundNote ? '\n' + noFundNote : ''}
 ${taBlock ? '\n' + taBlock : ''}
 
 โปรดวิเคราะห์เป็นภาษาไทยกระชับ ในรูปแบบ markdown 4 หัวข้อ:
@@ -139,10 +151,12 @@ ${taBlock ? '\n' + taBlock : ''}
 - น้ำหนัก, สถานะ (top/concentration), ผลงานเทียบสัดส่วน
 
 ## งบการเงิน (Fundamentals)
-${fund ? '- ใช้ตัวเลขจากบล็อก "งบการเงิน" ข้างต้น ตีความ valuation, profitability, growth, debt, dividend\n- ระบุจุดแข็ง/อ่อน — ห้ามแต่งตัวเลขที่ไม่มีในบล็อก' : '- ไม่มีข้อมูลงบจาก Yahoo (อาจเป็นหุ้นไทยเล็กหรือ ETF) → ใช้ความรู้ทั่วไป + บอกว่าข้อมูลจำกัด'}
+${fund
+  ? '- ใช้ตัวเลขจากบล็อก "งบการเงิน" ข้างต้น ตีความ valuation, profitability, growth, debt, dividend\n- ระบุจุดแข็ง/อ่อน — ห้ามแต่งตัวเลขที่ไม่มีในบล็อก'
+  : '- ไม่มีข้อมูล real-time — ให้ใช้ความรู้จาก training ตามที่ระบุในบล็อก noFundNote ข้างต้น\n- ให้ข้อมูลที่มีประโยชน์จริง: ธุรกิจ, sector, dividend history, ปัจจัยเสี่ยง\n- ห้ามปฏิเสธว่า "วิเคราะห์ไม่ได้" ให้ใช้ความรู้ที่มีแล้วบอก disclaimer ท้าย'}
 
 ## มุมมองเทคนิค (Technical)
-${ta ? '- ใช้ตัวเลขจากบล็อก "เทคนิค" — ตำแหน่งราคาเทียบ MA, RSI, แนวรับ-แนวต้านจาก swing high/low + 52-week range\n- ห้ามแต่งระดับราคาที่ไม่มีในบล็อก' : '- ไม่มีข้อมูลราคาย้อนหลังพอ → ระบุว่าวิเคราะห์เทคนิคไม่ได้'}
+${ta ? '- ใช้ตัวเลขจากบล็อก "เทคนิค" — ตำแหน่งราคาเทียบ MA, RSI, แนวรับ-แนวต้านจาก swing high/low + 52-week range\n- ห้ามแต่งระดับราคาที่ไม่มีในบล็อก' : '- ไม่มีข้อมูลราคาย้อนหลัง → ระบุสั้นๆ'}
 
 ## สิ่งที่อาจพิจารณา
 2-3 ข้อ — ใช้คำ "อาจ/ควรพิจารณา" ห้าม "ต้อง" ห้ามแนะนำซื้อ-ขายโดยตรง
@@ -164,9 +178,15 @@ Portfolio: ${counts.stocksTotal || 0} holdings (${counts.stocksTH || 0} TH, ${co
 Same-class peers in this portfolio:
 ${sameClass.length ? sameClass.map(s => `- ${s.ticker} (${s.region}) · ${s.pctOfStocks}% · ${s.plPct != null ? (s.plPct >= 0 ? '+' : '') + s.plPct + '%' : 'n/a'}`).join('\n') : '(none)'}
 ${fundBlock ? '\n' + fundBlock : ''}
+${noFundNote ? '\n' + noFundNote : ''}
 ${taBlock ? '\n' + taBlock : ''}
 
-Reply in markdown with 4 sections: ## Role in portfolio · ## Fundamentals (use the figures above; don't fabricate) · ## Technical (use the levels above; don't fabricate) · ## Things to consider (2-3 bullets, "might/consider", no specific buy/sell).
+Reply in markdown with 4 sections:
+## Role in portfolio — weight, status, performance vs peers
+## Fundamentals — ${fund ? 'use figures from the block above; cite sources; no fabrication' : 'no real-time data; use training knowledge per noFundNote above; describe business/sector/dividend history/risks; add "from training data" disclaimer; do NOT refuse to analyse'}
+## Technical — ${ta ? 'use levels from block above; no fabrication' : 'note data unavailable briefly'}
+## Things to consider — 2-3 bullets, "might/consider", no direct buy/sell
+
 End with: "AI-generated analysis for education only — not investment advice."`
 }
 
