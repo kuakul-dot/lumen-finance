@@ -1,4 +1,5 @@
 import { useState, useMemo, useEffect, useCallback } from 'react'
+import { createPortal } from 'react-dom'
 import { PageHead, Delta, Icon, TickerLogo } from './Nav'
 import { CalcInput } from './CalcInput'
 import { LineChart, Donut, BarChart } from './Charts'
@@ -1104,7 +1105,7 @@ function AnalyticsDiv2({ t, lang, ccy, rows, totalValue, dataState, liveHoldings
       </div>
 
       {/* ── Sync modal ── */}
-      {syncModal && (
+      {syncModal && createPortal(
         <div
           style={{ position: "fixed", inset: 0, zIndex: 1000, background: "rgba(0,0,0,0.45)", display: "flex", alignItems: "center", justifyContent: "center", padding: 16 }}
           onClick={e => { if (e.target === e.currentTarget && !syncSaving) setSyncModal(null) }}>
@@ -1184,10 +1185,10 @@ function AnalyticsDiv2({ t, lang, ccy, rows, totalValue, dataState, liveHoldings
             )}
           </div>
         </div>
-      )}
+      , document.body)}
 
       {/* ── Edit recorded dividends modal ── */}
-      {editModal !== null && (
+      {editModal !== null && createPortal(
         <div
           style={{ position: "fixed", inset: 0, zIndex: 1000, background: "rgba(0,0,0,0.45)", display: "flex", alignItems: "center", justifyContent: "center", padding: 16 }}
           onClick={e => { if (e.target === e.currentTarget && !editSaving) setEditModal(null) }}>
@@ -1261,7 +1262,7 @@ function AnalyticsDiv2({ t, lang, ccy, rows, totalValue, dataState, liveHoldings
             </div>
           </div>
         </div>
-      )}
+      , document.body)}
     </div>
   )
 }
