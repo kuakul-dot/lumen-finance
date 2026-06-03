@@ -1142,15 +1142,27 @@ function AnalyticsDiv2({ t, lang, ccy, rows, totalValue, dataState, liveHoldings
                     style={{ background: "none", border: "none", cursor: "pointer", fontSize: 20, color: "var(--ink-3)", lineHeight: 1, padding: 4 }}>✕</button>
                 </div>
                 <div style={{ overflowY: "auto", flex: 1, minHeight: 0, margin: "0 -4px", padding: "0 4px" }}>
-                  {/* Sticky column header — keeps Gross/Net labels visible while scrolling */}
-                  <div style={{ position: "sticky", top: 0, background: "var(--bg)", zIndex: 1, paddingBottom: 6, borderBottom: "1.5px solid var(--line)", marginBottom: 2 }}>
-                    <div style={{ display: "grid", gridTemplateColumns: "20px 36px 1fr auto 88px", gap: 10 }}>
-                      <div /><div />
-                      <div style={{ fontSize: 10, fontWeight: 600, color: "var(--ink-3)", textTransform: "uppercase", letterSpacing: "0.06em" }}>{th ? "หลักทรัพย์" : "Holding"}</div>
-                      <div style={{ textAlign: "right", fontSize: 10, fontWeight: 600, color: "var(--ink-3)", textTransform: "uppercase", letterSpacing: "0.06em" }}>{th ? "รวม" : "Gross"}</div>
-                      <div style={{ fontSize: 10, fontWeight: 600, color: "var(--ink-3)", textTransform: "uppercase", letterSpacing: "0.06em" }}>{th ? "สุทธิ" : "Net"}</div>
-                    </div>
-                  </div>
+                  {/* Sticky column header with Select-All checkbox */}
+                  {(() => {
+                    const allChecked  = syncModal.every(s => s.checked)
+                    const someChecked = !allChecked && syncModal.some(s => s.checked)
+                    const toggleAll   = () => setSyncModal(prev => prev.map(p => ({ ...p, checked: !allChecked })))
+                    return (
+                      <div style={{ position: "sticky", top: 0, background: "var(--bg)", zIndex: 1, paddingBottom: 6, borderBottom: "1.5px solid var(--line)", marginBottom: 2 }}>
+                        <div style={{ display: "grid", gridTemplateColumns: "20px 36px 1fr auto 88px", gap: 10, alignItems: "center" }}>
+                          {/* Select-all checkbox */}
+                          <input type="checkbox" checked={allChecked} ref={el => { if (el) el.indeterminate = someChecked }}
+                            onChange={toggleAll}
+                            title={th ? (allChecked ? "ยกเลิกทั้งหมด" : "เลือกทั้งหมด") : (allChecked ? "Deselect all" : "Select all")}
+                            style={{ width: 16, height: 16, cursor: "pointer", accentColor: "var(--accent)" }} />
+                          <div />
+                          <div style={{ fontSize: 10, fontWeight: 600, color: "var(--ink-3)", textTransform: "uppercase", letterSpacing: "0.06em" }}>{th ? "หลักทรัพย์" : "Holding"}</div>
+                          <div style={{ textAlign: "right", fontSize: 10, fontWeight: 600, color: "var(--ink-3)", textTransform: "uppercase", letterSpacing: "0.06em" }}>{th ? "รวม" : "Gross"}</div>
+                          <div style={{ fontSize: 10, fontWeight: 600, color: "var(--ink-3)", textTransform: "uppercase", letterSpacing: "0.06em" }}>{th ? "สุทธิ" : "Net"}</div>
+                        </div>
+                      </div>
+                    )
+                  })()}
                   {syncModal.map((s, i) => (
                     <SyncRow key={i} s={s} th={th} FMT={FMT} ccy={ccy}
                       onChange={upd => setSyncModal(prev => prev.map((p, j) => j === i ? { ...p, ...upd } : p))} />
