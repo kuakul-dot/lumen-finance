@@ -409,21 +409,26 @@ function GoalModal({ lang, userId, ccy, goal, onClose, onSaved }) {
   return (
     <div style={{
       position: "fixed", inset: 0, background: "rgba(0,0,0,0.45)", backdropFilter: "blur(4px)",
-      display: "flex", alignItems: "flex-end", justifyContent: "center", zIndex: 1000,
+      display: "flex", alignItems: "center", justifyContent: "center", zIndex: 1000, padding: 16,
     }} onClick={e => e.target === e.currentTarget && onClose()}>
       <div style={{
-        background: "var(--bg)", borderRadius: "20px 20px 0 0", padding: "32px 28px 40px",
-        width: "100%", maxWidth: 540, boxShadow: "0 -8px 40px rgba(0,0,0,0.12)",
-        maxHeight: "90vh", overflowY: "auto", animation: "slideUp 0.2s ease",
+        background: "var(--bg)", borderRadius: 20, padding: "28px 28px 24px",
+        width: "100%", maxWidth: 480, boxShadow: "0 24px 60px rgba(0,0,0,0.18)",
+        maxHeight: "90vh", overflowY: "auto",
       }}>
-        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 24 }}>
-          <h3 style={{ margin: 0, fontSize: 20, fontFamily: "var(--font-display)" }}>
-            {isEdit ? (th ? "แก้ไขเป้าหมาย" : "Edit Goal") : (th ? "เพิ่มเป้าหมาย" : "Add Goal")}
+        {/* Header */}
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 22 }}>
+          <h3 style={{ margin: 0, fontSize: 18, fontWeight: 700, fontFamily: "var(--font-display)" }}>
+            {isEdit ? (th ? "แก้ไขเป้าหมาย" : "Edit goal") : (th ? "เพิ่มเป้าหมาย" : "Add goal")}
           </h3>
-          <button onClick={onClose} style={{ background: "none", border: "none", cursor: "pointer", fontSize: 20, color: "var(--ink-3)", lineHeight: 1 }}>×</button>
+          <button onClick={onClose} style={{
+            width: 30, height: 30, borderRadius: 999, background: "var(--bg-2)",
+            border: "none", cursor: "pointer", fontSize: 16, color: "var(--ink-3)",
+            display: "grid", placeItems: "center",
+          }}>×</button>
         </div>
 
-        <form onSubmit={handleSubmit} style={{ display: "flex", flexDirection: "column", gap: 14 }}>
+        <form onSubmit={handleSubmit} style={{ display: "flex", flexDirection: "column", gap: 16 }}>
           {error && (
             <div style={{ padding: "10px 14px", borderRadius: 8, background: "oklch(0.96 0.05 25)", color: "oklch(0.40 0.12 25)", fontSize: 13 }}>
               {error}
@@ -436,8 +441,8 @@ function GoalModal({ lang, userId, ccy, goal, onClose, onSaved }) {
               placeholder={th ? "เช่น เงินดาวน์บ้าน" : "e.g. House down payment"} style={iStyle} />
           </GField>
 
+          {/* Icon + Target year */}
           <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
-            {/* Icon */}
             <GField label={th ? "ไอคอน" : "Icon"}>
               <select value={form.icon} onChange={e => set('icon', e.target.value)} style={iStyle}>
                 {[
@@ -452,7 +457,6 @@ function GoalModal({ lang, userId, ccy, goal, onClose, onSaved }) {
                 ].map(([v, l]) => <option key={v} value={v}>{l}</option>)}
               </select>
             </GField>
-            {/* ETA */}
             <GField label={th ? "ปีเป้าหมาย" : "Target year"}>
               <input value={form.eta_year} onChange={e => set('eta_year', e.target.value)}
                 placeholder="2028" style={iStyle} />
@@ -461,37 +465,39 @@ function GoalModal({ lang, userId, ccy, goal, onClose, onSaved }) {
 
           {/* Color swatches */}
           <GField label={th ? "สี" : "Color"}>
-            <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+            <div style={{ display: "flex", gap: 10, paddingTop: 2 }}>
               {COLORS.map(({ v, hex }) => (
-                <button key={v} type="button"
-                  onClick={() => set('color', v)}
+                <button key={v} type="button" onClick={() => set('color', v)}
                   style={{
-                    width: 28, height: 28, borderRadius: 999,
-                    background: hex, border: form.color === v ? "3px solid var(--ink)" : "3px solid transparent",
-                    cursor: "pointer", transition: "border 0.1s",
+                    width: 32, height: 32, borderRadius: 999, background: hex,
+                    border: form.color === v ? "3px solid var(--ink)" : "3px solid transparent",
+                    cursor: "pointer", transition: "border 0.12s, transform 0.12s",
+                    transform: form.color === v ? "scale(1.15)" : "scale(1)",
+                    flexShrink: 0,
                   }} />
               ))}
             </div>
           </GField>
 
-          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
+          {/* Target + Saved + Monthly — 3-column grid */}
+          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 12 }}>
             <GField label={`${th ? "เป้าหมาย" : "Target"} (${ccy})`}>
               <CalcInput required value={form.target}
                 onChange={e => set('target', e.target.value)} placeholder="0" style={iStyle} />
             </GField>
-            <GField label={`${th ? "ออมแล้ว" : "Saved so far"} (${ccy})`}>
+            <GField label={`${th ? "ออมแล้ว" : "Saved"} (${ccy})`}>
               <CalcInput value={form.current}
                 onChange={e => set('current', e.target.value)} placeholder="0" style={iStyle} />
             </GField>
+            <GField label={`${th ? "ต่อเดือน" : "Monthly"} (${ccy})`}>
+              <CalcInput value={form.monthly_contribution}
+                onChange={e => set('monthly_contribution', e.target.value)}
+                placeholder="0" style={iStyle} />
+            </GField>
           </div>
 
-          <GField label={`${th ? "ออมต่อเดือน" : "Monthly contribution"} (${ccy})`}>
-            <CalcInput value={form.monthly_contribution}
-              onChange={e => set('monthly_contribution', e.target.value)}
-              placeholder="0" style={{ ...iStyle, maxWidth: 200 }} />
-          </GField>
-
-          <div style={{ display: "flex", gap: 10, marginTop: 8 }}>
+          {/* Buttons */}
+          <div style={{ display: "flex", gap: 10, marginTop: 4 }}>
             <button type="button" className="btn btn-outline" style={{ flex: 1 }} onClick={onClose}>
               {th ? "ยกเลิก" : "Cancel"}
             </button>
