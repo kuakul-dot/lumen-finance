@@ -901,16 +901,20 @@ function AnalyticsDiv2({ t, lang, ccy, rows, totalValue, dataState, liveHoldings
       const divTxs = transactions.filter(tx => tx.type === 'Dividend')
       // Convert Yahoo Unix timestamp → "YYYY-MM-DD" string (add 12 h to handle midnight-UTC edge)
       const toXdStr = (sec) => new Date((sec + 43200) * 1000).toISOString().slice(0, 10)
-      // Already recorded? Check note tag first (exact), then ±28-day window.
-      // ±28 days: covers US XD→pay-date gap (~14-28 days) without blocking
-      // monthly dividend payers like O/RATCH whose next payout is ~30 days later.
-      // TH stocks with long pay gaps (>28 days) will rely on the xd: tag after first resync.
+      // Already recorded? Primary: exact xd: tag match. Fallback: ±28-day proximity.
+      // IMPORTANT: for the proximity fallback, compare against the XD date extracted from
+      // the note (if present) rather than transacted_at — because transacted_at may be a
+      // pay date weeks after XD, which would falsely block the next month's dividend.
+      // e.g. O March XD=03-29 saved with pay=04-11 → must NOT block April XD=04-29 (18 days away).
       const alreadyRecorded = (ticker, xdDateStr) =>
         divTxs
           .filter(tx => tx.ticker === ticker && tx.transacted_at)
           .some(tx => {
             if (tx.note?.includes(`xd:${xdDateStr}`)) return true
-            const diffMs = Math.abs(new Date(tx.transacted_at.slice(0, 10)).getTime() - new Date(xdDateStr).getTime())
+            // Use the xd: date from note for comparison; fall back to transacted_at for old records
+            const noteXd = tx.note?.match(/xd:(\d{4}-\d{2}-\d{2})/)?.[1]
+            const refDate = noteXd ?? tx.transacted_at.slice(0, 10)
+            const diffMs = Math.abs(new Date(refDate).getTime() - new Date(xdDateStr).getTime())
             return diffMs < 28 * 86400 * 1000
           })
       // Shares actually held BEFORE the ex-dividend date (from the transaction ledger).
