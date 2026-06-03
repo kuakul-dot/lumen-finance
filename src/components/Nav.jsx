@@ -470,8 +470,10 @@ export function Icon({ name, size = 18 }) {
 
 // Shared allocation category icon — SVG-based so it renders identically on all platforms.
 // Used by Dashboard and Portfolio Categories tab.
-export function AllocCategoryIcon({ name, color, isCash }) {
+export function AllocCategoryIcon({ name, color, isCash, isEmergency }) {
   const s = { width: 22, height: 22, stroke: color, fill: "none", strokeWidth: 1.8, strokeLinecap: "round", strokeLinejoin: "round" }
+  if (isEmergency)
+    return <svg viewBox="0 0 24 24" style={s}><path d="M12 3 4 6v6c0 5 4 8 8 9 4-1 8-4 8-9V6Z"/><path d="m9 12 2 2 4-4"/></svg>
   if (isCash)
     return <svg viewBox="0 0 24 24" style={s}><rect x="2" y="7" width="20" height="14" rx="2"/><path d="M16 11h2M2 7l5-4h10l5 4"/></svg>
   if (name.includes("TH") || name.includes("ไทย"))

@@ -601,13 +601,18 @@ function LiveDashboardPage({ t, lang, ccy, setRoute, liveHoldings, prices = {}, 
       const rest = arr.slice(7).reduce((s, x) => s + x.value, 0)
       arr = [...arr.slice(0, 7), { name: th ? "อื่นๆ" : "Others", value: rest, _other: true }]
     }
-    // Cash counts as its own slice on every mode so the donut matches net worth
-    if (cashTotal > 0) arr.push({ name: th ? "เงินสด" : "Cash", value: cashTotal, _cash: true })
+    // Cash counts as its own slice on every mode so the donut matches net worth.
+    // Emergency fund is shown as a separate protected slice when present.
+    if (investableCash > 0) arr.push({ name: th ? "เงินสด" : "Cash", value: investableCash, _cash: true })
+    if (emergencyProtected > 0) arr.push({ name: th ? "กองฉุกเฉิน" : "Emergency Fund", value: emergencyProtected, _emergency: true })
     return arr.map((x, i) => ({
       ...x,
-      color: x._cash ? "oklch(0.82 0.04 230)" : x._other ? "var(--ink-4)" : colors[i % colors.length],
+      color: x._emergency ? "oklch(0.78 0.10 70)"
+           : x._cash      ? "oklch(0.82 0.04 230)"
+           : x._other     ? "var(--ink-4)"
+           : colors[i % colors.length],
     }))
-  }, [rows, th, allocMode, cashTotal])
+  }, [rows, th, allocMode, investableCash, emergencyProtected])
 
   // Allocation table — same grouping as donut but enriched with cost basis + P/L
   const [expandedCats, setExpandedCats] = useState(new Set())
@@ -639,9 +644,13 @@ function LiveDashboardPage({ t, lang, ccy, setRoute, liveHoldings, prices = {}, 
       map[k].pl       += r.pl
       map[k].holdings.push(r)
     })
-    if (cashTotal > 0) {
+    if (investableCash > 0) {
       const cashKey = th ? "เงินสด" : "Cash"
-      map[cashKey] = { name: cashKey, value: cashTotal, costBasis: cashTotal, pl: 0, holdings: [], _cash: true }
+      map[cashKey] = { name: cashKey, value: investableCash, costBasis: investableCash, pl: 0, holdings: [], _cash: true }
+    }
+    if (emergencyProtected > 0) {
+      const emKey = th ? "กองฉุกเฉิน" : "Emergency Fund"
+      map[emKey] = { name: emKey, value: emergencyProtected, costBasis: emergencyProtected, pl: 0, holdings: [], _cash: true, _emergency: true }
     }
     const denom = hasCash ? netWorth : totalValue
     return Object.values(map).map(g => ({
@@ -651,7 +660,7 @@ function LiveDashboardPage({ t, lang, ccy, setRoute, liveHoldings, prices = {}, 
       count:    new Set(g.holdings.map(r => r.ticker)).size,
       color:    allocClass.find(a => a.name === g.name)?.color || (g._cash ? "oklch(0.82 0.04 230)" : "var(--ink-4)"),
     }))
-  }, [rows, allocMode, th, cashTotal, hasCash, netWorth, totalValue, allocClass])
+  }, [rows, allocMode, th, investableCash, emergencyProtected, hasCash, netWorth, totalValue, allocClass])
 
   const sortedAllocTable = useMemo(() => {
     return [...allocTable].sort((a, b) => {
@@ -1019,7 +1028,13 @@ function LiveDashboardPage({ t, lang, ccy, setRoute, liveHoldings, prices = {}, 
                 accent="gain" />
               <Metric label={t.dashboard.cash}
                 value={LUMEN_FMT.money(cashTotal, ccy, { compact: true })}
-                sub={hasCash ? `${cashAccounts.length} ${th ? "บัญชี" : "accounts"}` : (th ? "ไม่มีบัญชีเงินสด" : "No cash accounts")} />
+                sub={
+                  hasCash
+                    ? emergencyProtected > 0
+                      ? `${LUMEN_FMT.money(investableCash, ccy, { compact: true })} ${th ? "ลงทุนได้" : "investable"} · ${LUMEN_FMT.money(emergencyProtected, ccy, { compact: true })} ${th ? "ฉุกเฉิน" : "emergency"}`
+                      : `${cashAccounts.length} ${th ? "บัญชี" : "accounts"}`
+                    : (th ? "ไม่มีบัญชีเงินสด" : "No cash accounts")
+                } />
               <Metric label={th ? "ปันผล/ปี" : "Annual div."}
                 value={annualDiv > 0 ? LUMEN_FMT.money(annualDiv, ccy, { compact: true }) : "—"}
                 sub={annualDiv > 0 ? LUMEN_FMT.money(annualDiv / 12, ccy, { compact: true }) + (th ? "/เดือน" : "/mo") : (th ? "ยังไม่มีปันผล" : "No dividends")} />
@@ -1178,11 +1193,16 @@ function LiveDashboardPage({ t, lang, ccy, setRoute, liveHoldings, prices = {}, 
                             {/* Color bar */}
                             <div style={{ width: 4, height: 36, borderRadius: 2, background: g.color, flexShrink: 0 }} />
                             <div style={{ width: 36, height: 36, borderRadius: 10, background: g.color + "22", display: "grid", placeItems: "center", flexShrink: 0, overflow: "hidden" }}>
-                              <AllocCategoryIcon name={g.name} color={g.color} isCash={g._cash} />
+                              <AllocCategoryIcon name={g.name} color={g.color} isCash={g._cash && !g._emergency} isEmergency={!!g._emergency} />
                             </div>
                             <div>
                               <div style={{ fontWeight: 600, fontSize: 13 }}>{g.name}</div>
-                              {!g._cash && <div className="muted" style={{ fontSize: 11, marginTop: 1 }}>{g.count} {th ? "รายการ" : g.count === 1 ? "item" : "items"}</div>}
+                              {g._emergency
+                                ? <div style={{ fontSize: 10, color: "oklch(0.55 0.10 70)", fontFamily: "var(--font-mono)", marginTop: 2 }}>
+                                    {th ? "🛡 สำรองฉุกเฉิน" : "🛡 Protected buffer"}
+                                  </div>
+                                : !g._cash && <div className="muted" style={{ fontSize: 11, marginTop: 1 }}>{g.count} {th ? "รายการ" : g.count === 1 ? "item" : "items"}</div>
+                              }
                             </div>
                             {!g._cash && g.holdings.length > 0 && (
                               <span style={{ marginLeft: "auto", color: "var(--ink-4)", fontSize: 11, transition: "transform 0.2s", transform: expanded ? "rotate(90deg)" : "none", display: "inline-block" }}>›</span>
