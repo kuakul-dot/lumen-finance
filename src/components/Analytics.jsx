@@ -1106,7 +1106,7 @@ function AnalyticsDiv2({ t, lang, ccy, rows, totalValue, dataState, liveHoldings
       {/* ── Sync modal ── */}
       {syncModal && (
         <div
-          style={{ position: "fixed", inset: 0, zIndex: 200, background: "rgba(0,0,0,0.45)", display: "flex", alignItems: "center", justifyContent: "center", padding: 16 }}
+          style={{ position: "fixed", inset: 0, zIndex: 1000, background: "rgba(0,0,0,0.45)", display: "flex", alignItems: "center", justifyContent: "center", padding: 16 }}
           onClick={e => { if (e.target === e.currentTarget && !syncSaving) setSyncModal(null) }}>
           <div style={{ background: "var(--bg)", borderRadius: 18, padding: 28, width: "100%", maxWidth: 540, maxHeight: "85vh", display: "flex", flexDirection: "column", gap: 20, boxShadow: "0 20px 60px rgba(0,0,0,0.2)", overflow: "hidden" }}>
             {syncModal === 'loading' ? (
@@ -1189,7 +1189,7 @@ function AnalyticsDiv2({ t, lang, ccy, rows, totalValue, dataState, liveHoldings
       {/* ── Edit recorded dividends modal ── */}
       {editModal !== null && (
         <div
-          style={{ position: "fixed", inset: 0, zIndex: 200, background: "rgba(0,0,0,0.45)", display: "flex", alignItems: "center", justifyContent: "center", padding: 16 }}
+          style={{ position: "fixed", inset: 0, zIndex: 1000, background: "rgba(0,0,0,0.45)", display: "flex", alignItems: "center", justifyContent: "center", padding: 16 }}
           onClick={e => { if (e.target === e.currentTarget && !editSaving) setEditModal(null) }}>
           <div style={{ background: "var(--bg)", borderRadius: 18, padding: 28, width: "100%", maxWidth: 560, maxHeight: "85vh", display: "flex", flexDirection: "column", gap: 20, boxShadow: "0 20px 60px rgba(0,0,0,0.2)" }}>
             <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start" }}>
