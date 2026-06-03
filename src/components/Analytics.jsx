@@ -1142,6 +1142,15 @@ function AnalyticsDiv2({ t, lang, ccy, rows, totalValue, dataState, liveHoldings
                     style={{ background: "none", border: "none", cursor: "pointer", fontSize: 20, color: "var(--ink-3)", lineHeight: 1, padding: 4 }}>✕</button>
                 </div>
                 <div style={{ overflowY: "auto", flex: 1, minHeight: 0, margin: "0 -4px", padding: "0 4px" }}>
+                  {/* Sticky column header — keeps Gross/Net labels visible while scrolling */}
+                  <div style={{ position: "sticky", top: 0, background: "var(--bg)", zIndex: 1, paddingBottom: 6, borderBottom: "1.5px solid var(--line)", marginBottom: 2 }}>
+                    <div style={{ display: "grid", gridTemplateColumns: "20px 36px 1fr auto 88px", gap: 10 }}>
+                      <div /><div />
+                      <div style={{ fontSize: 10, fontWeight: 600, color: "var(--ink-3)", textTransform: "uppercase", letterSpacing: "0.06em" }}>{th ? "หลักทรัพย์" : "Holding"}</div>
+                      <div style={{ textAlign: "right", fontSize: 10, fontWeight: 600, color: "var(--ink-3)", textTransform: "uppercase", letterSpacing: "0.06em" }}>{th ? "รวม" : "Gross"}</div>
+                      <div style={{ fontSize: 10, fontWeight: 600, color: "var(--ink-3)", textTransform: "uppercase", letterSpacing: "0.06em" }}>{th ? "สุทธิ" : "Net"}</div>
+                    </div>
+                  </div>
                   {syncModal.map((s, i) => (
                     <SyncRow key={i} s={s} th={th} FMT={FMT} ccy={ccy}
                       onChange={upd => setSyncModal(prev => prev.map((p, j) => j === i ? { ...p, ...upd } : p))} />
@@ -1249,7 +1258,7 @@ function AnalyticsDiv2({ t, lang, ccy, rows, totalValue, dataState, liveHoldings
 function SyncRow({ s, th, FMT, ccy, onChange }) {
   const tax = +(s.gross * s.taxRate).toFixed(2)
   return (
-    <div style={{ display: "grid", gridTemplateColumns: "20px 36px 1fr auto 88px", gap: 10, alignItems: "center", padding: "10px 0", borderBottom: "1px solid var(--line)" }}>
+    <div style={{ display: "grid", gridTemplateColumns: "20px 36px 1fr auto 88px", gap: 10, alignItems: "center", padding: "8px 0", borderBottom: "1px solid var(--line)" }}>
       <input type="checkbox" checked={s.checked} onChange={e => onChange({ checked: e.target.checked })}
         style={{ width: 16, height: 16, cursor: "pointer", accentColor: "var(--accent)" }} />
       <TickerLogo ticker={s.ticker} logoUrl={s.logo_url} region={s.region} cls={s.cls} size={30} />
@@ -1264,18 +1273,14 @@ function SyncRow({ s, th, FMT, ccy, onChange }) {
           )}
         </div>
       </div>
-      <div style={{ textAlign: "right", fontSize: 12, color: "var(--ink-3)" }}>
-        <div>{th ? "รวม" : "Gross"}</div>
-        <div className="mono">฿{s.gross}</div>
+      {/* Gross — label removed (now in sticky column header above the list) */}
+      <div style={{ textAlign: "right", fontSize: 13, fontFamily: "var(--font-mono)", color: "var(--ink-2)" }}>
+        ฿{s.gross}
       </div>
-      <div>
-        <div style={{ fontSize: 10, color: "var(--ink-4)", marginBottom: 3 }}>
-          {th ? "สุทธิ (แก้ได้)" : "Net (edit)"}
-        </div>
-        <CalcInput value={s.editedNet}
-          onChange={e => onChange({ editedNet: parseFloat(e.target.value) || 0 })}
-          style={{ width: "100%", padding: "4px 6px", fontSize: 13, fontFamily: "var(--font-mono)", textAlign: "right", border: "1px solid var(--line)", borderRadius: 6, background: "var(--bg-2)", color: "var(--ink)" }} />
-      </div>
+      {/* Net editable — label removed */}
+      <CalcInput value={s.editedNet}
+        onChange={e => onChange({ editedNet: parseFloat(e.target.value) || 0 })}
+        style={{ width: "100%", padding: "4px 6px", fontSize: 13, fontFamily: "var(--font-mono)", textAlign: "right", border: "1px solid var(--line)", borderRadius: 6, background: "var(--bg-2)", color: "var(--ink)" }} />
     </div>
   )
 }
