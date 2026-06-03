@@ -350,7 +350,9 @@ export function ToolsPage({ t, lang, ccy, dataState, liveHoldings = [], prices =
       // Cap this class's buy to remaining budget AND the class delta
       const classAlloc = Math.min(s.delta, buyBudget)
       const rich = enrichCandidates(s.candidates || [], s)
-        .filter(c => c.withinClassTarget > 0)   // skip holdings the user explicitly set to 0% — they want to sell, not buy
+        // Skip holdings the user has explicitly set to 0% target (waiting to sell / excluded)
+        // Check tickerWeights directly so the exclusion works in both Class and Hybrid mode
+        .filter(c => !(tickerWeights[c.ticker] != null && Number(tickerWeights[c.ticker]) === 0))
         .sort((a, b) => a.drift - b.drift)
 
       let remaining = classAlloc
@@ -376,7 +378,7 @@ export function ToolsPage({ t, lang, ccy, dataState, liveHoldings = [], prices =
     }
 
     return out
-  }, [suggestions, allowSales, rows, total, showResult, band, effHybrid, depInTHB, mode])
+  }, [suggestions, allowSales, rows, total, showResult, band, effHybrid, tickerWeights, depInTHB, mode])
 
   // cashRemaining in THB (depInTHB minus buy/sell amounts which are also THB)
   const cashRemaining = Math.max(0, depInTHB - trades.filter(tr => tr.action === "Buy").reduce((a, b) => a + b.amount, 0)
