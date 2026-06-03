@@ -349,7 +349,9 @@ export function ToolsPage({ t, lang, ccy, dataState, liveHoldings = [], prices =
       if (buyBudget <= 10) break
       // Cap this class's buy to remaining budget AND the class delta
       const classAlloc = Math.min(s.delta, buyBudget)
-      const rich = enrichCandidates(s.candidates || [], s).sort((a, b) => a.drift - b.drift)
+      const rich = enrichCandidates(s.candidates || [], s)
+        .filter(c => c.withinClassTarget > 0)   // skip holdings the user explicitly set to 0% — they want to sell, not buy
+        .sort((a, b) => a.drift - b.drift)
 
       let remaining = classAlloc
       for (const c of rich.slice(0, Math.min(3, rich.length))) {
