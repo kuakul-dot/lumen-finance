@@ -906,7 +906,8 @@ function AnalyticsDiv2({ t, lang, ccy, rows, totalValue, dataState, liveHoldings
             suggestions.push({
               ticker: h.ticker,
               region, cls: h.asset_class || 'Equity', logo_url: h.logo_url || null,
-              date:      d.toISOString().slice(0, 10),
+              xdDate:    d.toISOString().slice(0, 10),   // ex-dividend date from Yahoo
+              date:      d.toISOString().slice(0, 10),   // editedDate default = xdDate; user can change to pay date
               dateLabel: d.toLocaleDateString(th ? 'th-TH' : 'en-US', { day: 'numeric', month: 'short', year: '2-digit' }),
               pricePerShare: e.amount,
               shares: sharesHeld,
@@ -1271,13 +1272,27 @@ function AnalyticsDiv2({ t, lang, ccy, rows, totalValue, dataState, liveHoldings
 function SyncRow({ s, th, FMT, ccy, onChange }) {
   const tax = +(s.gross * s.taxRate).toFixed(2)
   const sym = s.currency === 'USD' ? '$' : '฿'
+  const dateChanged = s.date !== s.xdDate
   return (
     <div style={{ display: "grid", gridTemplateColumns: "20px 36px 1fr auto 88px", gap: 10, alignItems: "center", padding: "8px 0", borderBottom: "1px solid var(--line)" }}>
       <input type="checkbox" checked={s.checked} onChange={e => onChange({ checked: e.target.checked })}
         style={{ width: 16, height: 16, cursor: "pointer", accentColor: "var(--accent)" }} />
       <TickerLogo ticker={s.ticker} logoUrl={s.logo_url} region={s.region} cls={s.cls} size={30} />
       <div>
-        <div style={{ fontWeight: 500, fontSize: 13 }}>{s.ticker} · {s.dateLabel}</div>
+        <div style={{ fontWeight: 500, fontSize: 13, display: "flex", alignItems: "center", gap: 6, flexWrap: "wrap" }}>
+          <span>{s.ticker}</span>
+          {/* Editable date — shows XD badge when unchanged, pay-date when edited */}
+          <span style={{ display: "flex", alignItems: "center", gap: 4 }}>
+            <input type="date" value={s.date} onChange={e => onChange({ date: e.target.value })}
+              style={{ fontSize: 11, padding: "1px 4px", borderRadius: 5, border: "1px solid var(--line)", background: "var(--bg-2)", color: "var(--ink)", fontFamily: "var(--font-mono)", cursor: "pointer", width: 110 }} />
+            {!dateChanged && (
+              <span style={{ fontSize: 9, background: "oklch(0.90 0.06 60)", color: "oklch(0.45 0.10 60)", padding: "1px 5px", borderRadius: 3, fontWeight: 600, letterSpacing: "0.04em" }}>XD</span>
+            )}
+            {dateChanged && (
+              <span style={{ fontSize: 9, background: "var(--gain-soft)", color: "var(--gain)", padding: "1px 5px", borderRadius: 3, fontWeight: 600 }}>✓</span>
+            )}
+          </span>
+        </div>
         <div className="muted" style={{ fontSize: 11 }}>
           {s.shares} {th ? "หุ้น" : "shares"} × {sym}{s.pricePerShare}
           {s.taxRate > 0 && (
