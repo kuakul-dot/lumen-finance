@@ -601,18 +601,15 @@ function LiveDashboardPage({ t, lang, ccy, setRoute, liveHoldings, prices = {}, 
       const rest = arr.slice(7).reduce((s, x) => s + x.value, 0)
       arr = [...arr.slice(0, 7), { name: th ? "อื่นๆ" : "Others", value: rest, _other: true }]
     }
-    // Cash counts as its own slice on every mode so the donut matches net worth.
-    // Emergency fund is shown as a separate protected slice when present.
+    // Only investable cash counts in allocation — Emergency Fund is excluded
     if (investableCash > 0) arr.push({ name: th ? "เงินสด" : "Cash", value: investableCash, _cash: true })
-    if (emergencyProtected > 0) arr.push({ name: th ? "กองฉุกเฉิน" : "Emergency Fund", value: emergencyProtected, _emergency: true })
     return arr.map((x, i) => ({
       ...x,
-      color: x._emergency ? "oklch(0.78 0.10 70)"
-           : x._cash      ? "oklch(0.82 0.04 230)"
-           : x._other     ? "var(--ink-4)"
+      color: x._cash  ? "oklch(0.82 0.04 230)"
+           : x._other ? "var(--ink-4)"
            : colors[i % colors.length],
     }))
-  }, [rows, th, allocMode, investableCash, emergencyProtected])
+  }, [rows, th, allocMode, investableCash])
 
   // Allocation table — same grouping as donut but enriched with cost basis + P/L
   const [expandedCats, setExpandedCats] = useState(new Set())
@@ -648,11 +645,10 @@ function LiveDashboardPage({ t, lang, ccy, setRoute, liveHoldings, prices = {}, 
       const cashKey = th ? "เงินสด" : "Cash"
       map[cashKey] = { name: cashKey, value: investableCash, costBasis: investableCash, pl: 0, holdings: [], _cash: true }
     }
-    if (emergencyProtected > 0) {
-      const emKey = th ? "กองฉุกเฉิน" : "Emergency Fund"
-      map[emKey] = { name: emKey, value: emergencyProtected, costBasis: emergencyProtected, pl: 0, holdings: [], _cash: true, _emergency: true }
-    }
-    const denom = hasCash ? netWorth : totalValue
+    // Emergency Fund is intentionally excluded from the allocation view
+    // (it's protected capital, not an investable allocation)
+    const investableTotal = totalValue + investableCash   // denominator = investable only
+    const denom = investableTotal > 0 ? investableTotal : totalValue
     return Object.values(map).map(g => ({
       ...g,
       plPct:    g.costBasis > 0 ? (g.pl / g.costBasis) * 100 : 0,
@@ -660,7 +656,7 @@ function LiveDashboardPage({ t, lang, ccy, setRoute, liveHoldings, prices = {}, 
       count:    new Set(g.holdings.map(r => r.ticker)).size,
       color:    allocClass.find(a => a.name === g.name)?.color || (g._cash ? "oklch(0.82 0.04 230)" : "var(--ink-4)"),
     }))
-  }, [rows, allocMode, th, investableCash, emergencyProtected, hasCash, netWorth, totalValue, allocClass])
+  }, [rows, allocMode, th, investableCash, hasCash, totalValue, allocClass])
 
   const sortedAllocTable = useMemo(() => {
     return [...allocTable].sort((a, b) => {
@@ -1089,23 +1085,38 @@ function LiveDashboardPage({ t, lang, ccy, setRoute, liveHoldings, prices = {}, 
             </div>
           </div>
           <div style={{ display: "flex", alignItems: "center", gap: 24 }}>
-            <Donut data={allocClass} size={180} thickness={26}
-                   centerLabel={hasCash ? (th ? "มูลค่าสุทธิ" : "Net Worth") : t.common.total}
-                   centerValue={LUMEN_FMT.money(hasCash ? netWorth : totalValue, ccy, { compact: true })}
-                   valueFmt={v => LUMEN_FMT.money(v, ccy, { compact: true })} />
-            <div style={{ flex: 1, display: "grid", gap: 10 }}>
-              {allocClass.map((s, i) => (
-                <div key={i} style={{ display: "grid", gridTemplateColumns: "auto 1fr auto", gap: 10, alignItems: "center", fontSize: 13 }}>
-                  <span className="dot" style={{ background: s.color }} />
-                  <span>{s.name}</span>
-                  <span className="mono">{(s.value / (hasCash ? netWorth : totalValue) * 100).toFixed(1)}%</span>
-                </div>
-              ))}
-            </div>
+            {(() => {
+              const investableTotal = totalValue + investableCash
+              const allocDenom = investableTotal > 0 ? investableTotal : totalValue
+              return (
+                <>
+                  <Donut data={allocClass} size={180} thickness={26}
+                         centerLabel={th ? "พอร์ตลงทุน" : "Investable"}
+                         centerValue={LUMEN_FMT.money(allocDenom, ccy, { compact: true })}
+                         valueFmt={v => LUMEN_FMT.money(v, ccy, { compact: true })} />
+                  <div style={{ flex: 1, display: "grid", gap: 10 }}>
+                    {allocClass.map((s, i) => (
+                      <div key={i} style={{ display: "grid", gridTemplateColumns: "auto 1fr auto", gap: 10, alignItems: "center", fontSize: 13 }}>
+                        <span className="dot" style={{ background: s.color }} />
+                        <span>{s.name}</span>
+                        <span className="mono">{(s.value / allocDenom * 100).toFixed(1)}%</span>
+                      </div>
+                    ))}
+                    {emergencyProtected > 0 && (
+                      <div style={{ display: "grid", gridTemplateColumns: "auto 1fr auto", gap: 10, alignItems: "center", fontSize: 11, opacity: 0.55, marginTop: 2 }}>
+                        <span style={{ width: 8, height: 8, borderRadius: "50%", background: "oklch(0.78 0.10 70)", display: "inline-block" }} />
+                        <span>🛡 {th ? "กองฉุกเฉิน (ไม่นับรวม)" : "Emergency (excluded)"}</span>
+                        <span className="mono">{LUMEN_FMT.money(emergencyProtected, ccy, { compact: true })}</span>
+                      </div>
+                    )}
+                  </div>
+                </>
+              )
+            })()}
           </div>
           {/* ── Footer stats: positions · largest slice · currency exposure ── */}
           {(() => {
-            const denom = hasCash ? netWorth : totalValue
+            const denom = (totalValue + investableCash) > 0 ? (totalValue + investableCash) : totalValue
             if (denom <= 0) return null
             const positionCount = new Set(rows.map(r => r.ticker)).size
             const largest = allocClass[0]
@@ -1122,7 +1133,7 @@ function LiveDashboardPage({ t, lang, ccy, setRoute, liveHoldings, prices = {}, 
                   <span className="label-up" style={{ fontSize: 9 }}>{th ? "หลักทรัพย์" : "Positions"}</span>
                   <div style={{ display: "flex", alignItems: "baseline", gap: 6 }}>
                     <span style={{ fontSize: 22, fontWeight: 600, fontFamily: "var(--font-display)", lineHeight: 1 }}>{positionCount}</span>
-                    {hasCash && <span className="muted" style={{ fontSize: 10.5, fontFamily: "var(--font-mono)" }}>+{cashAccounts.length} {th ? "เงินสด" : "cash"}</span>}
+                    {investableCash > 0 && <span className="muted" style={{ fontSize: 10.5, fontFamily: "var(--font-mono)" }}>+{cashAccounts.filter(a => !(a.icon === 'shield' && a.target_balance)).length || cashAccounts.length} {th ? "เงินสด" : "cash"}</span>}
                   </div>
                 </div>
                 {/* Largest slice */}
