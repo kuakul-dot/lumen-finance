@@ -102,6 +102,7 @@ export function ToolsPage({ t, lang, ccy, dataState, liveHoldings = [], prices =
   const [band,       setBand]       = useState(loadBand)   // tolerance (percentage points)
   const [copied,     setCopied]     = useState(false)
   const [openRow,    setOpenRow]    = useState(null)   // which drift row is expanded to show ฿ amounts
+  const [driftLevel, setDriftLevel] = useState("class")  // "class" | "class+holding"
   const [lastRebalance, setLastRebalance] = useState(loadLastRebalance)
   // ── AI rebalance explainer (optional — hides when /api/analyze 503s) ──
   const ai = useAiAnalysis()
@@ -244,6 +245,27 @@ export function ToolsPage({ t, lang, ccy, dataState, liveHoldings = [], prices =
     const delta = targetValue - u.current
     return { name: u.key, current: u.current, target: targetValue, delta, curPct: total > 0 ? (u.current / total) * 100 : 0, tgtPct: u.tgt * 100, candidates: u.candidates }
   }), [units, newTotal, total])
+
+  // ── Per-holding drift within each class (for Class+Holding view) ────────────
+  const holdingDriftByClass = useMemo(() => {
+    const out = {}
+    suggestions.forEach(s => {
+      if (!s.candidates || s.candidates.length === 0) return
+      const classTotal = s.candidates.reduce((sum, c) => sum + c.value, 0)
+      const n = s.candidates.length
+      out[s.name] = s.candidates.map(c => {
+        // Within-class target: use per-ticker hybrid weight if set; else equal split
+        const tgtWithin = hybridWeightPct(c)  // % within class (0-100)
+        const curWithin = classTotal > 0 ? (c.value / classTotal) * 100 : 0
+        const drift = curWithin - tgtWithin
+        // Effective portfolio % and target
+        const curPct = total > 0 ? (c.value / total) * 100 : 0
+        const tgtPct = s.tgtPct * (tgtWithin / 100)  // class% × within%
+        return { ...c, curWithin, tgtWithin, drift, curPct, tgtPct }
+      }).sort((a, b) => b.curWithin - a.curWithin)
+    })
+    return out
+  }, [suggestions, hybridWeightPct, total])
 
   // ── Rebalance recommendation logic ────────────────────────────────────────────
   const maxDrift = useMemo(() => {
@@ -931,11 +953,27 @@ export function ToolsPage({ t, lang, ccy, dataState, liveHoldings = [], prices =
 
           {/* Drift table */}
           <div className="card">
-            <h3 className="section-title" style={{ marginBottom: 4 }}>{th ? "เป้าหมาย vs. หลังปรับ" : "Target vs. after rebalance"}</h3>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 4, gap: 8 }}>
+              <h3 className="section-title" style={{ margin: 0 }}>{th ? "เป้าหมาย vs. หลังปรับ" : "Target vs. after rebalance"}</h3>
+              <div className="segmented" style={{ flexShrink: 0 }}>
+                <button className={driftLevel === "class" ? "on" : ""} style={{ fontSize: 11, padding: "4px 10px" }}
+                  onClick={() => setDriftLevel("class")}>
+                  {th ? "ตามกลุ่ม" : "Class"}
+                </button>
+                <button className={driftLevel === "class+holding" ? "on" : ""} style={{ fontSize: 11, padding: "4px 10px" }}
+                  onClick={() => setDriftLevel("class+holding")}>
+                  {th ? "กลุ่ม+รายตัว" : "Class + Holding"}
+                </button>
+              </div>
+            </div>
             <p className="muted" style={{ fontSize: 11.5, margin: "0 0 14px", lineHeight: 1.5 }}>
-              {th
-                ? "ส่วนต่าง = น้ำหนักปัจจุบัน − เป้า · 🔴 + = เกินเป้า (ควรขาย/ลด) · 🟢 − = ต่ำกว่าเป้า (ควรซื้อเพิ่ม)"
-                : "Diff = current − target · 🔴 + = overweight (sell) · 🟢 − = underweight (buy)"}
+              {driftLevel === "class+holding"
+                ? (th
+                    ? "แถวกลุ่ม = % ของพอร์ตรวม · แถวรายตัว = % ภายในกลุ่ม · 🔴 = เกินเป้า · 🟢 = ต่ำกว่าเป้า"
+                    : "Class rows = % of total · Holding rows = % within class · 🔴 = overweight · 🟢 = underweight")
+                : (th
+                    ? "ส่วนต่าง = น้ำหนักปัจจุบัน − เป้า · 🔴 + = เกินเป้า (ควรขาย/ลด) · 🟢 − = ต่ำกว่าเป้า (ควรซื้อเพิ่ม)"
+                    : "Diff = current − target · 🔴 + = overweight (sell) · 🟢 − = underweight (buy)")}
             </p>
             {/* Column headers */}
             <div style={{ display: "grid", gridTemplateColumns: "minmax(96px,150px) 42px 1fr 56px 60px 50px", alignItems: "center", gap: 10, paddingBottom: 5 }}>
@@ -952,26 +990,73 @@ export function ToolsPage({ t, lang, ccy, dataState, liveHoldings = [], prices =
                 const after = newTotal > 0 ? (s.current + tradeDelta) / newTotal * 100 : 0
                 const before = s.curPct
                 const drift = before - s.tgtPct
+                const holdingRows = driftLevel === "class+holding" ? (holdingDriftByClass[s.name] || []) : []
                 return (
-                  <div key={s.name} onClick={() => setOpenRow(s)}
-                    style={{ display: "grid", gridTemplateColumns: "minmax(96px,150px) 42px 1fr 56px 60px 50px", alignItems: "center", gap: 10, padding: "5px 0", borderTop: "1px solid var(--line)", cursor: "pointer" }}>
-                    <div style={{ fontSize: 12.5, fontWeight: 500, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}><ClassBadge name={s.name} /></div>
-                    <div className="mono muted" style={{ fontSize: 10.5 }}>→{s.tgtPct.toFixed(0)}%</div>
-                    <div style={{ position: "relative", height: 10 }}>
-                      <div style={{ position: "absolute", inset: 0, background: "var(--bg-2)", borderRadius: 999 }} />
-                      <div style={{ position: "absolute", height: "100%", background: "var(--ink-4)", width: Math.min(100, before) + "%", opacity: 0.5, borderRadius: 999 }} />
-                      <div style={{ position: "absolute", height: "100%", background: "var(--accent)", width: Math.min(100, after) + "%", borderRadius: 999 }} />
-                      <div style={{ position: "absolute", top: -2, height: 14, width: 2, background: "var(--ink-2)", left: "calc(" + Math.min(100, s.tgtPct) + "% - 1px)" }} />
+                  <div key={s.name}>
+                    {/* Class row */}
+                    <div onClick={() => setOpenRow(s)}
+                      style={{ display: "grid", gridTemplateColumns: "minmax(96px,150px) 42px 1fr 56px 60px 50px", alignItems: "center", gap: 10, padding: "5px 0", borderTop: "1px solid var(--line)", cursor: "pointer" }}>
+                      <div style={{ fontSize: 12.5, fontWeight: 600, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", display: "flex", alignItems: "center", gap: 4 }}>
+                        <ClassBadge name={s.name} />
+                        {driftLevel === "class+holding" && holdingRows.length > 0 && (
+                          <span style={{ fontSize: 9, color: "var(--ink-4)", marginLeft: 2 }}>▾</span>
+                        )}
+                      </div>
+                      <div className="mono muted" style={{ fontSize: 10.5 }}>→{s.tgtPct.toFixed(0)}%</div>
+                      <div style={{ position: "relative", height: 10 }}>
+                        <div style={{ position: "absolute", inset: 0, background: "var(--bg-2)", borderRadius: 999 }} />
+                        <div style={{ position: "absolute", height: "100%", background: "var(--ink-4)", width: Math.min(100, before) + "%", opacity: 0.5, borderRadius: 999 }} />
+                        <div style={{ position: "absolute", height: "100%", background: "var(--accent)", width: Math.min(100, after) + "%", borderRadius: 999 }} />
+                        <div style={{ position: "absolute", top: -2, height: 14, width: 2, background: "var(--ink-2)", left: "calc(" + Math.min(100, s.tgtPct) + "% - 1px)" }} />
+                      </div>
+                      <div className="mono muted" style={{ fontSize: 10.5, textAlign: "right" }}>{before.toFixed(1)}%</div>
+                      <div className="mono" style={{ fontSize: 10.5, textAlign: "right", fontWeight: 500 }}>{after.toFixed(1)}%</div>
+                      <div style={{ textAlign: "right" }}>
+                        {Math.abs(drift) > 1 && (
+                          <span className={"chip " + (drift > 0 ? "chip-loss" : "chip-gain")} style={{ fontSize: 9.5 }}>
+                            {drift > 0 ? "+" : ""}{drift.toFixed(1)}%
+                          </span>
+                        )}
+                      </div>
                     </div>
-                    <div className="mono muted" style={{ fontSize: 10.5, textAlign: "right" }}>{before.toFixed(1)}%</div>
-                    <div className="mono" style={{ fontSize: 10.5, textAlign: "right", fontWeight: 500 }}>{after.toFixed(1)}%</div>
-                    <div style={{ textAlign: "right" }}>
-                      {Math.abs(drift) > 1 && (
-                        <span className={"chip " + (drift > 0 ? "chip-loss" : "chip-gain")} style={{ fontSize: 9.5 }}>
-                          {drift > 0 ? "+" : ""}{drift.toFixed(1)}%
-                        </span>
-                      )}
-                    </div>
+                    {/* Holding sub-rows (Class+Holding view) */}
+                    {holdingRows.map((h, hi) => {
+                      const hDrift = h.drift  // within-class drift
+                      const exceedsBand = Math.abs(hDrift) >= band
+                      return (
+                        <div key={h.ticker}
+                          style={{ display: "grid", gridTemplateColumns: "minmax(96px,150px) 42px 1fr 56px 60px 50px", alignItems: "center", gap: 10, padding: "4px 0 4px 12px", background: "var(--bg-2)", borderTop: hi === 0 ? "none" : "1px solid var(--line)" }}>
+                          {/* Ticker name + logo */}
+                          <div style={{ display: "flex", alignItems: "center", gap: 7, minWidth: 0 }}>
+                            <div style={{ width: 3, height: 20, background: "var(--line)", borderRadius: 2, flexShrink: 0 }} />
+                            <TickerLogo ticker={h.ticker} logoUrl={h.logo_url} region={h.region} cls={h.cls} size={20} />
+                            <span style={{ fontSize: 11.5, fontWeight: 500, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{h.ticker}</span>
+                          </div>
+                          {/* Within-class target */}
+                          <div className="mono muted" style={{ fontSize: 10 }}>→{h.tgtWithin.toFixed(0)}%*</div>
+                          {/* Mini bar — within-class % */}
+                          <div style={{ position: "relative", height: 7 }}>
+                            <div style={{ position: "absolute", inset: 0, background: "var(--bg)", borderRadius: 999 }} />
+                            <div style={{ position: "absolute", height: "100%", background: hDrift > 0 ? "var(--loss)" : "var(--gain)", opacity: 0.6, width: Math.min(100, h.curWithin) + "%", borderRadius: 999 }} />
+                            <div style={{ position: "absolute", top: -1, height: 9, width: 2, background: "var(--ink-3)", left: "calc(" + Math.min(100, h.tgtWithin) + "% - 1px)" }} />
+                          </div>
+                          {/* Current within-class % */}
+                          <div className="mono muted" style={{ fontSize: 10, textAlign: "right" }}>{h.curWithin.toFixed(1)}%</div>
+                          {/* Portfolio % */}
+                          <div className="mono muted" style={{ fontSize: 10, textAlign: "right" }}>{h.curPct.toFixed(1)}%</div>
+                          {/* Drift badge — only if exceeds tolerance band */}
+                          <div style={{ textAlign: "right" }}>
+                            {exceedsBand ? (
+                              <span className={"chip " + (hDrift > 0 ? "chip-loss" : "chip-gain")} style={{ fontSize: 9 }}>
+                                {hDrift > 0 ? "+" : ""}{hDrift.toFixed(1)}%
+                              </span>
+                            ) : (
+                              <span style={{ fontSize: 9, color: "var(--ink-4)" }}>✓</span>
+                            )}
+                          </div>
+                        </div>
+                      )
+                    })}
                   </div>
                 )
               })}
@@ -991,6 +1076,15 @@ export function ToolsPage({ t, lang, ccy, dataState, liveHoldings = [], prices =
                   </div>
                 )
               })()}
+              {/* Footnote for Class+Holding view */}
+              {driftLevel === "class+holding" && (
+                <div style={{ marginTop: 8, fontSize: 10.5, color: "var(--ink-4)", lineHeight: 1.6 }}>
+                  <span style={{ fontFamily: "var(--font-mono)" }}>→X%*</span> {th ? "= เป้าภายในกลุ่ม (ไม่ใช่ % ของพอร์ตรวม) · ส่วนต่างรายตัวจะแสดงเฉพาะเมื่อเบี่ยง ≥ tolerance band" : "= target within class (not % of total portfolio) · drift shown only when ≥ tolerance band"}
+                  {targetMode !== "hybrid" && (
+                    <> · {th ? "ตั้ง Hybrid mode เพื่อกำหนดเป้าต่างกันในแต่ละหุ้น" : "switch to Hybrid mode (Edit targets) to set custom per-ticker targets"}</>
+                  )}
+                </div>
+              )}
             </div>
           </div>
 
