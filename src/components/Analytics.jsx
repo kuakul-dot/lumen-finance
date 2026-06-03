@@ -868,18 +868,25 @@ function AnalyticsDiv2({ t, lang, ccy, rows, totalValue, dataState, liveHoldings
       }
       const nowSec = Date.now() / 1000
       const divTxs = transactions.filter(tx => tx.type === 'Dividend')
-      // Is a Yahoo event already recorded for this ticker (within ±60 days)?
-      const alreadyRecorded = (ticker, eventSec) =>
+      // Convert Yahoo Unix timestamp → "YYYY-MM-DD" string (add 12 h to handle midnight-UTC edge)
+      const toXdStr = (sec) => new Date((sec + 43200) * 1000).toISOString().slice(0, 10)
+      // Already recorded? Check note tag first (exact), then ±180-day window (handles pay-date offsets)
+      const alreadyRecorded = (ticker, xdDateStr) =>
         divTxs
           .filter(tx => tx.ticker === ticker && tx.transacted_at)
-          .some(tx => Math.abs(new Date(tx.transacted_at).getTime() / 1000 - eventSec) < 60 * 86400)
-      // Shares actually held on a given date (from the transaction ledger) —
-      // dividends accrue to the position on the ex-date, not today's total.
-      const sharesAsOf = (ticker, sec) => {
+          .some(tx => {
+            if (tx.note?.includes(`xd:${xdDateStr}`)) return true
+            const diffMs = Math.abs(new Date(tx.transacted_at.slice(0, 10)).getTime() - new Date(xdDateStr).getTime())
+            return diffMs < 180 * 86400 * 1000
+          })
+      // Shares actually held BEFORE the ex-dividend date (from the transaction ledger).
+      // Uses date-string comparison to be timezone-safe.
+      // Shares bought on or after XD date are excluded — you need to hold before XD to receive the dividend.
+      const sharesAsOf = (ticker, xdDateStr) => {
         let s = 0
         for (const tx of transactions) {
           if (tx.ticker !== ticker || !tx.transacted_at) continue
-          if (new Date(tx.transacted_at).getTime() / 1000 > sec) continue
+          if (tx.transacted_at.slice(0, 10) >= xdDateStr) continue  // bought on/after XD → not entitled
           const q = Number(tx.shares) || 0
           if (tx.type === 'Buy') s += q
           else if (tx.type === 'Sell') s -= q
@@ -893,11 +900,14 @@ function AnalyticsDiv2({ t, lang, ccy, rows, totalValue, dataState, liveHoldings
       Object.values(tickerMeta).forEach(h => {
         const sym = toYahooSymbol(h.ticker, h.region || 'TH', h.asset_class || 'Equity');
         (history[sym] || [])
-          .filter(e => e.date <= nowSec && !alreadyRecorded(h.ticker, e.date))
+          .filter(e => {
+            const xdDateStr = toXdStr(e.date)
+            return e.date <= nowSec && !alreadyRecorded(h.ticker, xdDateStr)
+          })
           .forEach(e => {
-            const sharesHeld = sharesAsOf(h.ticker, e.date)
-            if (sharesHeld <= 0) return   // didn't hold it on the ex-date
-            const d = new Date(e.date * 1000)
+            const xdDateStr = toXdStr(e.date)
+            const sharesHeld = sharesAsOf(h.ticker, xdDateStr)
+            if (sharesHeld <= 0) return   // didn't hold it before the ex-date
             const region  = h.region || 'TH'
             const isTHB   = region === 'TH'
             const gross   = +(e.amount * sharesHeld).toFixed(2)
@@ -906,9 +916,9 @@ function AnalyticsDiv2({ t, lang, ccy, rows, totalValue, dataState, liveHoldings
             suggestions.push({
               ticker: h.ticker,
               region, cls: h.asset_class || 'Equity', logo_url: h.logo_url || null,
-              xdDate:    d.toISOString().slice(0, 10),   // ex-dividend date from Yahoo
-              date:      d.toISOString().slice(0, 10),   // editedDate default = xdDate; user can change to pay date
-              dateLabel: d.toLocaleDateString(th ? 'th-TH' : 'en-US', { day: 'numeric', month: 'short', year: '2-digit' }),
+              xdDate:    xdDateStr,   // ex-dividend date from Yahoo
+              date:      xdDateStr,   // editedDate default = xdDate; user can change to pay date
+              dateLabel: new Date(xdDateStr + 'T12:00:00Z').toLocaleDateString(th ? 'th-TH' : 'en-US', { day: 'numeric', month: 'short', year: '2-digit' }),
               pricePerShare: e.amount,
               shares: sharesHeld,
               gross, taxRate, net,
@@ -940,7 +950,7 @@ function AnalyticsDiv2({ t, lang, ccy, rows, totalValue, dataState, liveHoldings
         amount: s.editedNet,
         currency: s.currency,
         transacted_at: s.date,
-        note: `Synced · ${s.currency === 'USD' ? '$' : '฿'}${s.pricePerShare}/share gross · WHT ${(s.taxRate * 100).toFixed(0)}%`,
+        note: `Synced · xd:${s.xdDate} · ${s.currency === 'USD' ? '$' : '฿'}${s.pricePerShare}/share gross · WHT ${(s.taxRate * 100).toFixed(0)}%`,
       })
       if (data) newTxs.push(data)
     }
