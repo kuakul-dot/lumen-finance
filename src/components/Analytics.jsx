@@ -870,14 +870,17 @@ function AnalyticsDiv2({ t, lang, ccy, rows, totalValue, dataState, liveHoldings
       const divTxs = transactions.filter(tx => tx.type === 'Dividend')
       // Convert Yahoo Unix timestamp → "YYYY-MM-DD" string (add 12 h to handle midnight-UTC edge)
       const toXdStr = (sec) => new Date((sec + 43200) * 1000).toISOString().slice(0, 10)
-      // Already recorded? Check note tag first (exact), then ±180-day window (handles pay-date offsets)
+      // Already recorded? Check note tag first (exact), then ±28-day window.
+      // ±28 days: covers US XD→pay-date gap (~14-28 days) without blocking
+      // monthly dividend payers like O/RATCH whose next payout is ~30 days later.
+      // TH stocks with long pay gaps (>28 days) will rely on the xd: tag after first resync.
       const alreadyRecorded = (ticker, xdDateStr) =>
         divTxs
           .filter(tx => tx.ticker === ticker && tx.transacted_at)
           .some(tx => {
             if (tx.note?.includes(`xd:${xdDateStr}`)) return true
             const diffMs = Math.abs(new Date(tx.transacted_at.slice(0, 10)).getTime() - new Date(xdDateStr).getTime())
-            return diffMs < 180 * 86400 * 1000
+            return diffMs < 28 * 86400 * 1000
           })
       // Shares actually held BEFORE the ex-dividend date (from the transaction ledger).
       // Uses date-string comparison to be timezone-safe.
