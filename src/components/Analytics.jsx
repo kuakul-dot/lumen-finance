@@ -823,6 +823,7 @@ function AnalyticsDiv2({ t, lang, ccy, rows, totalValue, dataState, liveHoldings
         ...tx,
         ...(meta[tx.ticker] || {}),
         editedAmount: tx.amount ?? 0,
+        editedShares: tx.shares ?? '',
         editedDate: tx.transacted_at ?? '',
         markedDelete: false,
       }))
@@ -838,10 +839,15 @@ function AnalyticsDiv2({ t, lang, ccy, rows, totalValue, dataState, liveHoldings
           await deleteTransaction(row.id)
           onTransactionDeleted?.(row.id)
         } else {
-          const amtChanged  = Number(row.editedAmount) !== Number(row.amount ?? 0)
-          const dateChanged = row.editedDate !== (row.transacted_at ?? '')
-          if (amtChanged || dateChanged) {
-            const updates = { amount: Number(row.editedAmount), transacted_at: row.editedDate }
+          const amtChanged    = Number(row.editedAmount) !== Number(row.amount ?? 0)
+          const sharesChanged = String(row.editedShares) !== String(row.shares ?? '')
+          const dateChanged   = row.editedDate !== (row.transacted_at ?? '')
+          if (amtChanged || sharesChanged || dateChanged) {
+            const updates = {
+              amount: Number(row.editedAmount),
+              shares: row.editedShares !== '' ? Number(row.editedShares) : row.shares,
+              transacted_at: row.editedDate,
+            }
             const { data } = await updateTransaction(row.id, updates)
             if (data) onTransactionUpdated?.(data)
           }
@@ -1206,14 +1212,14 @@ function AnalyticsDiv2({ t, lang, ccy, rows, totalValue, dataState, liveHoldings
         <div
           style={{ position: "fixed", inset: 0, zIndex: 1000, background: "rgba(0,0,0,0.45)", display: "flex", alignItems: "center", justifyContent: "center", padding: 16 }}
           onClick={e => { if (e.target === e.currentTarget && !editSaving) setEditModal(null) }}>
-          <div style={{ background: "var(--bg)", borderRadius: 18, padding: 28, width: "100%", maxWidth: 560, maxHeight: "85vh", display: "flex", flexDirection: "column", gap: 20, boxShadow: "0 20px 60px rgba(0,0,0,0.2)" }}>
+          <div style={{ background: "var(--bg)", borderRadius: 18, padding: 28, width: "100%", maxWidth: 620, maxHeight: "85vh", display: "flex", flexDirection: "column", gap: 20, boxShadow: "0 20px 60px rgba(0,0,0,0.2)" }}>
             <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start" }}>
               <div>
                 <h3 style={{ margin: 0, fontSize: 16, fontWeight: 600 }}>
                   {th ? "แก้ไขรายการปันผลที่บันทึก" : "Edit recorded dividends"}
                 </h3>
                 <p className="muted" style={{ margin: "4px 0 0", fontSize: 12 }}>
-                  {th ? "แก้ไขยอด / วันที่ หรือกดลบ — กด 🗑 เพื่อลบรายการ" : "Edit amount / date, or tap 🗑 to delete"}
+                  {th ? "แก้ไขหุ้น / ยอด / วันที่ หรือกด 🗑 เพื่อลบ" : "Edit shares / amount / date, or tap 🗑 to delete"}
                 </p>
               </div>
               <button onClick={() => !editSaving && setEditModal(null)}
@@ -1227,16 +1233,17 @@ function AnalyticsDiv2({ t, lang, ccy, rows, totalValue, dataState, liveHoldings
             ) : (
               <div style={{ overflow: "auto", flex: 1, margin: "0 -4px", padding: "0 4px" }}>
                 {/* Header */}
-                <div style={{ display: "grid", gridTemplateColumns: "36px 1fr 100px 90px 36px", gap: 8, alignItems: "center", padding: "0 0 6px", borderBottom: "2px solid var(--line)", fontSize: 10, color: "var(--ink-4)", fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.05em" }}>
+                <div style={{ display: "grid", gridTemplateColumns: "36px 1fr 80px 90px 90px 32px", gap: 8, alignItems: "center", padding: "0 0 6px", borderBottom: "2px solid var(--line)", fontSize: 10, color: "var(--ink-4)", fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.05em" }}>
                   <div />
                   <div>{th ? "หลักทรัพย์ / วันที่" : "Ticker / Date"}</div>
-                  <div style={{ textAlign: "right" }}>{th ? "ยอดสุทธิ (฿)" : "Net amount"}</div>
+                  <div style={{ textAlign: "right" }}>{th ? "หุ้น" : "Shares"}</div>
+                  <div style={{ textAlign: "right" }}>{th ? "ยอดสุทธิ" : "Net amount"}</div>
                   <div>{th ? "วันที่รับ" : "Pay date"}</div>
                   <div />
                 </div>
                 {editModal.map((row, i) => (
                   <div key={row.id} style={{
-                    display: "grid", gridTemplateColumns: "36px 1fr 100px 90px 36px", gap: 8,
+                    display: "grid", gridTemplateColumns: "36px 1fr 80px 90px 90px 32px", gap: 8,
                     alignItems: "center", padding: "10px 0", borderBottom: "1px solid var(--line)",
                     opacity: row.markedDelete ? 0.35 : 1, transition: "opacity 0.15s"
                   }}>
@@ -1246,19 +1253,24 @@ function AnalyticsDiv2({ t, lang, ccy, rows, totalValue, dataState, liveHoldings
                       {row.note && <div className="muted" style={{ fontSize: 10 }}>{row.note}</div>}
                     </div>
                     <CalcInput
+                      value={row.editedShares} disabled={row.markedDelete}
+                      onChange={e => setEditModal(prev => prev.map((r, j) => j === i ? { ...r, editedShares: e.target.value } : r))}
+                      style={{ padding: "4px 6px", fontSize: 12, fontFamily: "var(--font-mono)", textAlign: "right", border: "1px solid var(--line)", borderRadius: 6, background: "var(--bg-2)", color: "var(--ink)", width: "100%" }}
+                    />
+                    <CalcInput
                       value={row.editedAmount} disabled={row.markedDelete}
                       onChange={e => setEditModal(prev => prev.map((r, j) => j === i ? { ...r, editedAmount: e.target.value } : r))}
-                      style={{ padding: "4px 6px", fontSize: 13, fontFamily: "var(--font-mono)", textAlign: "right", border: "1px solid var(--line)", borderRadius: 6, background: "var(--bg-2)", color: "var(--ink)", width: "100%" }}
+                      style={{ padding: "4px 6px", fontSize: 12, fontFamily: "var(--font-mono)", textAlign: "right", border: "1px solid var(--line)", borderRadius: 6, background: "var(--bg-2)", color: "var(--ink)", width: "100%" }}
                     />
                     <input
                       type="date" value={row.editedDate} disabled={row.markedDelete}
                       onChange={e => setEditModal(prev => prev.map((r, j) => j === i ? { ...r, editedDate: e.target.value } : r))}
-                      style={{ padding: "4px 6px", fontSize: 12, border: "1px solid var(--line)", borderRadius: 6, background: "var(--bg-2)", color: "var(--ink)", width: "100%" }}
+                      style={{ padding: "4px 6px", fontSize: 11, border: "1px solid var(--line)", borderRadius: 6, background: "var(--bg-2)", color: "var(--ink)", width: "100%" }}
                     />
                     <button
                       onClick={() => setEditModal(prev => prev.map((r, j) => j === i ? { ...r, markedDelete: !r.markedDelete } : r))}
                       title={row.markedDelete ? (th ? "ยกเลิกลบ" : "Undo") : (th ? "ลบรายการ" : "Delete")}
-                      style={{ background: "none", border: "none", cursor: "pointer", fontSize: 16, color: row.markedDelete ? "var(--gain)" : "var(--loss)", padding: 4, lineHeight: 1 }}>
+                      style={{ background: "none", border: "none", cursor: "pointer", fontSize: 15, color: row.markedDelete ? "var(--gain)" : "var(--loss)", padding: 4, lineHeight: 1 }}>
                       {row.markedDelete ? "↩" : "🗑"}
                     </button>
                   </div>
