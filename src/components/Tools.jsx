@@ -107,9 +107,9 @@ export function ToolsPage({ t, lang, ccy, dataState, liveHoldings = [], prices =
   const [band,       setBand]       = useState(loadBand)   // tolerance (percentage points, flat mode)
   const [bandMode,   setBandMode]   = useState(loadBandMode)  // "flat" | "5/25"
   const [copied,     setCopied]     = useState(false)
-  const [openRow,    setOpenRow]    = useState(null)   // which drift row is expanded to show ฿ amounts
-  const [driftLevel, setDriftLevel] = useState("class")  // "class" | "class+holding"
-  const [lastRebalance, setLastRebalance] = useState(loadLastRebalance)
+  const [openRow,        setOpenRow]        = useState(null)   // which drift row is expanded to show ฿ amounts
+  const [expandedClasses, setExpandedClasses] = useState(new Set())   // per-class accordion in drift table
+  const [lastRebalance,  setLastRebalance]  = useState(loadLastRebalance)
   // ── AI rebalance explainer (optional — hides when /api/analyze 503s) ──
   const ai = useAiAnalysis()
   const [aiAvailable, setAiAvailable] = useState(false)
@@ -121,8 +121,11 @@ export function ToolsPage({ t, lang, ccy, dataState, liveHoldings = [], prices =
   })
   const [tickerWeights, setTickerWeights] = useState(() => { try { return JSON.parse(localStorage.getItem("lumen_rebalance_ticker_weights") || "{}") } catch { return {} } })
 
-  // Auto-switch to Class+Holding view when using hybrid mode for better UX
-  const effectiveDriftLevel = targetMode === "hybrid" ? "class+holding" : driftLevel
+  const toggleClassExpand = (name) => setExpandedClasses(prev => {
+    const next = new Set(prev)
+    next.has(name) ? next.delete(name) : next.add(name)
+    return next
+  })
 
   // Persist to localStorage
   useEffect(() => { saveTargets(targets) }, [targets])
@@ -1035,32 +1038,14 @@ export function ToolsPage({ t, lang, ccy, dataState, liveHoldings = [], prices =
           <div className="card">
             <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 4, gap: 8 }}>
               <h3 className="section-title" style={{ margin: 0 }}>{th ? "เป้าหมาย vs. หลังปรับ" : "Target vs. after rebalance"}</h3>
-              <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-                {targetMode === "hybrid" && (
-                  <span style={{ fontSize: 10.5, color: "var(--gain)", fontWeight: 500, display: "flex", alignItems: "center", gap: 4 }}>
-                    💚 {th ? "Hybrid mode" : "Hybrid mode"}
-                  </span>
-                )}
-                <div className="segmented" style={{ flexShrink: 0 }}>
-                  <button className={effectiveDriftLevel === "class" ? "on" : ""} style={{ fontSize: 11, padding: "4px 10px" }}
-                    onClick={() => setDriftLevel("class")} disabled={targetMode === "hybrid"}>
-                    {th ? "ตามกลุ่ม" : "Class"}
-                  </button>
-                  <button className={effectiveDriftLevel === "class+holding" ? "on" : ""} style={{ fontSize: 11, padding: "4px 10px" }}
-                    onClick={() => setDriftLevel("class+holding")}>
-                    {th ? "กลุ่ม+รายตัว" : "Class + Holding"}
-                  </button>
-                </div>
-              </div>
+              {targetMode === "hybrid" && (
+                <span style={{ fontSize: 10.5, color: "var(--gain)", fontWeight: 500 }}>💚 Hybrid mode</span>
+              )}
             </div>
             <p className="muted" style={{ fontSize: 11.5, margin: "0 0 14px", lineHeight: 1.5 }}>
-              {effectiveDriftLevel === "class+holding"
-                ? (th
-                    ? "แถวกลุ่ม = % ของพอร์ตรวม · แถวรายตัว = % ภายในกลุ่ม · 🔴 = เกินเป้า · 🟢 = ต่ำกว่าเป้า"
-                    : "Class rows = % of total · Holding rows = % within class · 🔴 = overweight · 🟢 = underweight")
-                : (th
-                    ? "ส่วนต่าง = น้ำหนักปัจจุบัน − เป้า · 🔴 + = เกินเป้า (ควรขาย/ลด) · 🟢 − = ต่ำกว่าเป้า (ควรซื้อเพิ่ม)"
-                    : "Diff = current − target · 🔴 + = overweight (sell) · 🟢 − = underweight (buy)")}
+              {th
+                ? "ส่วนต่าง = น้ำหนักปัจจุบัน − เป้า · 🔴 + = เกินเป้า · 🟢 − = ต่ำกว่าเป้า · กดที่กลุ่มเพื่อดูรายหุ้น"
+                : "Diff = current − target · 🔴 + = overweight · 🟢 − = underweight · click a class to see holdings"}
             </p>
             {/* Column headers */}
             <div style={{ display: "grid", gridTemplateColumns: "minmax(96px,150px) 42px 1fr 56px 60px 50px", alignItems: "center", gap: 10, paddingBottom: 5 }}>
@@ -1077,28 +1062,33 @@ export function ToolsPage({ t, lang, ccy, dataState, liveHoldings = [], prices =
                 const after = newTotal > 0 ? (s.current + tradeDelta) / newTotal * 100 : 0
                 const before = s.curPct
                 const drift = before - s.tgtPct
-                const holdingRows = effectiveDriftLevel === "class+holding" ? (holdingDriftByClass[s.name] || []) : []
+                const allHoldingRows = holdingDriftByClass[s.name] || []
+                const isExpanded = expandedClasses.has(s.name)
+                const holdingRows = isExpanded ? allHoldingRows : []
+                const hasHoldings = allHoldingRows.length > 0
                 return (
                   <div key={s.name}>
-                    {/* Class row */}
-                    <div onClick={() => setOpenRow(s)}
-                      style={{ display: "grid", gridTemplateColumns: "minmax(96px,150px) 42px 1fr 56px 60px 50px", alignItems: "center", gap: 10, padding: "5px 0", borderTop: "1px solid var(--line)", cursor: "pointer" }}>
-                      <div style={{ fontSize: 12.5, fontWeight: 600, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", display: "flex", alignItems: "center", gap: 4 }}>
+                    {/* Class row — click left side to open ฿ detail popup, click chevron to expand holdings */}
+                    <div style={{ display: "grid", gridTemplateColumns: "minmax(96px,150px) 42px 1fr 56px 60px 50px", alignItems: "center", gap: 10, padding: "5px 0", borderTop: "1px solid var(--line)" }}>
+                      <div
+                        onClick={() => hasHoldings ? toggleClassExpand(s.name) : setOpenRow(s)}
+                        style={{ fontSize: 12.5, fontWeight: 600, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", display: "flex", alignItems: "center", gap: 4, cursor: "pointer" }}>
                         <ClassBadge name={s.name} />
-                        {driftLevel === "class+holding" && holdingRows.length > 0 && (
-                          <span style={{ fontSize: 9, color: "var(--ink-4)", marginLeft: 2 }}>▾</span>
+                        {hasHoldings && (
+                          <span style={{ fontSize: 10, color: "var(--ink-3)", marginLeft: 2, flexShrink: 0, transition: "transform 0.15s", display: "inline-block", transform: isExpanded ? "rotate(180deg)" : "rotate(0deg)" }}>▾</span>
                         )}
                       </div>
-                      <div className="mono muted" style={{ fontSize: 10.5 }}>→{s.tgtPct.toFixed(0)}%</div>
-                      <div style={{ position: "relative", height: 10 }}>
+                      {/* remaining cells click → open ฿ popup */}
+                      <div className="mono muted" style={{ fontSize: 10.5, cursor: "pointer" }} onClick={() => setOpenRow(s)}>→{s.tgtPct.toFixed(0)}%</div>
+                      <div style={{ position: "relative", height: 10, cursor: "pointer" }} onClick={() => setOpenRow(s)}>
                         <div style={{ position: "absolute", inset: 0, background: "var(--bg-2)", borderRadius: 999 }} />
                         <div style={{ position: "absolute", height: "100%", background: "var(--ink-4)", width: Math.min(100, before) + "%", opacity: 0.5, borderRadius: 999 }} />
                         <div style={{ position: "absolute", height: "100%", background: "var(--accent)", width: Math.min(100, after) + "%", borderRadius: 999 }} />
                         <div style={{ position: "absolute", top: -2, height: 14, width: 2, background: "var(--ink-2)", left: "calc(" + Math.min(100, s.tgtPct) + "% - 1px)" }} />
                       </div>
-                      <div className="mono muted" style={{ fontSize: 10.5, textAlign: "right" }}>{before.toFixed(1)}%</div>
-                      <div className="mono" style={{ fontSize: 10.5, textAlign: "right", fontWeight: 500 }}>{after.toFixed(1)}%</div>
-                      <div style={{ textAlign: "right" }}>
+                      <div className="mono muted" style={{ fontSize: 10.5, textAlign: "right", cursor: "pointer" }} onClick={() => setOpenRow(s)}>{before.toFixed(1)}%</div>
+                      <div className="mono" style={{ fontSize: 10.5, textAlign: "right", fontWeight: 500, cursor: "pointer" }} onClick={() => setOpenRow(s)}>{after.toFixed(1)}%</div>
+                      <div style={{ textAlign: "right", cursor: "pointer" }} onClick={() => setOpenRow(s)}>
                         {Math.abs(drift) >= effectiveBand(s.tgtPct) ? (
                           <span className={"chip " + (drift > 0 ? "chip-loss" : "chip-gain")} style={{ fontSize: 9.5 }}>
                             {drift > 0 ? "+" : ""}{drift.toFixed(1)}%
@@ -1108,7 +1098,7 @@ export function ToolsPage({ t, lang, ccy, dataState, liveHoldings = [], prices =
                         ) : null}
                       </div>
                     </div>
-                    {/* Holding sub-rows (Class+Holding view) */}
+                    {/* Holding sub-rows (accordion — visible when class is expanded) */}
                     {holdingRows.map((h, hi) => {
                       const hDrift = h.drift  // within-class drift
                       const exceedsBand = Math.abs(hDrift) >= effectiveBand(h.tgtWithin)
@@ -1168,19 +1158,13 @@ export function ToolsPage({ t, lang, ccy, dataState, liveHoldings = [], prices =
                   </div>
                 )
               })()}
-              {/* Footnote for Class+Holding view */}
-              {effectiveDriftLevel === "class+holding" && (
-                <div style={{ marginTop: 8, fontSize: 10.5, color: "var(--ink-4)", lineHeight: 1.6 }}>
-                  <span style={{ fontFamily: "var(--font-mono)" }}>→X%*</span> {th ? "= สัดส่วนปัจจุบันภายในกลุ่ม (ไม่ใช่ % พอร์ตรวม) · ส่วนต่างแสดงเมื่อเบี่ยง ≥ tolerance band" : "= current proportion within class (not % of total portfolio) · drift shown only when ≥ tolerance band"}
-                  {targetMode === "hybrid" && (
-                    <> · {th ? "✓ Hybrid mode enabled: trades will respect per-ticker targets" : "✓ Hybrid mode enabled: trades will respect per-ticker targets"}</>
-                  )}
-                  {targetMode !== "hybrid"
-                    ? <> · {th ? "⚠ Class mode = ระบบซื้อตามสัดส่วนปัจจุบันในกลุ่ม ไม่ใช่จาก % ที่แสดง — ใช้ Hybrid mode เพื่อกำหนดเป้าต่างกันในแต่ละหุ้น" : "⚠ Class mode: buys are distributed proportionally within the class, not by this % — use Hybrid mode (Edit targets) to set per-ticker targets"}</>
-                    : null
-                  }
-                </div>
-              )}
+              {/* Footnote */}
+              <div style={{ marginTop: 8, fontSize: 10.5, color: "var(--ink-4)", lineHeight: 1.6 }}>
+                <span style={{ fontFamily: "var(--font-mono)" }}>→X%*</span> {th ? "= สัดส่วนภายในกลุ่ม · ส่วนต่างแสดงเมื่อเบี่ยง ≥ tolerance band" : "= proportion within class · drift shown only when ≥ tolerance band"}
+                {targetMode !== "hybrid" && (
+                  <> · {th ? "⚠ ใช้ Hybrid mode (ปรับเป้าหมาย) เพื่อกำหนดเป้าแต่ละหุ้นแยกกัน" : "⚠ Use Hybrid mode (Edit targets) to set per-ticker targets"}</>
+                )}
+              </div>
             </div>
           </div>
 
