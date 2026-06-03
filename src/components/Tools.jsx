@@ -156,6 +156,13 @@ export function ToolsPage({ t, lang, ccy, dataState, liveHoldings = [], prices =
 
   const currentByClass = useMemo(() => buildCurrentByClass(rows, investableCash), [rows, investableCash])
 
+  // investableTotal = sum of all class values (stocks + investable cash, EXCLUDES emergency fund)
+  // This is the correct denominator for allocation %; using `total` (which includes emergency)
+  // would make the class % sum to < 100%.
+  const investableTotal = useMemo(() =>
+    Object.values(currentByClass).reduce((s, v) => s + v, 0)
+  , [currentByClass])
+
   // Per-account investable amounts (emergency accounts only expose excess above target)
   const accountOptions = useMemo(() => cashAccounts.map(a => {
     const balTHB = a.currency === 'USD' ? (a.balance || 0) * fxRate : (a.balance || 0)
@@ -188,7 +195,8 @@ export function ToolsPage({ t, lang, ccy, dataState, liveHoldings = [], prices =
   // (total, all values from deriveHoldings, are in THB)
   const dep = parseFloat(amount) || 0
   const depInTHB = ccy === 'USD' ? dep * fxRate : dep
-  const newTotal = mode === "deposit" ? total + depInTHB : Math.max(0, total - depInTHB)
+  // newTotal is based on INVESTABLE total (excludes emergency fund), not full net worth
+  const newTotal = mode === "deposit" ? investableTotal + depInTHB : Math.max(0, investableTotal - depInTHB)
 
   // ── Target editing helpers ───────────────────────────────────────────────────
   // Per-ticker positions (value aggregated across lots)
@@ -259,8 +267,9 @@ export function ToolsPage({ t, lang, ccy, dataState, liveHoldings = [], prices =
   const suggestions = useMemo(() => units.map(u => {
     const targetValue = newTotal * u.tgt
     const delta = targetValue - u.current
-    return { name: u.key, current: u.current, target: targetValue, delta, curPct: total > 0 ? (u.current / total) * 100 : 0, tgtPct: u.tgt * 100, candidates: u.candidates }
-  }), [units, newTotal, total])
+    // curPct uses investableTotal so class % sums to 100% (emergency fund excluded)
+    return { name: u.key, current: u.current, target: targetValue, delta, curPct: investableTotal > 0 ? (u.current / investableTotal) * 100 : 0, tgtPct: u.tgt * 100, candidates: u.candidates }
+  }), [units, newTotal, investableTotal])
 
   // ── Per-holding drift within each class (for Class+Holding view) ────────────
   const holdingDriftByClass = useMemo(() => {
@@ -659,8 +668,8 @@ export function ToolsPage({ t, lang, ccy, dataState, liveHoldings = [], prices =
           {/* Portfolio summary */}
           <div style={{ display: "flex", gap: 24, marginBottom: 20, padding: "14px 16px", borderRadius: 10, background: "var(--bg-2)" }}>
             <div>
-              <div className="label-up" style={{ marginBottom: 3 }}>{th ? "พอร์ตปัจจุบัน" : "Current portfolio"}</div>
-              <div style={{ fontSize: 18, fontWeight: 600, fontFamily: "var(--font-display)" }}>{FMT.money(total, ccy, { compact: true })}</div>
+              <div className="label-up" style={{ marginBottom: 3 }}>{th ? "พอร์ตลงทุน" : "Investable portfolio"}</div>
+              <div style={{ fontSize: 18, fontWeight: 600, fontFamily: "var(--font-display)" }}>{FMT.money(investableTotal, ccy, { compact: true })}</div>
             </div>
             {isLive && (
               <div>
