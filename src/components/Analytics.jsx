@@ -938,7 +938,7 @@ function AnalyticsDiv2({ t, lang, ccy, rows, totalValue, dataState, liveHoldings
         amount: s.editedNet,
         currency: s.currency,
         transacted_at: s.date,
-        note: `Synced · ฿${s.pricePerShare}/share gross · WHT ${(s.taxRate * 100).toFixed(0)}%`,
+        note: `Synced · ${s.currency === 'USD' ? '$' : '฿'}${s.pricePerShare}/share gross · WHT ${(s.taxRate * 100).toFixed(0)}%`,
       })
       if (data) newTxs.push(data)
     }
@@ -1257,6 +1257,7 @@ function AnalyticsDiv2({ t, lang, ccy, rows, totalValue, dataState, liveHoldings
 /* ─── Sync row (inside sync modal) ───────────────────────────────────────────── */
 function SyncRow({ s, th, FMT, ccy, onChange }) {
   const tax = +(s.gross * s.taxRate).toFixed(2)
+  const sym = s.currency === 'USD' ? '$' : '฿'
   return (
     <div style={{ display: "grid", gridTemplateColumns: "20px 36px 1fr auto 88px", gap: 10, alignItems: "center", padding: "8px 0", borderBottom: "1px solid var(--line)" }}>
       <input type="checkbox" checked={s.checked} onChange={e => onChange({ checked: e.target.checked })}
@@ -1265,17 +1266,17 @@ function SyncRow({ s, th, FMT, ccy, onChange }) {
       <div>
         <div style={{ fontWeight: 500, fontSize: 13 }}>{s.ticker} · {s.dateLabel}</div>
         <div className="muted" style={{ fontSize: 11 }}>
-          {s.shares} {th ? "หุ้น" : "shares"} × ฿{s.pricePerShare}
+          {s.shares} {th ? "หุ้น" : "shares"} × {sym}{s.pricePerShare}
           {s.taxRate > 0 && (
             <span style={{ color: "var(--loss)", marginLeft: 6 }}>
-              WHT {(s.taxRate * 100).toFixed(0)}% = −฿{tax}
+              WHT {(s.taxRate * 100).toFixed(0)}% = −{sym}{tax}
             </span>
           )}
         </div>
       </div>
       {/* Gross — label removed (now in sticky column header above the list) */}
       <div style={{ textAlign: "right", fontSize: 13, fontFamily: "var(--font-mono)", color: "var(--ink-2)" }}>
-        ฿{s.gross}
+        {sym}{s.gross}
       </div>
       {/* Net editable — label removed */}
       <CalcInput value={s.editedNet}
