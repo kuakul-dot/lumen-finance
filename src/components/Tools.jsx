@@ -95,6 +95,8 @@ export function ToolsPage({ t, lang, ccy, dataState, liveHoldings = [], prices =
   const [amount,     setAmount]     = useState("50000")
   const [allowSales, setAllowSales] = useState(false)
   const [showResult, setShowResult] = useState(false)
+  // Cash account selector for deposit — set of account IDs the user wants to draw from
+  const [selectedAccountIds, setSelectedAccountIds] = useState(new Set())
   const [editTargets, setEditTargets] = useState(false)
   const [targets,    setTargets]    = useState(loadTargets)
   const [band,       setBand]       = useState(loadBand)   // tolerance (percentage points)
@@ -145,6 +147,25 @@ export function ToolsPage({ t, lang, ccy, dataState, liveHoldings = [], prices =
   }, [isLive, liveHoldings, ccy, prices, fxRate, cashAccounts, dataState])
 
   const currentByClass = useMemo(() => buildCurrentByClass(rows, investableCash), [rows, investableCash])
+
+  // Per-account investable amounts (emergency accounts only expose excess above target)
+  const accountOptions = useMemo(() => cashAccounts.map(a => {
+    const balTHB = a.currency === 'USD' ? (a.balance || 0) * fxRate : (a.balance || 0)
+    const isEmergency = a.icon === 'shield' && a.target_balance > 0
+    const targetTHB = isEmergency ? (a.currency === 'USD' ? a.target_balance * fxRate : a.target_balance) : 0
+    const available = isEmergency ? Math.max(0, balTHB - targetTHB) : balTHB
+    return { ...a, balTHB, targetTHB, available, isEmergency, locked: isEmergency && available <= 0 }
+  }), [cashAccounts, fxRate])
+
+  const selectedAvailableTHB = useMemo(() =>
+    accountOptions.filter(a => selectedAccountIds.has(a.id)).reduce((s, a) => s + a.available, 0)
+  , [accountOptions, selectedAccountIds])
+
+  const toggleAccount = (id) => setSelectedAccountIds(prev => {
+    const next = new Set(prev)
+    next.has(id) ? next.delete(id) : next.add(id)
+    return next
+  })
 
   // User types amount in display currency; convert to THB for internal calculations
   // (total, all values from deriveHoldings, are in THB)
@@ -606,6 +627,89 @@ export function ToolsPage({ t, lang, ccy, dataState, liveHoldings = [], prices =
               {t.tools.withdraw}
             </button>
           </div>
+
+          {/* ── Cash account selector (deposit mode only, live data only) ── */}
+          {mode === "deposit" && isLive && accountOptions.length > 0 && (
+            <div style={{ marginTop: 18 }}>
+              <div className="label-up" style={{ marginBottom: 8 }}>{th ? "ใช้เงินจากบัญชี (เลือกได้หลายบัญชี)" : "Draw funds from accounts (multi-select)"}</div>
+              <div style={{ display: "grid", gap: 6 }}>
+                {accountOptions.map(a => {
+                  const checked = selectedAccountIds.has(a.id)
+                  const displayBal = ccy === 'USD' ? a.available / fxRate : a.available
+                  const displayTarget = ccy === 'USD' ? a.targetTHB / fxRate : a.targetTHB
+                  const displayBalFull = ccy === 'USD' ? a.balTHB / fxRate : a.balTHB
+                  return (
+                    <div
+                      key={a.id}
+                      onClick={() => !a.locked && toggleAccount(a.id)}
+                      style={{
+                        display: "flex", alignItems: "center", gap: 10,
+                        padding: "10px 12px", borderRadius: 10,
+                        border: `1.5px solid ${a.locked ? "var(--line)" : checked ? "var(--accent)" : "var(--line)"}`,
+                        background: a.locked ? "var(--bg-2)" : checked ? "var(--accent-soft)" : "var(--bg)",
+                        cursor: a.locked ? "not-allowed" : "pointer",
+                        opacity: a.locked ? 0.55 : 1,
+                        transition: "all 0.15s",
+                      }}
+                    >
+                      {/* Checkbox */}
+                      <div style={{
+                        width: 18, height: 18, borderRadius: 5, border: `1.5px solid ${a.locked ? "var(--line)" : checked ? "var(--accent)" : "var(--ink-3)"}`,
+                        background: checked ? "var(--accent)" : "transparent",
+                        display: "grid", placeItems: "center", flexShrink: 0,
+                      }}>
+                        {checked && <svg width="10" height="10" viewBox="0 0 10 10"><polyline points="2 5 4.5 7.5 8 2.5" fill="none" stroke="white" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"/></svg>}
+                      </div>
+                      {/* Icon */}
+                      <div style={{ fontSize: 16, flexShrink: 0 }}>{a.isEmergency ? "🛡" : "💵"}</div>
+                      {/* Name + info */}
+                      <div style={{ flex: 1, minWidth: 0 }}>
+                        <div style={{ fontSize: 13, fontWeight: 500, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                          {a.name || (th ? "บัญชีเงินสด" : "Cash account")}
+                        </div>
+                        <div style={{ fontSize: 10.5, color: "var(--ink-3)", marginTop: 1 }}>
+                          {a.isEmergency
+                            ? a.locked
+                              ? (th ? `ยอดฉุกเฉิน ฿${FMT.money(displayBalFull, ccy, { compact: true })} · ยังไม่เกินเป้า` : `Emergency ฿${FMT.money(displayBalFull, ccy, { compact: true })} · at/below target`)
+                              : (th ? `ส่วนเกินเป้า ${FMT.money(displayTarget, ccy, { compact: true })} = ฿${FMT.money(displayBal, ccy, { compact: true })}` : `Excess above target ${FMT.money(displayTarget, ccy, { compact: true })}`)
+                            : (th ? `ยอด ${FMT.money(displayBalFull, ccy, { compact: true })} · ลงทุนได้ทั้งหมด` : `Balance ${FMT.money(displayBalFull, ccy, { compact: true })} · fully investable`)
+                          }
+                        </div>
+                      </div>
+                      {/* Available badge */}
+                      <div style={{ textAlign: "right", flexShrink: 0 }}>
+                        {a.locked
+                          ? <span style={{ fontSize: 11, color: "var(--ink-4)", fontFamily: "var(--font-mono)" }}>—</span>
+                          : <span style={{ fontSize: 13, fontWeight: 600, fontFamily: "var(--font-display)", color: checked ? "var(--accent-ink)" : "var(--ink)" }}>
+                              {FMT.money(displayBal, ccy, { compact: true })}
+                            </span>
+                        }
+                      </div>
+                    </div>
+                  )
+                })}
+              </div>
+              {/* Total + use-amount button */}
+              {selectedAccountIds.size > 0 && selectedAvailableTHB > 0 && (
+                <div style={{ marginTop: 10, padding: "10px 12px", borderRadius: 10, background: "oklch(0.96 0.04 200)", border: "1px solid oklch(0.82 0.08 200)", display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10 }}>
+                  <div>
+                    <div style={{ fontSize: 11, color: "oklch(0.45 0.10 200)" }}>{th ? "รวมที่เลือก" : "Total selected"}</div>
+                    <div style={{ fontSize: 16, fontWeight: 700, fontFamily: "var(--font-display)", color: "oklch(0.35 0.12 200)" }}>
+                      {FMT.money(ccy === 'USD' ? selectedAvailableTHB / fxRate : selectedAvailableTHB, ccy, { compact: true })}
+                    </div>
+                  </div>
+                  <button className="btn btn-sm" style={{ background: "oklch(0.35 0.12 200)", color: "white", border: "none" }}
+                    onClick={() => {
+                      const val = ccy === 'USD' ? selectedAvailableTHB / fxRate : selectedAvailableTHB
+                      setAmount(String(Math.floor(val)))
+                      setShowResult(false)
+                    }}>
+                    {th ? "ใช้จำนวนนี้" : "Use this amount"}
+                  </button>
+                </div>
+              )}
+            </div>
+          )}
 
           <label style={{ display: "block", marginTop: 22 }}>
             <div className="label-up" style={{ marginBottom: 8 }}>{t.tools.amount} ({ccy})</div>
