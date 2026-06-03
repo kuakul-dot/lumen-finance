@@ -42,12 +42,19 @@ export default async function handler(request) {
     if (!Array.isArray(list) || list.length === 0) return corsMiss(404)
 
     // 1) exact ticker + preferred exchange + has logo
-    // 2) exact ticker with any logo
-    // 3) any result on a preferred exchange with a logo
-    const exact = list.filter(x => strip(x.symbol) === ticker && x.logoid)
+    // 2) exact ticker (any exchange) with logo
+    // 3) dot-normalised form (BRK-B → BRK.B) — TradingView uses dots for share classes
+    // 4) any result on a preferred exchange with a logo (broad fallback)
+    const dotTicker = ticker.replace(/-/g, '.')  // BRK-B → BRK.B
+    const exact    = list.filter(x => strip(x.symbol) === ticker    && x.logoid)
+    const exactDot = dotTicker !== ticker
+      ? list.filter(x => strip(x.symbol) === dotTicker && x.logoid)
+      : []
     const pick =
       exact.find(x => wantExch.includes(strip(x.exchange))) ||
       exact[0] ||
+      exactDot.find(x => wantExch.includes(strip(x.exchange))) ||
+      exactDot[0] ||
       list.find(x => x.logoid && wantExch.includes(strip(x.exchange)))
     if (!pick?.logoid) return corsMiss(404)
 
