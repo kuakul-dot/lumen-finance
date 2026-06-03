@@ -695,7 +695,7 @@ export function ToolsPage({ t, lang, ccy, dataState, liveHoldings = [], prices =
                       {/* Name + info */}
                       <div style={{ flex: 1, minWidth: 0 }}>
                         <div style={{ fontSize: 13, fontWeight: 500, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-                          {a.name || (th ? "บัญชีเงินสด" : "Cash account")}
+                          {a.label || a.name || (th ? "บัญชีเงินสด" : "Cash account")}
                         </div>
                         <div style={{ fontSize: 10.5, color: "var(--ink-3)", marginTop: 1 }}>
                           {a.isEmergency
