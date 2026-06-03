@@ -1043,8 +1043,8 @@ export function ToolsPage({ t, lang, ccy, dataState, liveHoldings = [], prices =
                               <div className="mono muted" style={{ fontSize: 9.5 }}>{FMT.money(h.value, ccy, { compact: true })}</div>
                             </div>
                           </div>
-                          {/* Within-class target */}
-                          <div className="mono muted" style={{ fontSize: 10 }}>→{h.tgtWithin.toFixed(0)}%*</div>
+                          {/* Within-class target — use 1 decimal to avoid rounding small holdings to 0% */}
+                          <div className="mono muted" style={{ fontSize: 10 }}>→{h.tgtWithin.toFixed(1)}%*</div>
                           {/* Mini bar — within-class % */}
                           <div style={{ position: "relative", height: 7 }}>
                             <div style={{ position: "absolute", inset: 0, background: "var(--bg)", borderRadius: 999 }} />
@@ -1090,10 +1090,11 @@ export function ToolsPage({ t, lang, ccy, dataState, liveHoldings = [], prices =
               {/* Footnote for Class+Holding view */}
               {driftLevel === "class+holding" && (
                 <div style={{ marginTop: 8, fontSize: 10.5, color: "var(--ink-4)", lineHeight: 1.6 }}>
-                  <span style={{ fontFamily: "var(--font-mono)" }}>→X%*</span> {th ? "= เป้าภายในกลุ่ม (ไม่ใช่ % ของพอร์ตรวม) · ส่วนต่างรายตัวจะแสดงเฉพาะเมื่อเบี่ยง ≥ tolerance band" : "= target within class (not % of total portfolio) · drift shown only when ≥ tolerance band"}
-                  {targetMode !== "hybrid" && (
-                    <> · {th ? "ตั้ง Hybrid mode เพื่อกำหนดเป้าต่างกันในแต่ละหุ้น" : "switch to Hybrid mode (Edit targets) to set custom per-ticker targets"}</>
-                  )}
+                  <span style={{ fontFamily: "var(--font-mono)" }}>→X%*</span> {th ? "= สัดส่วนปัจจุบันภายในกลุ่ม (ไม่ใช่ % พอร์ตรวม) · ส่วนต่างแสดงเมื่อเบี่ยง ≥ tolerance band" : "= current proportion within class (not % of total portfolio) · drift shown only when ≥ tolerance band"}
+                  {targetMode !== "hybrid"
+                    ? <> · {th ? "⚠ Class mode = ระบบซื้อตามสัดส่วนปัจจุบันในกลุ่ม ไม่ใช่จาก % ที่แสดง — ใช้ Hybrid mode เพื่อกำหนดเป้าต่างกันในแต่ละหุ้น" : "⚠ Class mode: buys are distributed proportionally within the class, not by this % — use Hybrid mode (Edit targets) to set per-ticker targets"}</>
+                    : null
+                  }
                 </div>
               )}
             </div>
