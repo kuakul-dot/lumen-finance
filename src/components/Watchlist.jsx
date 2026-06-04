@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback, useRef } from 'react'
+import { useState, useEffect, useCallback, useRef, useMemo } from 'react'
 import { PageHead, Icon, TickerLogo } from './Nav'
 import { TradingViewChart } from './TradingViewChart'
 import { LineChart } from './Charts'
@@ -14,24 +14,31 @@ function saveList(items) {
 }
 
 // ── S/R computation ───────────────────────────────────────────────────────────
-// Uses pivot-point detection (local maxima/minima ± WIN bars) + 2% clustering.
-// Falls back to rolling 30d / all-time min-max when pivots are scarce.
-function computeSR(closes, current) {
-  if (!closes || closes.length < 12 || !current || current <= 0) return null
+// Uses real High/Low from OHLC bars for pivot detection (falls back to close
+// when h/l are null for close-only feeds like benchmark indices).
+// Cluster tolerance: 2%. Falls back to rolling 30d/all-time extremes.
+function computeSR(bars, current) {
+  if (!bars || bars.length < 12 || !current || current <= 0) return null
 
   const WIN = 3
   const pivotHighs = [], pivotLows = []
-  for (let i = WIN; i < closes.length - WIN; i++) {
+
+  for (let i = WIN; i < bars.length - WIN; i++) {
+    const hi = bars[i].h ?? bars[i].c
+    const lo = bars[i].l ?? bars[i].c
     let isHigh = true, isLow = true
     for (let d = 1; d <= WIN; d++) {
-      if (closes[i - d] >= closes[i] || closes[i + d] >= closes[i]) isHigh = false
-      if (closes[i - d] <= closes[i] || closes[i + d] <= closes[i]) isLow = false
+      const pH = bars[i - d].h ?? bars[i - d].c
+      const nH = bars[i + d].h ?? bars[i + d].c
+      const pL = bars[i - d].l ?? bars[i - d].c
+      const nL = bars[i + d].l ?? bars[i + d].c
+      if (pH >= hi || nH >= hi) isHigh = false
+      if (pL <= lo || nL <= lo) isLow  = false
     }
-    if (isHigh) pivotHighs.push(closes[i])
-    if (isLow)  pivotLows.push(closes[i])
+    if (isHigh) pivotHighs.push(hi)
+    if (isLow)  pivotLows.push(lo)
   }
 
-  // Cluster values within 2% of each other → pick most-tested level
   const cluster = (vals, tol = 0.02) => {
     const sorted = [...vals].sort((a, b) => a - b)
     const groups = []
@@ -43,26 +50,26 @@ function computeSR(closes, current) {
     return groups.sort((a, b) => b.pts.length - a.pts.length)
   }
 
-  const resClusters = cluster(pivotHighs.filter(v => v > current * 1.001))
-  const supClusters = cluster(pivotLows.filter(v => v < current * 0.999))
-
   const toLevel = (g) => ({ price: +g.c.toFixed(4), strength: g.pts.length })
 
-  // R1 = closest resistance, R2 = next; S1 = closest support, S2 = next
-  let resistances = resClusters.slice(0, 3).map(toLevel).sort((a, b) => a.price - b.price).slice(0, 2)
-  let supports    = supClusters.slice(0, 3).map(toLevel).sort((a, b) => b.price - a.price).slice(0, 2)
+  let resistances = cluster(pivotHighs.filter(v => v > current * 1.001))
+    .slice(0, 3).map(toLevel).sort((a, b) => a.price - b.price).slice(0, 2)
+  let supports = cluster(pivotLows.filter(v => v < current * 0.999))
+    .slice(0, 3).map(toLevel).sort((a, b) => b.price - a.price).slice(0, 2)
 
-  // Fallbacks from rolling extremes when clusters are insufficient
-  const w30 = closes.slice(-30), wAll = closes
-  const fallbackR = [Math.max(...w30), Math.max(...wAll)].filter(v => v > current * 1.005)
-  const fallbackS = [Math.min(...w30), Math.min(...wAll)].filter(v => v < current * 0.995)
+  // Rolling fallbacks when pivot data is insufficient
+  const allH = bars.map(b => b.h ?? b.c).filter(Number.isFinite)
+  const allL = bars.map(b => b.l ?? b.c).filter(Number.isFinite)
+  const w30H = allH.slice(-30), w30L = allL.slice(-30)
+  const fbR = [Math.max(...w30H), Math.max(...allH)].filter(v => v > current * 1.005)
+  const fbS = [Math.min(...w30L), Math.min(...allL)].filter(v => v < current * 0.995)
 
-  for (const v of fallbackR) {
+  for (const v of fbR) {
     if (resistances.length >= 2) break
     if (!resistances.some(r => Math.abs(r.price - v) / v < 0.02))
       resistances.push({ price: +v.toFixed(4), strength: 0 })
   }
-  for (const v of fallbackS) {
+  for (const v of fbS) {
     if (supports.length >= 2) break
     if (!supports.some(s => Math.abs(s.price - v) / v < 0.02))
       supports.push({ price: +v.toFixed(4), strength: 0 })
@@ -70,8 +77,81 @@ function computeSR(closes, current) {
 
   resistances.sort((a, b) => a.price - b.price)
   supports.sort((a, b) => b.price - a.price)
-
   return { resistances, supports }
+}
+
+// ── Fibonacci Retracement ─────────────────────────────────────────────────────
+// Uses the swing high and swing low of the entire bar series.
+// Key levels: 23.6%, 38.2%, 50%, 61.8%, 78.6%
+function computeFib(bars) {
+  if (!bars || bars.length < 5) return null
+  const highs  = bars.map(b => b.h ?? b.c).filter(Number.isFinite)
+  const lows   = bars.map(b => b.l ?? b.c).filter(Number.isFinite)
+  const sHigh  = Math.max(...highs)
+  const sLow   = Math.min(...lows)
+  const range  = sHigh - sLow
+  if (range <= 0) return null
+  return [0.236, 0.382, 0.5, 0.618, 0.786].map(r => ({
+    ratio: r,
+    price: +(sHigh - r * range).toFixed(4),
+    label: `${(r * 100).toFixed(1)}%`,
+  }))
+}
+
+// ── Moving Averages (MA20, MA50, MA200) ───────────────────────────────────────
+function computeMAs(bars) {
+  const closes = bars.map(b => b.c).filter(v => v != null && Number.isFinite(v))
+  const ma = (n) => {
+    if (closes.length < n) return null
+    return +(closes.slice(-n).reduce((s, c) => s + c, 0) / n).toFixed(4)
+  }
+  return { ma20: ma(20), ma50: ma(50), ma200: ma(200) }
+}
+
+// ── Volume Profile — Point of Control (POC) ───────────────────────────────────
+// Divides the price range into BUCKETS equal-width buckets, distributes each
+// bar's volume proportionally across the buckets it spans (by wick), then finds
+// the POC (bucket with the highest traded volume).
+function computeVolProfile(bars, BUCKETS = 24) {
+  const valid = bars.filter(b => b.h && b.l && b.v != null && b.v > 0 &&
+                                  Number.isFinite(b.h) && Number.isFinite(b.l))
+  if (valid.length < 5) return null
+  const lo   = Math.min(...valid.map(b => b.l))
+  const hi   = Math.max(...valid.map(b => b.h))
+  const span = hi - lo
+  if (span <= 0) return null
+
+  const bSz = span / BUCKETS
+  const vol = Array(BUCKETS).fill(0)
+
+  for (const bar of valid) {
+    const barSpan = bar.h - bar.l || 0.001
+    for (let i = 0; i < BUCKETS; i++) {
+      const bLo = lo + i * bSz, bHi = bLo + bSz
+      const overlap = Math.max(0, Math.min(bar.h, bHi) - Math.max(bar.l, bLo))
+      vol[i] += bar.v * (overlap / barSpan)
+    }
+  }
+
+  const pocIdx = vol.indexOf(Math.max(...vol))
+  const poc    = +(lo + (pocIdx + 0.5) * bSz).toFixed(4)
+
+  // Value Area High / Low: expand from POC until 70% of total volume is covered
+  const totalVol = vol.reduce((s, v) => s + v, 0)
+  const target   = totalVol * 0.70
+  let loI = pocIdx, hiI = pocIdx, covered = vol[pocIdx]
+  while (covered < target && (loI > 0 || hiI < BUCKETS - 1)) {
+    const addL = loI > 0          ? vol[loI - 1] : 0
+    const addH = hiI < BUCKETS - 1 ? vol[hiI + 1] : 0
+    if (addH >= addL && hiI < BUCKETS - 1) { hiI++; covered += addH }
+    else if (loI > 0)                       { loI--; covered += addL }
+    else break
+  }
+  return {
+    poc,
+    vah: +(lo + (hiI + 1) * bSz).toFixed(4),  // Value Area High
+    val: +(lo + loI * bSz).toFixed(4),         // Value Area Low
+  }
 }
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
@@ -174,12 +254,16 @@ function WatchlistCard({ item, priceData, sr, onRemove, onNoteChange, showChart,
   const gain = changePct > 0, loss = changePct < 0
 
   // ── Chart-specific state (self-contained in the card) ──────────────────────
-  const [chartMode,  setChartMode]  = useState('sr')    // 'sr' | 'tv'
-  const [chartRange, setChartRange] = useState('3mo')
-  const [chartPts,   setChartPts]   = useState(null)    // [{t, c}] from fetchHistory
+  const [chartMode,    setChartMode]    = useState('sr')   // 'sr' | 'tv'
+  const [chartRange,   setChartRange]   = useState('3mo')
+  const [chartBars,    setChartBars]    = useState(null)   // [{t,o,h,l,c,v}]
   const [loadingChart, setLoadingChart] = useState(false)
+  // Overlay toggles — Fibonacci, Moving Averages, Volume Profile
+  const [overlays, setOverlays] = useState({ fib: false, ma: false, vp: false })
 
-  // Fetch price history when chart opens or range changes
+  const toggleOverlay = (key) => setOverlays(prev => ({ ...prev, [key]: !prev[key] }))
+
+  // Fetch OHLC history when chart opens or range changes
   useEffect(() => {
     if (!showChart || chartMode !== 'sr') return
     const sym = toYahooSymbol(item.symbol, item.region || 'US', item.cls || 'Equity')
@@ -188,46 +272,75 @@ function WatchlistCard({ item, priceData, sr, onRemove, onNoteChange, showChart,
     fetchHistory(sym, chartRange)
       .then(({ series }) => {
         if (cancelled) return
-        const pts = series.filter(p => p.c != null && Number.isFinite(p.c) && p.c > 0)
-        setChartPts(pts.length >= 5 ? pts : null)
+        const bars = series.filter(p => p.c != null && Number.isFinite(p.c) && p.c > 0)
+        setChartBars(bars.length >= 5 ? bars : null)
       })
-      .catch(() => { if (!cancelled) setChartPts(null) })
+      .catch(() => { if (!cancelled) setChartBars(null) })
       .finally(() => { if (!cancelled) setLoadingChart(false) })
     return () => { cancelled = true }
   }, [showChart, chartMode, chartRange, item.symbol, item.region, item.cls])
 
-  // Reset chart mode when card is collapsed
-  useEffect(() => { if (!showChart) setChartMode('sr') }, [showChart])
+  // Reset state when card is collapsed
+  useEffect(() => { if (!showChart) { setChartMode('sr'); setOverlays({ fib: false, ma: false, vp: false }) } }, [showChart])
+
+  // ── Compute overlays from chartBars ────────────────────────────────────────
+  const chartSR  = useMemo(() => chartBars && livePrice ? computeSR(chartBars, livePrice) : null, [chartBars, livePrice])
+  const chartFib = useMemo(() => overlays.fib && chartBars ? computeFib(chartBars) : null, [chartBars, overlays.fib])
+  const chartMAs = useMemo(() => overlays.ma  && chartBars ? computeMAs(chartBars) : null, [chartBars, overlays.ma])
+  const chartVP  = useMemo(() => overlays.vp  && chartBars ? computeVolProfile(chartBars) : null, [chartBars, overlays.vp])
 
   // Clean ticker for TradingView: BTC-USD → BTC
   const tvTicker = item.cls === 'Crypto'
     ? item.symbol.replace(/[-/](USD|USDT|USDC|BTC|ETH)$/i, '')
     : item.symbol
 
-  // Build LineChart series + hLines from price history and S/R levels
-  const lineSeries = chartPts ? [{
+  // ── Build LineChart series from OHLC bars ─────────────────────────────────
+  const lineSeries = chartBars ? [{
     name: item.symbol,
     color: 'var(--accent)',
     fill: true,
-    data: chartPts.map(p => ({
+    data: chartBars.map(p => ({
       x: p.t,
       y: p.c,
       label: new Date(p.t * 1000).toLocaleDateString('en', { month: 'short', day: 'numeric' }),
     })),
   }] : null
 
-  const hLines = sr ? [
-    ...sr.resistances.map((lvl, i) => ({
-      y: lvl.price,
-      color: 'var(--loss)',
-      label: `R${i + 1} ${fmtPrice(lvl.price, currency)}`,
-    })),
-    ...sr.supports.map((lvl, i) => ({
-      y: lvl.price,
-      color: 'var(--gain)',
-      label: `S${i + 1} ${fmtPrice(lvl.price, currency)}`,
-    })),
-  ] : []
+  // ── Build combined hLines: S/R + optional Fib / MA / Volume Profile ───────
+  const displaySR = chartSR ?? sr   // prefer OHLC-based SR from chart range; fall back to parent's
+  const hLines = [
+    // S/R pivot lines (always shown when available)
+    ...(displaySR ? [
+      ...displaySR.resistances.map((lvl, i) => ({
+        y: lvl.price, color: 'var(--loss)',
+        label: `R${i + 1} ${fmtPrice(lvl.price, currency)}`,
+      })),
+      ...displaySR.supports.map((lvl, i) => ({
+        y: lvl.price, color: 'var(--gain)',
+        label: `S${i + 1} ${fmtPrice(lvl.price, currency)}`,
+      })),
+    ] : []),
+
+    // Fibonacci retracement levels
+    ...(chartFib ? chartFib.map(lvl => ({
+      y: lvl.price, color: 'oklch(0.65 0.14 55)',
+      label: `Fib ${lvl.label}`,
+    })) : []),
+
+    // Moving averages
+    ...(chartMAs ? [
+      chartMAs.ma20  != null && { y: chartMAs.ma20,  color: 'oklch(0.60 0.14 300)', label: 'MA20'  },
+      chartMAs.ma50  != null && { y: chartMAs.ma50,  color: 'oklch(0.50 0.12 250)', label: 'MA50'  },
+      chartMAs.ma200 != null && { y: chartMAs.ma200, color: 'oklch(0.45 0.08 220)', label: 'MA200' },
+    ].filter(Boolean) : []),
+
+    // Volume Profile levels
+    ...(chartVP ? [
+      { y: chartVP.poc, color: 'oklch(0.65 0.16 90)', label: `POC ${fmtPrice(chartVP.poc, currency)}` },
+      { y: chartVP.vah, color: 'oklch(0.65 0.10 90)', label: `VAH` },
+      { y: chartVP.val, color: 'oklch(0.65 0.10 90)', label: `VAL` },
+    ] : []),
+  ]
 
   return (
     <div style={{
@@ -354,8 +467,8 @@ function WatchlistCard({ item, priceData, sr, onRemove, onNoteChange, showChart,
           {/* ── S/R Chart mode ─────────────────────────────── */}
           {chartMode === 'sr' && (
             <>
-              {/* Range selector */}
-              <div style={{ display: 'flex', gap: 4, marginBottom: 10 }}>
+              {/* Range selector + overlay toggles */}
+              <div style={{ display: 'flex', gap: 4, marginBottom: 8, flexWrap: 'wrap', alignItems: 'center' }}>
                 {CHART_RANGES.map(r => (
                   <button key={r} onClick={() => setChartRange(r)} style={{
                     padding: '4px 10px', borderRadius: 6, fontSize: 11, fontWeight: 600, cursor: 'pointer',
@@ -366,7 +479,27 @@ function WatchlistCard({ item, priceData, sr, onRemove, onNoteChange, showChart,
                     {RANGE_LABEL[r]}
                   </button>
                 ))}
-                {loadingChart && <span style={{ fontSize: 11, color: 'var(--ink-3)', alignSelf: 'center', marginLeft: 4 }}>…</span>}
+                {loadingChart && <span style={{ fontSize: 11, color: 'var(--ink-3)', marginLeft: 2 }}>…</span>}
+              </div>
+
+              {/* Overlay toggles */}
+              <div style={{ display: 'flex', gap: 4, marginBottom: 10, flexWrap: 'wrap', alignItems: 'center' }}>
+                <span style={{ fontSize: 10, color: 'var(--ink-3)', marginRight: 2 }}>Overlay:</span>
+                {[
+                  { key: 'fib', label: 'Fibonacci', color: 'oklch(0.65 0.14 55)' },
+                  { key: 'ma',  label: 'MA20/50/200', color: 'oklch(0.50 0.12 250)' },
+                  { key: 'vp',  label: 'Vol Profile', color: 'oklch(0.60 0.14 90)' },
+                ].map(o => (
+                  <button key={o.key} onClick={() => toggleOverlay(o.key)} style={{
+                    padding: '3px 9px', borderRadius: 6, fontSize: 10, fontWeight: 600, cursor: 'pointer',
+                    border: `1.5px solid ${overlays[o.key] ? o.color : 'var(--line)'}`,
+                    background: overlays[o.key] ? o.color + '22' : 'transparent',
+                    color: overlays[o.key] ? o.color : 'var(--ink-3)',
+                    transition: 'all 0.15s',
+                  }}>
+                    {o.label}
+                  </button>
+                ))}
               </div>
 
               {/* Chart */}
@@ -390,28 +523,44 @@ function WatchlistCard({ item, priceData, sr, onRemove, onNoteChange, showChart,
                 </div>
               )}
 
-              {/* S/R legend */}
-              {sr && (
-                <div style={{ display: 'flex', gap: 14, marginTop: 8, flexWrap: 'wrap' }}>
-                  {sr.resistances.map((lvl, i) => (
+              {/* Legend */}
+              <div style={{ display: 'flex', gap: 10, marginTop: 8, flexWrap: 'wrap' }}>
+                {displaySR && <>
+                  {displaySR.resistances.map((lvl, i) => (
                     <span key={`r${i}`} style={{ fontSize: 10, color: 'var(--loss)', display: 'flex', alignItems: 'center', gap: 4, fontFamily: 'var(--font-mono)' }}>
-                      <span style={{ width: 14, borderTop: '2px dashed var(--loss)', display: 'inline-block' }} />
+                      <span style={{ width: 12, borderTop: '2px dashed var(--loss)', display: 'inline-block' }} />
                       R{i + 1} {fmtPrice(lvl.price, currency)} <StrengthDots count={lvl.strength} color="var(--loss)" />
                     </span>
                   ))}
-                  {sr.supports.map((lvl, i) => (
+                  {displaySR.supports.map((lvl, i) => (
                     <span key={`s${i}`} style={{ fontSize: 10, color: 'var(--gain)', display: 'flex', alignItems: 'center', gap: 4, fontFamily: 'var(--font-mono)' }}>
-                      <span style={{ width: 14, borderTop: '2px dashed var(--gain)', display: 'inline-block' }} />
+                      <span style={{ width: 12, borderTop: '2px dashed var(--gain)', display: 'inline-block' }} />
                       S{i + 1} {fmtPrice(lvl.price, currency)} <StrengthDots count={lvl.strength} color="var(--gain)" />
                     </span>
                   ))}
-                </div>
-              )}
+                </>}
+                {chartMAs && overlays.ma && [
+                  chartMAs.ma20  && { label: 'MA20',  color: 'oklch(0.60 0.14 300)', val: chartMAs.ma20 },
+                  chartMAs.ma50  && { label: 'MA50',  color: 'oklch(0.50 0.12 250)', val: chartMAs.ma50 },
+                  chartMAs.ma200 && { label: 'MA200', color: 'oklch(0.45 0.08 220)', val: chartMAs.ma200 },
+                ].filter(Boolean).map(m => (
+                  <span key={m.label} style={{ fontSize: 10, color: m.color, display: 'flex', alignItems: 'center', gap: 4, fontFamily: 'var(--font-mono)' }}>
+                    <span style={{ width: 12, borderTop: `2px dashed ${m.color}`, display: 'inline-block' }} />
+                    {m.label} {fmtPrice(m.val, currency)}
+                  </span>
+                ))}
+                {chartVP && overlays.vp && (
+                  <span style={{ fontSize: 10, color: 'oklch(0.65 0.16 90)', display: 'flex', alignItems: 'center', gap: 4, fontFamily: 'var(--font-mono)' }}>
+                    <span style={{ width: 12, borderTop: '2px dashed oklch(0.65 0.16 90)', display: 'inline-block' }} />
+                    POC {fmtPrice(chartVP.poc, currency)}
+                  </span>
+                )}
+              </div>
 
-              <p style={{ margin: '8px 0 0', fontSize: 10, color: 'var(--ink-3)' }}>
+              <p style={{ margin: '6px 0 0', fontSize: 10, color: 'var(--ink-3)' }}>
                 {th
-                  ? '● = pivot touches · คำนวณจากข้อมูลปิด 3 เดือน'
-                  : '● = pivot touches · computed from 3-month closing prices'}
+                  ? '● = pivot touches (OHLC High/Low) · Fib = swing H→L retracement · POC = ราคาที่ trade มากที่สุด'
+                  : '● = OHLC pivot touches · Fib = swing H→L retracement · POC = highest-volume price'}
               </p>
             </>
           )}
@@ -754,7 +903,7 @@ export function WatchlistPage({ lang, ccy, fxRate = 36 }) {
 
   const [items,        setItems]        = useState(loadList)
   const [prices,       setPrices]       = useState({})
-  const [histories,    setHistories]    = useState({})   // yahooSymbol → closes[]
+  const [histories,    setHistories]    = useState({})   // yahooSymbol → bars [{t,o,h,l,c,v}]
   const [expandedKey,  setExpandedKey]  = useState(null) // `${symbol}:${region}` of open chart
   const [showAdd,      setShowAdd]      = useState(false)
   const [loadingPrices, setLoadingPrices] = useState(false)
@@ -781,17 +930,16 @@ export function WatchlistPage({ lang, ccy, fxRate = 36 }) {
     }
   }, [items])
 
-  // ── Fetch 3-month history for S/R computation ───────────────────────────────
+  // ── Fetch 3-month OHLC history for S/R computation ────────────────────────
   const refreshHistories = useCallback(async () => {
     for (const item of items) {
       const sym = toYahooSymbol(item.symbol, item.region || 'US', item.cls || 'Equity')
       try {
         const { series } = await fetchHistory(sym, '3mo')
-        const closes = series
-          .map(p => p.c)
-          .filter(v => v != null && Number.isFinite(v) && v > 0)
-        if (closes.length >= 12) {
-          setHistories(prev => ({ ...prev, [sym]: closes }))
+        // Store full OHLC bars; filter only rows with a valid close
+        const bars = series.filter(p => p.c != null && Number.isFinite(p.c) && p.c > 0)
+        if (bars.length >= 12) {
+          setHistories(prev => ({ ...prev, [sym]: bars }))
         }
       } catch (err) {
         console.warn('[Watchlist] history error for', sym, err)
@@ -884,9 +1032,9 @@ export function WatchlistPage({ lang, ccy, fxRate = 36 }) {
               {items.map((item, idx) => {
                 const yahooSym   = toYahooSymbol(item.symbol, item.region || 'US', item.cls || 'Equity')
                 const priceData  = prices[yahooSym]
-                const closes     = histories[yahooSym]
+                const bars       = histories[yahooSym]   // [{t,o,h,l,c,v}]
                 const livePrice  = priceData?.price ?? null
-                const sr         = (closes && livePrice) ? computeSR(closes, livePrice) : null
+                const sr         = (bars && livePrice) ? computeSR(bars, livePrice) : null
                 const chartKey   = `${item.symbol}:${item.region}`
                 return (
                   <WatchlistCard

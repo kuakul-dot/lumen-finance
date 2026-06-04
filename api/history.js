@@ -44,9 +44,21 @@ export default async function handler(request) {
         const result = j?.chart?.result?.[0]
         if (result) {
           const timestamps = result.timestamp || []
-          const closes = result.indicators?.quote?.[0]?.close || []
+          const q = result.indicators?.quote?.[0] || {}
+          const opens   = q.open   || []
+          const highs   = q.high   || []
+          const lows    = q.low    || []
+          const closes  = q.close  || []
+          const volumes = q.volume || []
           const series = timestamps
-            .map((t, i) => ({ t, c: closes[i] }))
+            .map((t, i) => ({
+              t,
+              o: opens[i]   ?? null,
+              h: highs[i]   ?? null,
+              l: lows[i]    ?? null,
+              c: closes[i]  ?? null,
+              v: volumes[i] ?? null,
+            }))
             .filter(p => p.c != null)
           return new Response(JSON.stringify({
             symbol,
