@@ -761,6 +761,165 @@ function DivCard({ title, data, className }) {
   )
 }
 
+/* ─── Dividend Tax Summary (WHT report) ─────────────────────────────────────── */
+function DividendTaxSummary({ transactions, lang, ccy, fxRate = 36 }) {
+  const th = lang === "th"
+  const FMT = LUMEN_FMT
+  const [expandedYears, setExpandedYears] = useState(new Set())
+
+  const toggleYear = (y) => setExpandedYears(prev => {
+    const next = new Set(prev); next.has(y) ? next.delete(y) : next.add(y); return next
+  })
+
+  // Parse "WHT 10%" from note → decimal (0.10) or null if not present
+  const parseWHTRate = (note) => {
+    const m = note?.match(/WHT\s*(\d+)%/)
+    return m ? parseInt(m[1]) / 100 : null
+  }
+
+  // Build { year: { gross, wht, net, rows: [{ticker, currency, gross, wht, net}] } }
+  const summary = useMemo(() => {
+    const byYear = {}
+    const divTxs = transactions.filter(tx =>
+      tx.type === 'Dividend' && tx.transacted_at && Number(tx.amount) > 0
+    )
+    divTxs.forEach(tx => {
+      const year = tx.transacted_at.slice(0, 4)
+      const isTHB = (tx.currency || 'THB') !== 'USD'
+      const netTHB = Number(tx.amount) * (isTHB ? 1 : fxRate)
+      const whtRate = parseWHTRate(tx.note)
+      const grossTHB = whtRate != null && whtRate > 0 ? netTHB / (1 - whtRate) : netTHB
+      const whtTHB  = grossTHB - netTHB
+
+      if (!byYear[year]) byYear[year] = { gross: 0, wht: 0, net: 0, tickers: {} }
+      byYear[year].gross += grossTHB
+      byYear[year].wht   += whtTHB
+      byYear[year].net   += netTHB
+
+      const tk = tx.ticker || '—'
+      if (!byYear[year].tickers[tk]) byYear[year].tickers[tk] = { gross: 0, wht: 0, net: 0, whtRate, currency: tx.currency || 'THB' }
+      byYear[year].tickers[tk].gross += grossTHB
+      byYear[year].tickers[tk].wht   += whtTHB
+      byYear[year].tickers[tk].net   += netTHB
+    })
+    return Object.entries(byYear)
+      .sort(([a], [b]) => Number(b) - Number(a))
+      .map(([year, data]) => ({
+        year,
+        ...data,
+        rows: Object.entries(data.tickers)
+          .sort(([, a], [, b]) => b.gross - a.gross)
+          .map(([ticker, d]) => ({ ticker, ...d })),
+      }))
+  }, [transactions, fxRate])
+
+  // Export all dividend transactions as WHT-enriched CSV
+  const handleExportCSV = () => {
+    const esc = s => `"${String(s ?? '').replace(/"/g, '""')}"`
+    const header = ['Date','Year','Ticker','Currency','Net (THB)','WHT Rate','WHT (THB)','Gross (THB)','Note']
+    const rows = transactions
+      .filter(tx => tx.type === 'Dividend' && tx.transacted_at && Number(tx.amount) > 0)
+      .sort((a, b) => a.transacted_at.localeCompare(b.transacted_at))
+      .map(tx => {
+        const isTHB = (tx.currency || 'THB') !== 'USD'
+        const netTHB = +(Number(tx.amount) * (isTHB ? 1 : fxRate)).toFixed(2)
+        const whtRate = parseWHTRate(tx.note)
+        const grossTHB = whtRate != null && whtRate > 0 ? +(netTHB / (1 - whtRate)).toFixed(2) : netTHB
+        const whtTHB  = +(grossTHB - netTHB).toFixed(2)
+        return [
+          tx.transacted_at.slice(0, 10),
+          tx.transacted_at.slice(0, 4),
+          tx.ticker || '',
+          tx.currency || 'THB',
+          netTHB, whtRate != null ? (whtRate * 100).toFixed(0) + '%' : '',
+          whtTHB, grossTHB,
+          esc(tx.note || ''),
+        ].join(',')
+      })
+    const csv = '﻿' + [header.join(','), ...rows].join('\n')
+    const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' })
+    const url = URL.createObjectURL(blob)
+    const a = document.createElement('a'); a.href = url
+    a.download = `lumen-dividend-tax-${new Date().getFullYear()}.csv`; a.click()
+    URL.revokeObjectURL(url)
+  }
+
+  if (summary.length === 0) return null
+
+  const colHd = { fontSize: 11, fontWeight: 600, color: "var(--ink-3)", textAlign: "right", padding: "6px 0" }
+  const cell  = { fontSize: 12, fontFamily: "var(--font-mono)", textAlign: "right", padding: "5px 0" }
+
+  return (
+    <div className="card col-span-12">
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 16 }}>
+        <div>
+          <h3 className="section-title">{th ? "สรุปภาษีปันผล (WHT)" : "Dividend Tax Summary (WHT)"}</h3>
+          <p className="muted" style={{ fontSize: 11, marginTop: 4 }}>
+            {th ? "กรอง TH 10% · US 15% · ยอดในสกุล THB ณ อัตรา FX ขณะนั้น"
+                : "TH 10% · US 15% withholding · amounts in THB at prevailing FX rate"}
+          </p>
+        </div>
+        <button className="btn btn-outline btn-sm" onClick={handleExportCSV}>
+          <Icon name="upload" size={13} style={{ transform: "rotate(180deg)" }} />
+          {th ? "ส่งออก CSV" : "Export CSV"}
+        </button>
+      </div>
+
+      {/* Table */}
+      <div style={{ overflowX: "auto" }}>
+        <table style={{ width: "100%", borderCollapse: "collapse" }}>
+          <thead>
+            <tr>
+              <th style={{ ...colHd, textAlign: "left" }}>{th ? "ปี" : "Year"}</th>
+              <th style={colHd}>{th ? "ปันผลรวม (Gross)" : "Gross dividend"}</th>
+              <th style={colHd}>{th ? "ภาษีหัก ณ ที่จ่าย" : "WHT withheld"}</th>
+              <th style={colHd}>{th ? "รับสุทธิ (Net)" : "Net received"}</th>
+              <th style={{ ...colHd, textAlign: "center", width: 32 }} />
+            </tr>
+          </thead>
+          <tbody>
+            {summary.map(yr => (
+              <>
+                {/* Year summary row */}
+                <tr key={yr.year}
+                  style={{ cursor: "pointer", borderTop: "1px solid var(--line)" }}
+                  onClick={() => toggleYear(yr.year)}>
+                  <td style={{ fontSize: 14, fontWeight: 700, padding: "8px 0" }}>
+                    {th ? `ปี ${yr.year}` : yr.year}
+                  </td>
+                  <td style={{ ...cell, fontWeight: 600 }}>{FMT.money(yr.gross, ccy)}</td>
+                  <td style={{ ...cell, fontWeight: 600, color: "var(--loss)" }}>
+                    −{FMT.money(yr.wht, ccy)}
+                  </td>
+                  <td style={{ ...cell, fontWeight: 600, color: "var(--gain)" }}>{FMT.money(yr.net, ccy)}</td>
+                  <td style={{ textAlign: "center", padding: "8px 0", color: "var(--ink-3)" }}>
+                    <span style={{ display: "inline-block", transform: expandedYears.has(yr.year) ? "rotate(90deg)" : "none", transition: "transform 0.15s" }}>›</span>
+                  </td>
+                </tr>
+                {/* Per-ticker breakdown */}
+                {expandedYears.has(yr.year) && yr.rows.map(r => (
+                  <tr key={r.ticker} style={{ background: "var(--bg-2)" }}>
+                    <td style={{ fontSize: 12, padding: "5px 0 5px 16px", color: "var(--ink-2)" }}>
+                      {r.ticker}
+                      <span className="chip chip-soft" style={{ marginLeft: 6, fontSize: 9, padding: "1px 5px" }}>
+                        {r.whtRate != null ? `WHT ${(r.whtRate * 100).toFixed(0)}%` : r.currency}
+                      </span>
+                    </td>
+                    <td style={cell}>{FMT.money(r.gross, ccy)}</td>
+                    <td style={{ ...cell, color: "var(--loss)" }}>−{FMT.money(r.wht, ccy)}</td>
+                    <td style={{ ...cell, color: "var(--gain)" }}>{FMT.money(r.net, ccy)}</td>
+                    <td />
+                  </tr>
+                ))}
+              </>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  )
+}
+
 /* ─── Dividend Calendar ──────────────────────────────────────────────────────── */
 function DividendCalendar({ divHistory, transactions, liveHoldings, lang }) {
   const th = lang === "th"
@@ -1304,6 +1463,11 @@ function AnalyticsDiv2({ t, lang, ccy, rows, totalValue, dataState, liveHoldings
           </div>
         )}
       </div>
+
+      {/* ── WHT / Tax Summary ── */}
+      {dataState === "live" && (
+        <DividendTaxSummary transactions={transactions} lang={lang} ccy={ccy} fxRate={fxRate} />
+      )}
 
       {/* ── Sync modal ── */}
       {syncModal && createPortal(
