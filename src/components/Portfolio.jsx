@@ -1669,6 +1669,8 @@ function DateSelectField({ label, value, onChange, lang }) {
 }
 
 // ─── Transactions Tab ────────────────────────────────────────────────────────
+const TX_PAGE_SIZE = 50
+
 function TransactionsTab({ transactions, holdings = [], loading, lang, ccy, fxRate = 36, onReload, portfolioId }) {
   const th = lang === "th"
   const [editTx, setEditTx] = useState(null)     // tx object being edited
@@ -1679,6 +1681,7 @@ function TransactionsTab({ transactions, holdings = [], loading, lang, ccy, fxRa
   const [fPeriod, setFPeriod] = useState("all")   // time-range filter (preset, "y:YYYY", or "custom")
   const [customFrom, setCustomFrom] = useState("") // custom range start (YYYY-MM-DD)
   const [customTo, setCustomTo] = useState("")     // custom range end
+  const [visibleCount, setVisibleCount] = useState(TX_PAGE_SIZE)
 
   const handleDelete = async (tx) => {
     if (!window.confirm(th ? `ลบรายการ ${tx.ticker || ''} ${tx.type} นี้?` : `Delete this ${tx.type} transaction for ${tx.ticker || ''}?`)) return
@@ -1731,6 +1734,9 @@ function TransactionsTab({ transactions, holdings = [], loading, lang, ccy, fxRa
   const typeBg    = { Buy: "var(--gain-soft)", Sell: "var(--loss-soft)", Dividend: "var(--accent-soft)", Deposit: "var(--bg-2)", Withdraw: "var(--bg-2)" }
   const typeLabel = { en: { Buy: "Buy", Sell: "Sell", Dividend: "Dividend", Deposit: "Deposit", Withdraw: "Withdraw" }, th: { Buy: "ซื้อ", Sell: "ขาย", Dividend: "ปันผล", Deposit: "ฝาก", Withdraw: "ถอน" } }
   const typeIcon  = { Buy: "buy", Sell: "sell", Dividend: "dividend", Deposit: "deposit", Withdraw: "deposit" }
+
+  // Reset page when any filter changes
+  useEffect(() => { setVisibleCount(TX_PAGE_SIZE) }, [fType, fQuery, fPeriod, customFrom, customTo])
 
   // Filter chips (only show types that actually exist) + ticker/name search
   const typesPresent = [...new Set(transactions.map(tx => tx.type || "Buy"))]
@@ -1917,10 +1923,22 @@ function TransactionsTab({ transactions, holdings = [], loading, lang, ccy, fxRa
                 {th ? "ไม่พบรายการที่ตรงกับตัวกรอง" : "No transactions match the filter"}
               </td></tr>
             )}
-            {shown.map(renderRow)}
+            {shown.slice(0, visibleCount).map(renderRow)}
           </tbody>
         </table>
       </section>
+      {visibleCount < shown.length && (
+        <div style={{ textAlign: "center", padding: "12px 0" }}>
+          <button
+            className="btn btn-outline btn-sm"
+            onClick={() => setVisibleCount(c => c + TX_PAGE_SIZE)}
+          >
+            {th
+              ? `โหลดเพิ่ม ${Math.min(TX_PAGE_SIZE, shown.length - visibleCount)} รายการ (เหลือ ${shown.length - visibleCount})`
+              : `Load ${Math.min(TX_PAGE_SIZE, shown.length - visibleCount)} more (${shown.length - visibleCount} remaining)`}
+          </button>
+        </div>
+      )}
 
       {editTx && (
         <EditTransactionModal

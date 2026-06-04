@@ -99,6 +99,8 @@ export async function deleteHolding(id) {
   return supabase.from('holdings').delete().eq('id', id)
 }
 
+// Lightweight recent-transactions fetch (latest 50). Use getAllTransactions()
+// when the full history is required (analytics, dividend sync, holdings rebuild).
 export async function getTransactions(portfolioId) {
   const { data } = await supabase
     .from('transactions')
