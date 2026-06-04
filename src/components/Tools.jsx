@@ -6,6 +6,36 @@ import { useAiAnalysis } from '../lib/useAiAnalysis'
 import { LUMEN_FMT, LUMEN_DERIVE, LUMEN_TARGETS, LUMEN_FX } from '../data'
 import { deriveHoldings } from '../lib/db'
 
+// ── Starter instrument recommendations per asset class ────────────────────────
+// Shown when a class has a target allocation but no holdings yet.
+// TH = SET-listed, US = NYSE/NASDAQ
+const STARTER_INSTRUMENTS = {
+  "TH Equity": [
+    { ticker: "TDEX",    name: "iShares SET50 ETF",    region: "TH", cls: "ETF" },
+    { ticker: "THAITDR", name: "Thai Market DR",        region: "TH", cls: "ETF" },
+    { ticker: "KTSET50", name: "KT SET50 Index ETF",   region: "TH", cls: "ETF" },
+  ],
+  "Bonds": [
+    { ticker: "AGG",   name: "iShares Core US Agg Bond", region: "US", cls: "ETF" },
+    { ticker: "BND",   name: "Vanguard Total Bond",       region: "US", cls: "ETF" },
+    { ticker: "TLT",   name: "iShares 20+ Yr Treasury",  region: "US", cls: "ETF" },
+  ],
+  "Gold": [
+    { ticker: "GLD",  name: "SPDR Gold Trust",     region: "US", cls: "Commodity" },
+    { ticker: "IAU",  name: "iShares Gold Trust",  region: "US", cls: "Commodity" },
+    { ticker: "GOLD", name: "Gold ETF (SET)",       region: "TH", cls: "Commodity" },
+  ],
+  "Crypto": [
+    { ticker: "BTC-USD", name: "Bitcoin",   region: "US", cls: "Crypto" },
+    { ticker: "ETH-USD", name: "Ethereum",  region: "US", cls: "Crypto" },
+  ],
+  "US Equity": [
+    { ticker: "VOO", name: "Vanguard S&P 500 ETF",  region: "US", cls: "ETF" },
+    { ticker: "QQQ", name: "Invesco Nasdaq 100 ETF", region: "US", cls: "ETF" },
+    { ticker: "SPY", name: "SPDR S&P 500 ETF",       region: "US", cls: "ETF" },
+  ],
+}
+
 // ── Default target allocations (sum = 1.0) ───────────────────────────────────
 const DEFAULT_TARGETS = {
   "TH Equity": 0.35,
@@ -1168,13 +1198,61 @@ export function ToolsPage({ t, lang, ccy, dataState, liveHoldings = [], prices =
             </div>
           </div>
 
-          {/* Missing-class warning */}
+          {/* Missing-class starter suggestions */}
           {targetMode === "class" && missingClasses.length > 0 && (
-            <div className="card" style={{ padding: "12px 16px", background: "oklch(0.97 0.03 60)", border: "1px solid oklch(0.85 0.08 60)" }}>
-              <div style={{ fontSize: 12.5, color: "oklch(0.42 0.10 60)", lineHeight: 1.5 }}>
-                ⚠ {th
-                  ? `คุณตั้งเป้าไว้ที่ ${missingClasses.join(", ")} แต่ยังไม่มีสินทรัพย์ในกลุ่มนี้ — ระบบจะแนะนำซื้อให้ไม่ได้ ต้องเพิ่มหลักทรัพย์ในกลุ่มดังกล่าวก่อน`
-                  : `You allocate to ${missingClasses.join(", ")} but hold nothing there yet — no buys can be suggested until you add holdings in those classes.`}
+            <div className="card" style={{ padding: "16px 18px", background: "oklch(0.97 0.04 220)", border: "1px solid oklch(0.85 0.08 220)" }}>
+              <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 12 }}>
+                <span style={{ fontSize: 16 }}>💡</span>
+                <div style={{ fontWeight: 600, fontSize: 13, color: "oklch(0.35 0.12 220)" }}>
+                  {th ? "เพิ่มหลักทรัพย์เข้าพอร์ตก่อนเพื่อรับคำแนะนำซื้อ" : "Add holdings to unlock buy suggestions for these classes"}
+                </div>
+              </div>
+              <div style={{ display: "grid", gap: 10 }}>
+                {missingClasses.map(cls => {
+                  const s = suggestions.find(x => x.name === cls)
+                  const targetAmt = s ? s.delta : 0
+                  const starters = STARTER_INSTRUMENTS[cls] || []
+                  return (
+                    <div key={cls} style={{ display: "flex", alignItems: "flex-start", gap: 12, padding: "10px 12px", borderRadius: 10, background: "white", border: "1px solid oklch(0.88 0.05 220)" }}>
+                      <div style={{ flexShrink: 0 }}>
+                        <ClassBadge name={cls} />
+                      </div>
+                      <div style={{ flex: 1, minWidth: 0 }}>
+                        <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: starters.length ? 6 : 0, flexWrap: "wrap" }}>
+                          {targetAmt > 0 && showResult && (
+                            <span style={{ fontSize: 12, fontFamily: "var(--font-mono)", fontWeight: 600, color: "oklch(0.35 0.12 220)" }}>
+                              {FMT.money(targetAmt, ccy, { compact: true })}
+                            </span>
+                          )}
+                          {targetAmt > 0 && showResult && (
+                            <span className="chip chip-gain" style={{ fontSize: 10 }}>
+                              {th ? "จัดสรรได้" : "to allocate"}
+                            </span>
+                          )}
+                        </div>
+                        {starters.length > 0 && (
+                          <div style={{ display: "flex", gap: 5, flexWrap: "wrap" }}>
+                            {starters.map(inst => (
+                              <div key={inst.ticker} style={{
+                                display: "inline-flex", alignItems: "center", gap: 5,
+                                padding: "3px 8px 3px 5px", borderRadius: 6,
+                                background: "var(--bg-2)", border: "1px solid var(--line)",
+                                fontSize: 11, cursor: "default",
+                              }}>
+                                <TickerLogo ticker={inst.ticker} region={inst.region} cls={inst.cls} size={16} />
+                                <span style={{ fontWeight: 600 }}>{inst.ticker}</span>
+                                <span className="muted" style={{ fontSize: 10 }}>{inst.name}</span>
+                              </div>
+                            ))}
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                  )
+                })}
+              </div>
+              <div style={{ fontSize: 10.5, color: "oklch(0.50 0.08 220)", marginTop: 10 }}>
+                {th ? "เพิ่ม 1 หลักทรัพย์จากรายการข้างต้นในหน้า Portfolio แล้ว Calculate ใหม่" : "Add one of the above to your Portfolio, then Calculate again to get exact buy amounts."}
               </div>
             </div>
           )}
