@@ -11,6 +11,7 @@ export const LUMEN_I18N = {
       analytics: "Analytics",
       tools: "Tools",
       planning: "Planning",
+      watchlist: "Watchlist",
     },
     common: {
       total: "Total",
@@ -156,6 +157,7 @@ export const LUMEN_I18N = {
       analytics: "วิเคราะห์",
       tools: "เครื่องมือ",
       planning: "วางแผน",
+      watchlist: "Watchlist",
     },
     common: {
       total: "รวม",

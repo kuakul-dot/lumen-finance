@@ -97,6 +97,7 @@ export function TopNav({ route, setRoute, lang, setLang, ccy, setCcy, t, session
     { id: "analytics", label: t.nav.analytics },
     { id: "tools",     label: t.nav.tools },
     { id: "planning",  label: t.nav.planning },
+    { id: "watchlist", label: t.nav.watchlist || "Watchlist" },
   ]
   const email    = session?.user?.email || ""
   const initials = email ? email.slice(0, 2).toUpperCase() : "ME"
@@ -378,11 +379,12 @@ function MenuRow({ icon, label, children }) {
 
 export function BottomNav({ route, setRoute, lang }) {
   const items = [
-    { id: "dashboard", labelTh: "หน้าหลัก", labelEn: "Home",     icon: "home"   },
-    { id: "portfolio", labelTh: "พอร์ต",    labelEn: "Portfolio", icon: "filter" },
-    { id: "analytics", labelTh: "วิเคราะห์", labelEn: "Analytics", icon: "spark"  },
-    { id: "tools",     labelTh: "เครื่องมือ", labelEn: "Tools",    icon: "sort"   },
-    { id: "planning",  labelTh: "วางแผน",    labelEn: "Plan",      icon: "leaf"   },
+    { id: "dashboard", labelTh: "หน้าหลัก", labelEn: "Home",      icon: "home"      },
+    { id: "portfolio", labelTh: "พอร์ต",    labelEn: "Portfolio",  icon: "filter"    },
+    { id: "analytics", labelTh: "วิเคราะห์", labelEn: "Analytics", icon: "spark"     },
+    { id: "tools",     labelTh: "เครื่องมือ", labelEn: "Tools",    icon: "sort"      },
+    { id: "planning",  labelTh: "วางแผน",    labelEn: "Plan",      icon: "leaf"      },
+    { id: "watchlist", labelTh: "ติดตาม",    labelEn: "Watch",     icon: "eye"       },
   ]
   return (
     <nav className="bottom-nav" aria-label="Bottom navigation">

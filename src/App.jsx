@@ -7,6 +7,7 @@ import { PortfolioPage } from './components/Portfolio'
 import { AnalyticsPage } from './components/Analytics'
 import { ToolsPage } from './components/Tools'
 import { PlanningPage } from './components/Planning'
+import { WatchlistPage } from './components/Watchlist'
 import { LUMEN_I18N, setLiveFxRate } from './data'
 import { supabase } from './lib/supabase'
 import { getOrCreatePortfolio, getPortfolios, addPortfolio, updatePortfolio, deletePortfolioCascade, getHoldingsSafe, getCashAccounts, deriveHoldings, recordSnapshot, exportData, addTransaction, rebuildAllHoldings, upsertCashAccount, upsertGoal } from './lib/db'
@@ -447,6 +448,8 @@ export default function App() {
         fxRate={fxRate}
       />
     )
+  } else if (route === "watchlist") {
+    page = <WatchlistPage lang={lang} ccy={ccy} fxRate={fxRate} />
   }
 
   return (
@@ -583,6 +586,7 @@ export default function App() {
             ["analytics",  lang === "th" ? "วิเคราะห์"  : "Analytics"],
             ["tools",      lang === "th" ? "เครื่องมือ" : "Tools"],
             ["planning",   lang === "th" ? "วางแผน"     : "Planning"],
+            ["watchlist",  "Watchlist"],
           ].map(([id, lbl]) => (
             <button key={id} onClick={() => setRoute(id)}
                     style={{
