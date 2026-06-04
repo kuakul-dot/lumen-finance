@@ -9,7 +9,7 @@ import { ToolsPage } from './components/Tools'
 import { PlanningPage } from './components/Planning'
 import { LUMEN_I18N, setLiveFxRate } from './data'
 import { supabase } from './lib/supabase'
-import { getOrCreatePortfolio, getPortfolios, addPortfolio, updatePortfolio, deletePortfolioCascade, getHoldingsSafe, getCashAccounts, deriveHoldings, recordSnapshot, exportData } from './lib/db'
+import { getOrCreatePortfolio, getPortfolios, addPortfolio, updatePortfolio, deletePortfolioCascade, getHoldingsSafe, getCashAccounts, deriveHoldings, recordSnapshot, exportData, addTransaction, rebuildAllHoldings, upsertCashAccount, upsertGoal } from './lib/db'
 import { fetchPrices, fetchFxRate } from './lib/prices'
 
 const TWEAK_DEFAULTS = {
@@ -261,6 +261,81 @@ export default function App() {
     downloadBlob('﻿' + [header.join(','), ...rows].join('\n'), `lumen-transactions-${today()}.csv`, 'text/csv;charset=utf-8;')
   }
 
+  // ── JSON Restore ──────────────────────────────────────────────────────────────
+  const importFileRef = useRef(null)
+  const [importing, setImporting] = useState(false)
+  const [importMsg, setImportMsg] = useState(null)  // { ok, text }
+
+  const handleImportJSON = async (e) => {
+    const file = e.target.files?.[0]
+    e.target.value = ''   // reset so same file can be picked again
+    if (!file || !portfolio?.id) return
+
+    let json
+    try {
+      json = JSON.parse(await file.text())
+    } catch {
+      setImportMsg({ ok: false, text: lang === "th" ? "ไฟล์ไม่ใช่ JSON ที่ถูกต้อง" : "Invalid JSON file" })
+      return
+    }
+
+    if (json.app !== 'Lumen' || !Array.isArray(json.transactions)) {
+      setImportMsg({ ok: false, text: lang === "th" ? "ไฟล์นี้ไม่ใช่ Lumen backup" : "This is not a Lumen backup file" })
+      return
+    }
+
+    const txCount   = json.transactions?.length  || 0
+    const cashCount = json.cash_accounts?.length || 0
+    const goalCount = json.goals?.length         || 0
+    const confirm   = window.confirm(
+      lang === "th"
+        ? `นำเข้า ${txCount} ธุรกรรม, ${cashCount} บัญชีเงินสด, ${goalCount} เป้าหมาย\nไปยังพอร์ต "${portfolio.name}"?\n\nธุรกรรมที่มีอยู่จะยังคงอยู่ (ไม่ลบทับ)`
+        : `Import ${txCount} transactions, ${cashCount} cash accounts, ${goalCount} goals\ninto portfolio "${portfolio.name}"?\n\nExisting data is kept — nothing is deleted.`
+    )
+    if (!confirm) return
+
+    setImporting(true)
+    setImportMsg(null)
+    let added = 0, skipped = 0, errors = 0
+    try {
+      // 1. Transactions — strip id + portfolio_id, let Supabase assign new ones
+      for (const tx of json.transactions) {
+        const { id, portfolio_id, created_at, updated_at, ...payload } = tx
+        const { error } = await addTransaction(portfolio.id, payload)
+        if (error) errors++; else added++
+      }
+
+      // 2. Rebuild all holdings from the complete transaction set
+      if (added > 0) await rebuildAllHoldings(portfolio.id)
+
+      // 3. Cash accounts — upsert by name so re-imports don't duplicate
+      for (const ca of (json.cash_accounts || [])) {
+        const { id, portfolio_id, created_at, updated_at, ...payload } = ca
+        await upsertCashAccount(portfolio.id, payload)
+      }
+
+      // 4. Goals — upsert by name
+      if (session?.user?.id) {
+        for (const g of (json.goals || [])) {
+          const { id, user_id, created_at, updated_at, ...payload } = g
+          await upsertGoal(session.user.id, payload)
+        }
+      }
+
+      await refreshHoldings()
+      setImportMsg({
+        ok: true,
+        text: lang === "th"
+          ? `นำเข้าสำเร็จ: ${added} ธุรกรรม${errors > 0 ? ` (${errors} ผิดพลาด)` : ''}`
+          : `Imported: ${added} transactions${errors > 0 ? ` (${errors} errors)` : ''}`
+      })
+    } catch (err) {
+      setImportMsg({ ok: false, text: `Error: ${err.message}` })
+    } finally {
+      setImporting(false)
+    }
+  }
+
   if (session === undefined) {
     return (
       <div style={{ display: "flex", alignItems: "center", justifyContent: "center", height: "100vh" }}>
@@ -447,6 +522,21 @@ export default function App() {
                 {lang === "th" ? "ธุรกรรม CSV" : "Transactions CSV"}
               </button>
             </div>
+            {/* Restore */}
+            <input ref={importFileRef} type="file" accept=".json" style={{ display: "none" }} onChange={handleImportJSON} />
+            <button
+              onClick={() => { setImportMsg(null); importFileRef.current?.click() }}
+              disabled={importing}
+              style={{ marginTop: 6, width: "100%", padding: "8px 10px", fontSize: 11, fontWeight: 500, borderRadius: 8, cursor: importing ? "not-allowed" : "pointer", background: "var(--bg-2)", color: importing ? "var(--ink-3)" : "var(--ink)", border: "1px solid var(--line)" }}>
+              {importing
+                ? (lang === "th" ? "กำลังนำเข้า…" : "Importing…")
+                : (lang === "th" ? "↩ นำเข้า JSON backup" : "↩ Restore JSON backup")}
+            </button>
+            {importMsg && (
+              <div style={{ marginTop: 6, padding: "8px 10px", borderRadius: 8, fontSize: 11, background: importMsg.ok ? "var(--gain-soft)" : "var(--loss-soft)", color: importMsg.ok ? "var(--gain)" : "var(--loss)", border: `1px solid ${importMsg.ok ? "var(--gain)" : "var(--loss)"}` }}>
+                {importMsg.text}
+              </div>
+            )}
           </>
         )}
 
