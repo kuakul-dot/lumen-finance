@@ -520,7 +520,8 @@ function LivePortfolioPage({ t, lang, ccy, portfolio, liveHoldings, prices = {},
                 <tr>
                   <SortHeader id="ticker" label={t.portfolio.holding} sortKey={sortKey} sortDir={sortDir} onSort={setSort} />
                   <SortHeader id="shares" label={t.portfolio.shares} sortKey={sortKey} sortDir={sortDir} onSort={setSort} align="right" />
-                  <SortHeader id="value"  label={th ? "ต้นทุน" : "Cost"} sortKey={sortKey} sortDir={sortDir} onSort={setSort} align="right" />
+                  <th className="num hide-mob">{th ? "ราคา / ทุน" : "Price / Cost"}</th>
+                  <SortHeader id="value"  label={th ? "ต้นทุนรวม" : "Cost"} sortKey={sortKey} sortDir={sortDir} onSort={setSort} align="right" />
                   <SortHeader id="value"  label={t.portfolio.value} sortKey={sortKey} sortDir={sortDir} onSort={setSort} align="right" />
                   <th className="num">{th ? "30 วัน" : "30d"}</th>
                   <SortHeader id="pl"     label={t.portfolio.pl} sortKey={sortKey} sortDir={sortDir} onSort={setSort} align="right" />
@@ -555,6 +556,25 @@ function LivePortfolioPage({ t, lang, ccy, portfolio, liveHoldings, prices = {},
                         </div>
                       </td>
                       <td className="num">{r.shares.toLocaleString(undefined, { maximumFractionDigits: 4 })}</td>
+                      <td className="num hide-mob">
+                        {r.hasLivePrice ? (
+                          <>
+                            <div style={{ fontWeight: 500, fontFamily: "var(--font-mono)", fontSize: 13 }}>
+                              {r.nativeCcy === 'USD' ? '$' : '฿'}{r.priceNative.toLocaleString(undefined, { maximumFractionDigits: 2 })}
+                            </div>
+                            <div style={{ fontSize: 11, color: r.priceNative >= r.costNative ? "var(--gain)" : "var(--loss)", fontFamily: "var(--font-mono)" }}>
+                              {r.nativeCcy === 'USD' ? '$' : '฿'}{r.costNative.toLocaleString(undefined, { maximumFractionDigits: 2 })} {th ? "ทุน" : "cost"}
+                            </div>
+                          </>
+                        ) : (
+                          <>
+                            <div style={{ fontFamily: "var(--font-mono)", fontSize: 13, color: "var(--ink-2)" }}>
+                              {r.nativeCcy === 'USD' ? '$' : '฿'}{r.costNative.toLocaleString(undefined, { maximumFractionDigits: 2 })}
+                            </div>
+                            <div className="muted" style={{ fontSize: 10 }}>{th ? "ราคาซื้อ" : "avg cost"}</div>
+                          </>
+                        )}
+                      </td>
                       <td className="num">{LUMEN_FMT.money(costBasis, ccy, { compact: true })}</td>
                       <td className="num">
                         <div style={{ fontWeight: 500 }}>{LUMEN_FMT.money(r.value, ccy, { compact: true })}</div>
