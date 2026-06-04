@@ -32,7 +32,8 @@ export function LineChart({ series, height = 280, fmt, labelFmt }) {
   const padL = 4, padR = 92, padT = 12, padB = 28
   const innerW = w - padL - padR
   const innerH = height - padT - padB
-  const allY = series.flatMap(s => s.data.map(d => d.y))
+  const allY = series.flatMap(s => s.data.map(d => d.y)).filter(Number.isFinite)
+  if (allY.length === 0) return null
   const yMin = Math.min(...allY)
   const yMax = Math.max(...allY)
   const yRange = (yMax - yMin) || 1

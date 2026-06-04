@@ -1852,10 +1852,12 @@ function AnalyticsGrowth({ t, lang, ccy, rows = [], fxRate = 36, totalValue, tot
 
     const days = growthPeriodDaysMap[chartPeriod] || 365
     const fromTs = (Date.now() - days * 86400000) / 1000
-    const window = raw.filter(p => p.t >= fromTs)
+    // Strip null/zero prices — Yahoo Finance sometimes returns null on holidays
+    const window = raw.filter(p => p.t >= fromTs && p.c != null && p.c > 0)
     if (window.length < 2) return null
 
     const base = window[0].c
+    if (!base || !Number.isFinite(base)) return null
     const locale = th ? "th-TH" : "en-US"
     const span = (window[window.length - 1].t - window[0].t) / 86400
     const mkLabel = ts => {
@@ -1872,11 +1874,16 @@ function AnalyticsGrowth({ t, lang, ccy, rows = [], fxRate = 36, totalValue, tot
     if (sampled[sampled.length - 1] !== window[window.length - 1])
       sampled = [...sampled, window[window.length - 1]]
 
+    const data = sampled
+      .map((p, i) => ({ x: i, y: (p.c / base - 1) * 100, label: mkLabel(p.t) }))
+      .filter(d => Number.isFinite(d.y))   // drop any surviving NaN/Infinity points
+    if (data.length < 2) return null
+
     return {
       name: BENCHMARKS[benchKey].label,
       color: BENCHMARKS[benchKey].color,
       dashed: true,
-      data: sampled.map((p, i) => ({ x: i, y: (p.c / base - 1) * 100, label: mkLabel(p.t) })),
+      data,
     }
   }, [benchKey, benchHistory, portSeries, chartPeriod, th])
 
