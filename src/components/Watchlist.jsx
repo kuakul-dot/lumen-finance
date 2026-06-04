@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from 'react'
+import { useState, useEffect, useCallback, useRef } from 'react'
 import { PageHead, Icon, TickerLogo } from './Nav'
 import { TradingViewChart } from './TradingViewChart'
 import { fetchHistory, fetchPrices, toYahooSymbol } from '../lib/prices'
@@ -287,34 +287,113 @@ function WatchlistCard({ item, priceData, sr, onRemove, onNoteChange, showChart,
   )
 }
 
-// ── Add-symbol modal ──────────────────────────────────────────────────────────
+// ── Map Yahoo Finance quoteType → app cls ────────────────────────────────────
+function mapQuoteType(type) {
+  switch ((type || '').toUpperCase()) {
+    case 'ETF':            return 'ETF'
+    case 'CRYPTOCURRENCY': return 'Crypto'
+    case 'FUTURE':         return 'Commodity'
+    default:               return 'Equity'
+  }
+}
+function mapExchange(exchange, symbol) {
+  if (exchange === 'SET' || (symbol || '').endsWith('.BK')) return 'TH'
+  return 'US'
+}
+
+// ── Add-symbol modal with live search autocomplete ────────────────────────────
 function AddModal({ th, onClose, onAdd }) {
-  const [symbol, setSymbol] = useState('')
-  const [name,   setName]   = useState('')
-  const [region, setRegion] = useState('US')
-  const [cls,    setCls]    = useState('Equity')
-  const [note,   setNote]   = useState('')
+  const [query,    setQuery]    = useState('')        // raw text in the search box
+  const [symbol,   setSymbol]   = useState('')        // confirmed ticker (after selection)
+  const [name,     setName]     = useState('')
+  const [region,   setRegion]   = useState('US')
+  const [cls,      setCls]      = useState('Equity')
+  const [note,     setNote]     = useState('')
+  const [results,  setResults]  = useState([])        // dropdown items
+  const [searching,setSearching]= useState(false)
+  const [dropOpen, setDropOpen] = useState(false)
+  const inputRef  = useRef(null)
+  const dropRef   = useRef(null)
 
-  // Auto-detect region/class from symbol input
+  // Debounced search while typing
   useEffect(() => {
-    const sym = symbol.trim().toUpperCase()
-    if (sym.endsWith('.BK'))            { setRegion('TH'); setCls('Equity') }
-    else if (/-(USD|USDT|USDC)$/i.test(sym)) { setRegion('US'); setCls('Crypto') }
-  }, [symbol])
+    const q = query.trim()
+    if (q.length < 1) { setResults([]); setDropOpen(false); return }
+    setSearching(true)
+    const t = setTimeout(async () => {
+      try {
+        const res  = await fetch(`/api/search?q=${encodeURIComponent(q)}`)
+        const data = await res.json()
+        const items = Array.isArray(data) ? data.slice(0, 7) : []
+        setResults(items)
+        setDropOpen(items.length > 0)
+      } catch {
+        setResults([])
+      } finally {
+        setSearching(false)
+      }
+    }, 350)
+    return () => clearTimeout(t)
+  }, [query])
 
+  // Close dropdown when clicking outside
+  useEffect(() => {
+    const handler = (e) => {
+      if (dropRef.current && !dropRef.current.contains(e.target) &&
+          inputRef.current && !inputRef.current.contains(e.target)) {
+        setDropOpen(false)
+      }
+    }
+    document.addEventListener('mousedown', handler)
+    return () => document.removeEventListener('mousedown', handler)
+  }, [])
+
+  // User picks a result from the dropdown → fill in all fields
+  const handleSelect = (r) => {
+    const sym = r.symbol.replace(/\.BK$/i, '')   // strip .BK — toYahooSymbol re-adds it
+    const reg = mapExchange(r.exchange, r.symbol)
+    const type = mapQuoteType(r.type)
+    setSymbol(sym)
+    setQuery(sym)
+    setName(r.name)
+    setRegion(reg)
+    setCls(type)
+    setResults([])
+    setDropOpen(false)
+  }
+
+  // Confirm and add — falls back to manual query if no dropdown selection made
   const handleAdd = () => {
-    // Strip .BK suffix — toYahooSymbol re-adds it for TH region
-    const sym = symbol.trim().toUpperCase().replace(/\.BK$/i, '')
+    const sym = (symbol || query).trim().toUpperCase().replace(/\.BK$/i, '')
     if (!sym) return
+    // Auto-detect region/cls from raw query when user didn't pick from dropdown
+    let finalRegion = region
+    let finalCls    = cls
+    if (!symbol) {
+      if (sym.endsWith('.BK') || region === 'TH') finalRegion = 'TH'
+      if (/-(USD|USDT|USDC)$/i.test(sym)) { finalRegion = 'US'; finalCls = 'Crypto' }
+    }
     onAdd({
       symbol: sym,
       name: name.trim() || sym,
-      region,
-      cls,
-      note: note.trim(),
+      region: finalRegion,
+      cls:    finalCls,
+      note:   note.trim(),
       addedAt: new Date().toISOString(),
     })
     onClose()
+  }
+
+  const hasSelection = Boolean(symbol)   // true after picking from dropdown
+
+  // Exchange label shown in each dropdown row
+  const exchangeLabel = (r) => {
+    const ex = r.exchange || ''
+    if (ex === 'SET')  return { label: 'SET', bg: 'oklch(0.94 0.04 200)' }
+    if (ex === 'NMS' || ex === 'NAS') return { label: 'NASDAQ', bg: 'oklch(0.94 0.04 250)' }
+    if (ex === 'NYQ')  return { label: 'NYSE', bg: 'oklch(0.94 0.04 250)' }
+    if (ex === 'CCC')  return { label: 'CRYPTO', bg: 'oklch(0.94 0.06 65)' }
+    return { label: ex || 'US', bg: 'oklch(0.94 0.04 250)' }
   }
 
   return (
@@ -327,69 +406,164 @@ function AddModal({ th, onClose, onAdd }) {
       }}>
       <div style={{
         background: 'var(--bg)', borderRadius: 18, padding: 28,
-        width: '100%', maxWidth: 400,
+        width: '100%', maxWidth: 420,
         boxShadow: '0 20px 60px rgba(0,0,0,0.2)',
       }}>
         <h3 style={{ margin: '0 0 4px', fontSize: 16, fontWeight: 600 }}>
           {th ? 'เพิ่มหุ้นใน Watchlist' : 'Add to watchlist'}
         </h3>
         <p style={{ margin: '0 0 18px', fontSize: 12, color: 'var(--ink-3)' }}>
-          {th
-            ? 'ใส่ Ticker เช่น AAPL, PTT, BTC-USD'
-            : 'Enter a ticker e.g. AAPL, PTT, BTC-USD'}
+          {th ? 'พิมพ์ชื่อหรือ Ticker เช่น AAPL, Apple, PTT, Bitcoin'
+              : 'Search by ticker or name — e.g. AAPL, Apple, PTT, Bitcoin'}
         </p>
 
         <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
-          {/* Ticker */}
-          <input
-            autoFocus
-            value={symbol}
-            onChange={e => setSymbol(e.target.value)}
-            onKeyDown={e => e.key === 'Enter' && symbol.trim() && handleAdd()}
-            placeholder="AAPL / PTT / VOO / BTC-USD"
-            style={{ padding: '10px 12px', borderRadius: 8, fontSize: 15, fontWeight: 600, letterSpacing: '-0.01em', border: '1.5px solid var(--line)', background: 'var(--bg)', color: 'var(--ink)', outline: 'none', fontFamily: 'var(--font-mono)' }}
-          />
 
-          {/* Company name */}
-          <input
-            value={name}
-            onChange={e => setName(e.target.value)}
-            placeholder={th ? 'ชื่อบริษัท (ไม่บังคับ)' : 'Company name (optional)'}
-            style={{ padding: '9px 12px', borderRadius: 8, fontSize: 13, border: '1.5px solid var(--line)', background: 'var(--bg)', color: 'var(--ink)', outline: 'none' }}
-          />
+          {/* ── Search input + dropdown ─────────────────────── */}
+          <div style={{ position: 'relative' }}>
+            <div style={{ position: 'relative', display: 'flex', alignItems: 'center' }}>
+              <Icon name="search" size={15}
+                style={{ position: 'absolute', left: 12, color: 'var(--ink-3)', pointerEvents: 'none' }} />
+              <input
+                ref={inputRef}
+                autoFocus
+                value={query}
+                onChange={e => { setQuery(e.target.value); setSymbol('') }}
+                onFocus={() => results.length > 0 && setDropOpen(true)}
+                onKeyDown={e => {
+                  if (e.key === 'Enter') { setDropOpen(false); handleAdd() }
+                  if (e.key === 'Escape') onClose()
+                }}
+                placeholder={th ? 'ค้นหา ticker หรือชื่อหุ้น…' : 'Search ticker or company name…'}
+                style={{
+                  width: '100%', padding: '11px 12px 11px 36px',
+                  borderRadius: 10, fontSize: 14, fontWeight: 600, letterSpacing: '-0.01em',
+                  border: `1.5px solid ${hasSelection ? 'var(--accent)' : 'var(--line)'}`,
+                  background: 'var(--bg)', color: 'var(--ink)', outline: 'none',
+                  fontFamily: 'var(--font-mono)', boxSizing: 'border-box',
+                  transition: 'border-color 0.15s',
+                }}
+              />
+              {searching && (
+                <span style={{ position: 'absolute', right: 12, fontSize: 11, color: 'var(--ink-3)' }}>…</span>
+              )}
+              {hasSelection && !searching && (
+                <span style={{ position: 'absolute', right: 12, color: 'var(--accent)', lineHeight: 0 }}>
+                  <Icon name="check" size={14} />
+                </span>
+              )}
+            </div>
 
-          {/* Region + Class */}
-          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
-            <div>
-              <div style={{ fontSize: 10, fontWeight: 700, color: 'var(--ink-3)', letterSpacing: '0.06em', textTransform: 'uppercase', marginBottom: 5 }}>
-                {th ? 'ตลาด' : 'Region'}
+            {/* Dropdown */}
+            {dropOpen && results.length > 0 && (
+              <div ref={dropRef} style={{
+                position: 'absolute', top: 'calc(100% + 4px)', left: 0, right: 0, zIndex: 600,
+                background: 'var(--bg)', border: '1.5px solid var(--line)',
+                borderRadius: 12, boxShadow: '0 8px 32px rgba(0,0,0,0.16)',
+                overflow: 'hidden',
+              }}>
+                {results.map((r, i) => {
+                  const { label, bg } = exchangeLabel(r)
+                  const isTH = r.exchange === 'SET' || r.symbol.endsWith('.BK')
+                  return (
+                    <button
+                      key={r.symbol + i}
+                      onMouseDown={e => { e.preventDefault(); handleSelect(r) }}
+                      style={{
+                        width: '100%', padding: '10px 14px',
+                        display: 'flex', alignItems: 'center', gap: 10,
+                        border: 'none', background: 'transparent',
+                        cursor: 'pointer', textAlign: 'left',
+                        borderBottom: i < results.length - 1 ? '1px solid var(--line)' : 'none',
+                      }}
+                      onMouseEnter={e => e.currentTarget.style.background = 'var(--bg-2)'}
+                      onMouseLeave={e => e.currentTarget.style.background = 'transparent'}
+                    >
+                      {/* Flag */}
+                      <span style={{ fontSize: 16, flexShrink: 0 }}>{isTH ? '🇹🇭' : '🇺🇸'}</span>
+
+                      {/* Symbol + Name */}
+                      <div style={{ flex: 1, minWidth: 0 }}>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                          <span style={{ fontWeight: 700, fontFamily: 'var(--font-mono)', fontSize: 13 }}>
+                            {r.symbol.replace(/\.BK$/i, '')}
+                          </span>
+                          <span style={{
+                            fontSize: 9, padding: '1px 5px', borderRadius: 99,
+                            background: bg, color: 'var(--ink-2)', fontWeight: 700,
+                            letterSpacing: '0.04em', flexShrink: 0,
+                          }}>{label}</span>
+                          <span style={{
+                            fontSize: 9, padding: '1px 5px', borderRadius: 99,
+                            background: 'var(--bg-2)', color: 'var(--ink-3)', fontWeight: 600, flexShrink: 0,
+                          }}>{mapQuoteType(r.type)}</span>
+                        </div>
+                        <div style={{ fontSize: 12, color: 'var(--ink-2)', marginTop: 2, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                          {r.name}
+                        </div>
+                      </div>
+                    </button>
+                  )
+                })}
               </div>
-              <div className="pill-toggle" style={{ width: '100%' }}>
-                <button className={region === 'US' ? 'on' : ''} onClick={() => setRegion('US')}>🇺🇸 US</button>
-                <button className={region === 'TH' ? 'on' : ''} onClick={() => setRegion('TH')}>🇹🇭 TH</button>
-              </div>
-            </div>
-            <div>
-              <div style={{ fontSize: 10, fontWeight: 700, color: 'var(--ink-3)', letterSpacing: '0.06em', textTransform: 'uppercase', marginBottom: 5 }}>
-                {th ? 'ประเภท' : 'Type'}
-              </div>
-              <select
-                value={cls}
-                onChange={e => setCls(e.target.value)}
-                style={{ width: '100%', padding: '7px 10px', borderRadius: 8, fontSize: 13, border: '1.5px solid var(--line)', background: 'var(--bg)', color: 'var(--ink)', outline: 'none' }}>
-                <option value="Equity">Equity</option>
-                <option value="ETF">ETF</option>
-                <option value="Crypto">Crypto</option>
-                <option value="Commodity">Commodity</option>
-              </select>
-            </div>
+            )}
           </div>
 
-          {/* Note */}
+          {/* ── Resolved details (shown after selection) ──── */}
+          {hasSelection && (
+            <div style={{
+              padding: '12px 14px', borderRadius: 10,
+              background: 'var(--accent-soft)', border: '1px solid var(--line)',
+              display: 'flex', alignItems: 'center', gap: 12,
+            }}>
+              <TickerLogo ticker={symbol} region={region} cls={cls} size={32} />
+              <div style={{ flex: 1, minWidth: 0 }}>
+                <div style={{ fontWeight: 700, fontSize: 14, fontFamily: 'var(--font-mono)' }}>{symbol}</div>
+                <div style={{ fontSize: 12, color: 'var(--ink-2)', marginTop: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{name}</div>
+              </div>
+              <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: 3 }}>
+                <span style={{ fontSize: 10, padding: '2px 6px', borderRadius: 99, background: region === 'TH' ? 'oklch(0.94 0.04 200)' : cls === 'Crypto' ? 'oklch(0.94 0.06 65)' : 'oklch(0.94 0.04 250)', fontWeight: 700, color: 'var(--ink-2)' }}>
+                  {region}
+                </span>
+                <span style={{ fontSize: 10, padding: '2px 6px', borderRadius: 99, background: 'var(--bg-2)', fontWeight: 600, color: 'var(--ink-3)' }}>
+                  {cls}
+                </span>
+              </div>
+            </div>
+          )}
+
+          {/* ── Manual override: Region + Class (only shown when no selection yet) */}
+          {!hasSelection && query.trim().length > 0 && (
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
+              <div>
+                <div style={{ fontSize: 10, fontWeight: 700, color: 'var(--ink-3)', letterSpacing: '0.06em', textTransform: 'uppercase', marginBottom: 5 }}>
+                  {th ? 'ตลาด' : 'Region'}
+                </div>
+                <div className="pill-toggle" style={{ width: '100%' }}>
+                  <button className={region === 'US' ? 'on' : ''} onClick={() => setRegion('US')}>🇺🇸 US</button>
+                  <button className={region === 'TH' ? 'on' : ''} onClick={() => setRegion('TH')}>🇹🇭 TH</button>
+                </div>
+              </div>
+              <div>
+                <div style={{ fontSize: 10, fontWeight: 700, color: 'var(--ink-3)', letterSpacing: '0.06em', textTransform: 'uppercase', marginBottom: 5 }}>
+                  {th ? 'ประเภท' : 'Type'}
+                </div>
+                <select value={cls} onChange={e => setCls(e.target.value)}
+                  style={{ width: '100%', padding: '7px 10px', borderRadius: 8, fontSize: 13, border: '1.5px solid var(--line)', background: 'var(--bg)', color: 'var(--ink)', outline: 'none' }}>
+                  <option value="Equity">Equity</option>
+                  <option value="ETF">ETF</option>
+                  <option value="Crypto">Crypto</option>
+                  <option value="Commodity">Commodity</option>
+                </select>
+              </div>
+            </div>
+          )}
+
+          {/* ── Note ─────────────────────────────────────────── */}
           <input
             value={note}
             onChange={e => setNote(e.target.value)}
-            placeholder={th ? '📝 บันทึก (ไม่บังคับ)' : '📝 Note (optional)'}
+            placeholder={th ? '📝 บันทึก (เช่น รอ Pullback ที่ S1)' : '📝 Note (optional)'}
             style={{ padding: '9px 12px', borderRadius: 8, fontSize: 13, border: '1.5px solid var(--line)', background: 'var(--bg)', color: 'var(--ink)', outline: 'none' }}
           />
         </div>
@@ -398,7 +572,7 @@ function AddModal({ th, onClose, onAdd }) {
           <button className="btn btn-outline" style={{ flex: 1 }} onClick={onClose}>
             {th ? 'ยกเลิก' : 'Cancel'}
           </button>
-          <button className="btn" style={{ flex: 1 }} onClick={handleAdd} disabled={!symbol.trim()}>
+          <button className="btn" style={{ flex: 1 }} onClick={handleAdd} disabled={!query.trim()}>
             {th ? '+ เพิ่ม' : '+ Add'}
           </button>
         </div>
