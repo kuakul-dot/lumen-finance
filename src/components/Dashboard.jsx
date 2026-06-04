@@ -9,7 +9,7 @@ import {
   LUMEN_ACTIVITY, LUMEN_UPCOMING, LUMEN_INSIGHTS, LUMEN_FX,
 } from '../data'
 import { deriveHoldings, upsertCashAccount, deleteCashAccount, getGoals, getAllTransactions } from '../lib/db'
-import { fetchHistory, toYahooSymbol } from '../lib/prices'
+import { fetchHistory, toYahooSymbol, clearPriceCache } from '../lib/prices'
 
 function makeGreeting(name, lang) {
   const h = new Date().getHours()
@@ -38,13 +38,14 @@ function makeGreetingSub(lang) {
   return lang === "th" ? subTh[slot] : subEn[slot]
 }
 
-export function DashboardPage({ t, lang, ccy, setRoute, dataState, liveHoldings = [], prices = {}, cashAccounts = [], portfolio, refreshCashAccounts, displayName = '', fxRate = 36 }) {
+export function DashboardPage({ t, lang, ccy, setRoute, dataState, liveHoldings = [], prices = {}, cashAccounts = [], portfolio, refreshHoldings, refreshCashAccounts, displayName = '', fxRate = 36 }) {
   if (dataState === "empty") return <DashboardEmpty t={t} lang={lang} setRoute={setRoute} />
   if (dataState === "live") return (
     <LiveDashboardPage
       t={t} lang={lang} ccy={ccy} setRoute={setRoute}
       liveHoldings={liveHoldings} prices={prices}
       cashAccounts={cashAccounts} portfolio={portfolio}
+      refreshHoldings={refreshHoldings}
       refreshCashAccounts={refreshCashAccounts}
       displayName={displayName}
       fxRate={fxRate}
@@ -441,9 +442,26 @@ function groupRowsByTicker(rows) {
 }
 
 // ─── Live Dashboard — matches demo layout with real data ─────────────────────
-function LiveDashboardPage({ t, lang, ccy, setRoute, liveHoldings, prices = {}, cashAccounts = [], portfolio, refreshCashAccounts, displayName = '', fxRate = 36 }) {
+function LiveDashboardPage({ t, lang, ccy, setRoute, liveHoldings, prices = {}, cashAccounts = [], portfolio, refreshHoldings, refreshCashAccounts, displayName = '', fxRate = 36 }) {
   const th = lang === "th"
   const [showCashModal, setShowCashModal] = useState(null)
+  const [refreshing, setRefreshing] = useState(false)
+  const [lastRefreshedAt, setLastRefreshedAt] = useState(null)
+  const [refreshCooldown, setRefreshCooldown] = useState(false)
+
+  const handleRefresh = async () => {
+    if (refreshing || refreshCooldown || !refreshHoldings) return
+    setRefreshing(true)
+    clearPriceCache()
+    try {
+      await refreshHoldings()
+      setLastRefreshedAt(new Date())
+    } finally {
+      setRefreshing(false)
+      setRefreshCooldown(true)
+      setTimeout(() => setRefreshCooldown(false), 30_000)
+    }
+  }
   // ── AI analysis (optional feature — auto-hides when /api/analyze 503s) ──
   const [aiAvailable, setAiAvailable] = useState(false)
   const ai = useAiAnalysis()
@@ -965,13 +983,35 @@ function LiveDashboardPage({ t, lang, ccy, setRoute, liveHoldings, prices = {}, 
         title={makeGreeting(displayName, lang)}
         sub={makeGreetingSub(lang)}
         right={
-          <div style={{ display: "flex", gap: 8 }}>
+          <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
             {aiAvailable && (
               <button className="btn btn-outline btn-sm" onClick={runAi} disabled={ai.loading}
                 title={th ? "วิเคราะห์พอร์ตด้วย AI" : "Analyse portfolio with AI"}>
                 <Icon name="spark" size={14} /> {ai.loading ? (th ? "กำลังวิเคราะห์…" : "Analysing…") : (th ? "วิเคราะห์ด้วย AI" : "AI analysis")}
               </button>
             )}
+            {/* Price refresh */}
+            <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+              {lastRefreshedAt && !refreshing && (
+                <span style={{ fontSize: 11, color: "var(--ink-3)", fontFamily: "var(--font-mono)" }}>
+                  {th ? "อัปเดต " : "Updated "}{lastRefreshedAt.toLocaleTimeString(th ? "th-TH" : "en-US", { hour: "2-digit", minute: "2-digit" })}
+                </span>
+              )}
+              <button
+                className="btn btn-outline btn-sm"
+                onClick={handleRefresh}
+                disabled={refreshing || refreshCooldown}
+                title={
+                  refreshCooldown ? (th ? "รอสักครู่…" : "Please wait…")
+                  : (th ? "รีเฟรชราคา" : "Refresh prices")
+                }
+                style={{ padding: "6px 10px", opacity: refreshCooldown ? 0.45 : 1 }}
+              >
+                <span className={refreshing ? "spin" : ""} style={{ display: "inline-flex" }}>
+                  <Icon name="refresh" size={14} />
+                </span>
+              </button>
+            </div>
             <button className="btn btn-outline btn-sm" onClick={() => setShowCashModal('add')}>
               <Icon name="deposit" size={14} /> {th ? "เพิ่มบัญชีเงินสด" : "Add cash account"}
             </button>

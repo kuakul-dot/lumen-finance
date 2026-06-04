@@ -291,6 +291,7 @@ export default function App() {
         prices={prices}
         cashAccounts={cashAccounts}
         portfolio={portfolio}
+        refreshHoldings={refreshHoldings}
         refreshCashAccounts={refreshCashAccounts}
         displayName={displayName}
         fxRate={fxRate}

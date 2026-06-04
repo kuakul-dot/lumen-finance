@@ -556,6 +556,11 @@ hr.rule { border: 0; border-top: 1px solid var(--line); margin: 24px 0; }
   from { opacity: 0; transform: scale(0.97) translateY(-4px); }
   to   { opacity: 1; transform: none; }
 }
+@keyframes spin {
+  from { transform: rotate(0deg); }
+  to   { transform: rotate(360deg); }
+}
+.spin { animation: spin 0.8s linear infinite; display: inline-flex; }
 
 /* Sparkline */
 .spark { display: inline-block; vertical-align: middle; }
