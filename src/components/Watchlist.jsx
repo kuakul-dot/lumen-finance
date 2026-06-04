@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback, useRef, useMemo } from 'react'
+import { useState, useEffect, useCallback, useRef, useMemo, createPortal } from 'react'
 import { PageHead, Icon, TickerLogo } from './Nav'
 import { TradingViewChart } from './TradingViewChart'
 import { LineChart } from './Charts'
@@ -280,8 +280,13 @@ function WatchlistCard({ item, priceData, sr, onRemove, onNoteChange, showChart,
     return () => { cancelled = true }
   }, [showChart, chartMode, chartRange, item.symbol, item.region, item.cls])
 
+  // Fullscreen modal state
+  const [fullscreen, setFullscreen] = useState(false)
+
   // Reset state when card is collapsed
-  useEffect(() => { if (!showChart) { setChartMode('sr'); setOverlays({ fib: false, ma: false, vp: false }) } }, [showChart])
+  useEffect(() => {
+    if (!showChart) { setChartMode('sr'); setOverlays({ fib: false, ma: false, vp: false }); setFullscreen(false) }
+  }, [showChart])
 
   // ── Compute overlays from chartBars ────────────────────────────────────────
   const chartSR  = useMemo(() => chartBars && livePrice ? computeSR(chartBars, livePrice) : null, [chartBars, livePrice])
@@ -343,6 +348,7 @@ function WatchlistCard({ item, priceData, sr, onRemove, onNoteChange, showChart,
   ]
 
   return (
+    <>
     <div style={{
       background: 'var(--bg)',
       border: '1px solid var(--line)',
@@ -444,8 +450,8 @@ function WatchlistCard({ item, priceData, sr, onRemove, onNoteChange, showChart,
       {showChart && (
         <div style={{ padding: '0 var(--pad-card) var(--pad-card)' }}>
 
-          {/* Mode toggle: S/R Chart ↔ TradingView */}
-          <div style={{ display: 'flex', gap: 6, marginBottom: 12 }}>
+          {/* Mode toggle: S/R Chart ↔ TradingView + Expand button */}
+          <div style={{ display: 'flex', gap: 6, marginBottom: 12, alignItems: 'center' }}>
             <button onClick={() => setChartMode('sr')} style={{
               flex: 1, padding: '7px 0', borderRadius: 8, fontSize: 11, fontWeight: 600, cursor: 'pointer',
               border: '1.5px solid var(--line)',
@@ -461,6 +467,13 @@ function WatchlistCard({ item, priceData, sr, onRemove, onNoteChange, showChart,
               color: chartMode === 'tv' ? 'var(--bg)' : 'var(--ink)',
             }}>
               📊 TradingView
+            </button>
+            {/* Fullscreen / expand button */}
+            <button onClick={() => setFullscreen(true)} title={th ? 'เต็มหน้าจอ' : 'Full screen'}
+              style={{ padding: '7px 9px', borderRadius: 8, border: '1.5px solid var(--line)', background: 'var(--bg-2)', color: 'var(--ink-2)', cursor: 'pointer', flexShrink: 0, lineHeight: 0 }}>
+              <svg width={13} height={13} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2.2} strokeLinecap="round" strokeLinejoin="round">
+                <path d="M15 3h6v6M9 21H3v-6M21 3l-7 7M3 21l7-7"/>
+              </svg>
             </button>
           </div>
 
@@ -579,6 +592,163 @@ function WatchlistCard({ item, priceData, sr, onRemove, onNoteChange, showChart,
         </div>
       )}
     </div>
+
+    {/* ── Fullscreen modal (portal to document.body) ─────────────────────── */}
+    {fullscreen && createPortal(
+      <div
+        onClick={e => e.target === e.currentTarget && setFullscreen(false)}
+        style={{
+          position: 'fixed', inset: 0, zIndex: 1000,
+          background: 'rgba(0,0,0,0.78)',
+          display: 'flex', alignItems: 'center', justifyContent: 'center',
+          padding: 16,
+        }}>
+        <div style={{
+          background: 'var(--bg)', borderRadius: 18,
+          width: '100%', maxWidth: 1120,
+          maxHeight: '95vh',
+          display: 'flex', flexDirection: 'column',
+          overflow: 'hidden',
+          boxShadow: '0 24px 80px rgba(0,0,0,0.35)',
+        }}>
+
+          {/* ── Modal header ─────────────────────────────────── */}
+          <div style={{
+            padding: '14px 20px', borderBottom: '1px solid var(--line)',
+            display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap',
+          }}>
+            <TickerLogo ticker={item.symbol} region={item.region} cls={item.cls} size={30} />
+            <div style={{ flex: 1, minWidth: 0 }}>
+              <span style={{ fontWeight: 700, fontSize: 15 }}>{item.symbol}</span>
+              <span style={{ marginLeft: 8, color: 'var(--ink-2)', fontSize: 12, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{item.name}</span>
+            </div>
+            {livePrice != null && (
+              <span style={{ fontFamily: 'var(--font-mono)', fontWeight: 700, fontSize: 17 }}>
+                {fmtPrice(livePrice, currency)}{' '}
+                <span style={{ fontSize: 12, color: gain ? 'var(--gain)' : loss ? 'var(--loss)' : 'var(--ink-3)' }}>
+                  {gain ? '+' : ''}{changePct.toFixed(2)}%
+                </span>
+              </span>
+            )}
+            {/* Mode toggle */}
+            <div style={{ display: 'flex', gap: 5 }}>
+              {[['sr', '📈 S/R'], ['tv', '📊 TradingView']].map(([m, lbl]) => (
+                <button key={m} onClick={() => setChartMode(m)} style={{
+                  padding: '6px 12px', borderRadius: 8, fontSize: 11, fontWeight: 600, cursor: 'pointer',
+                  border: '1.5px solid var(--line)',
+                  background: chartMode === m ? (m === 'sr' ? 'var(--accent)' : 'var(--ink)') : 'var(--bg-2)',
+                  color: chartMode === m ? (m === 'sr' ? '#fff' : 'var(--bg)') : 'var(--ink)',
+                }}>{lbl}</button>
+              ))}
+            </div>
+            {/* Close button */}
+            <button onClick={() => setFullscreen(false)}
+              style={{ padding: 8, borderRadius: 8, border: '1.5px solid var(--line)', background: 'var(--bg-2)', color: 'var(--ink)', cursor: 'pointer', lineHeight: 0, flexShrink: 0 }}
+              title={th ? 'ปิด' : 'Close'}>
+              <svg width={14} height={14} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2.2} strokeLinecap="round">
+                <path d="M18 6 6 18M6 6l12 12"/>
+              </svg>
+            </button>
+          </div>
+
+          {/* ── Modal body ────────────────────────────────────── */}
+          <div style={{ flex: 1, minHeight: 0, overflow: 'auto', padding: '14px 20px 20px' }}>
+            {(() => {
+              const fsH = Math.max(380, (typeof window !== 'undefined' ? window.innerHeight : 800) - 280)
+              return chartMode === 'sr' ? (
+                <>
+                  {/* Range + Overlays */}
+                  <div style={{ display: 'flex', gap: 4, marginBottom: 8, flexWrap: 'wrap', alignItems: 'center' }}>
+                    {CHART_RANGES.map(r => (
+                      <button key={r} onClick={() => setChartRange(r)} style={{
+                        padding: '4px 12px', borderRadius: 6, fontSize: 12, fontWeight: 600, cursor: 'pointer',
+                        border: '1px solid var(--line)',
+                        background: chartRange === r ? 'var(--ink)' : 'transparent',
+                        color: chartRange === r ? 'var(--bg)' : 'var(--ink-2)',
+                      }}>{RANGE_LABEL[r]}</button>
+                    ))}
+                    {loadingChart && <span style={{ fontSize: 11, color: 'var(--ink-3)', marginLeft: 4 }}>…</span>}
+                    <span style={{ marginLeft: 8, fontSize: 10, color: 'var(--ink-3)' }}>Overlay:</span>
+                    {[
+                      { key: 'fib', label: 'Fibonacci',    color: 'oklch(0.65 0.14 55)'  },
+                      { key: 'ma',  label: 'MA20/50/200',  color: 'oklch(0.50 0.12 250)' },
+                      { key: 'vp',  label: 'Vol Profile',  color: 'oklch(0.60 0.14 90)'  },
+                    ].map(o => (
+                      <button key={o.key} onClick={() => toggleOverlay(o.key)} style={{
+                        padding: '3px 10px', borderRadius: 6, fontSize: 10, fontWeight: 600, cursor: 'pointer',
+                        border: `1.5px solid ${overlays[o.key] ? o.color : 'var(--line)'}`,
+                        background: overlays[o.key] ? o.color + '22' : 'transparent',
+                        color: overlays[o.key] ? o.color : 'var(--ink-3)',
+                      }}>{o.label}</button>
+                    ))}
+                  </div>
+
+                  {/* Full-height chart */}
+                  {lineSeries ? (
+                    <div style={{ background: 'var(--bg-2)', borderRadius: 12, padding: '12px 4px 6px', border: '1px solid var(--line)' }}>
+                      <LineChart series={lineSeries} height={fsH} hLines={hLines}
+                        fmt={v => fmtPrice(v, currency)} labelFmt={d => d.label} />
+                    </div>
+                  ) : loadingChart ? (
+                    <div style={{ height: 200, display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--ink-3)' }}>
+                      {th ? 'กำลังโหลดกราฟ…' : 'Loading chart…'}
+                    </div>
+                  ) : (
+                    <div style={{ height: 120, display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--ink-3)' }}>
+                      {th ? 'ไม่มีข้อมูล' : 'No data available'}
+                    </div>
+                  )}
+
+                  {/* Legend */}
+                  <div style={{ display: 'flex', gap: 12, marginTop: 10, flexWrap: 'wrap' }}>
+                    {displaySR && <>
+                      {displaySR.resistances.map((lvl, i) => (
+                        <span key={`r${i}`} style={{ fontSize: 11, color: 'var(--loss)', display: 'flex', alignItems: 'center', gap: 5, fontFamily: 'var(--font-mono)' }}>
+                          <span style={{ width: 14, borderTop: '2px dashed var(--loss)', display: 'inline-block' }} />
+                          R{i + 1} {fmtPrice(lvl.price, currency)} <StrengthDots count={lvl.strength} color="var(--loss)" />
+                        </span>
+                      ))}
+                      {displaySR.supports.map((lvl, i) => (
+                        <span key={`s${i}`} style={{ fontSize: 11, color: 'var(--gain)', display: 'flex', alignItems: 'center', gap: 5, fontFamily: 'var(--font-mono)' }}>
+                          <span style={{ width: 14, borderTop: '2px dashed var(--gain)', display: 'inline-block' }} />
+                          S{i + 1} {fmtPrice(lvl.price, currency)} <StrengthDots count={lvl.strength} color="var(--gain)" />
+                        </span>
+                      ))}
+                    </>}
+                    {chartMAs && overlays.ma && [
+                      chartMAs.ma20  && { lbl: 'MA20',  c: 'oklch(0.60 0.14 300)', v: chartMAs.ma20  },
+                      chartMAs.ma50  && { lbl: 'MA50',  c: 'oklch(0.50 0.12 250)', v: chartMAs.ma50  },
+                      chartMAs.ma200 && { lbl: 'MA200', c: 'oklch(0.45 0.08 220)', v: chartMAs.ma200 },
+                    ].filter(Boolean).map(m => (
+                      <span key={m.lbl} style={{ fontSize: 11, color: m.c, display: 'flex', alignItems: 'center', gap: 5, fontFamily: 'var(--font-mono)' }}>
+                        <span style={{ width: 14, borderTop: `2px dashed ${m.c}`, display: 'inline-block' }} />
+                        {m.lbl} {fmtPrice(m.v, currency)}
+                      </span>
+                    ))}
+                    {chartVP && overlays.vp && (
+                      <span style={{ fontSize: 11, color: 'oklch(0.65 0.16 90)', display: 'flex', alignItems: 'center', gap: 5, fontFamily: 'var(--font-mono)' }}>
+                        <span style={{ width: 14, borderTop: '2px dashed oklch(0.65 0.16 90)', display: 'inline-block' }} />
+                        POC {fmtPrice(chartVP.poc, currency)}
+                      </span>
+                    )}
+                  </div>
+                  <p style={{ margin: '8px 0 0', fontSize: 10, color: 'var(--ink-3)' }}>
+                    {th
+                      ? '● = OHLC pivot touches · Fib = swing H→L · POC = ราคาที่ trade มากที่สุด'
+                      : '● = OHLC pivot touches · Fib = swing H→L · POC = highest-volume price'}
+                  </p>
+                </>
+              ) : (
+                // TradingView fullscreen
+                <TradingViewChart ticker={tvTicker} region={item.region} height={fsH} />
+              )
+            })()}
+          </div>
+        </div>
+      </div>,
+      document.body
+    )}
+    </>
   )
 }
 
