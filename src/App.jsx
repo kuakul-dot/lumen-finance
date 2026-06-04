@@ -8,6 +8,7 @@ import { AnalyticsPage } from './components/Analytics'
 import { ToolsPage } from './components/Tools'
 import { PlanningPage } from './components/Planning'
 import { WatchlistPage } from './components/Watchlist'
+import { DCAPage } from './components/DCA'
 import { LUMEN_I18N, setLiveFxRate } from './data'
 import { supabase } from './lib/supabase'
 import { getOrCreatePortfolio, getPortfolios, addPortfolio, updatePortfolio, deletePortfolioCascade, getHoldingsSafe, getCashAccounts, deriveHoldings, recordSnapshot, exportData, addTransaction, rebuildAllHoldings, upsertCashAccount, upsertGoal } from './lib/db'
@@ -450,6 +451,8 @@ export default function App() {
     )
   } else if (route === "watchlist") {
     page = <WatchlistPage lang={lang} ccy={ccy} fxRate={fxRate} />
+  } else if (route === "dca") {
+    page = <DCAPage lang={lang} ccy={ccy} fxRate={fxRate} />
   }
 
   return (
@@ -587,6 +590,7 @@ export default function App() {
             ["tools",      lang === "th" ? "เครื่องมือ" : "Tools"],
             ["planning",   lang === "th" ? "วางแผน"     : "Planning"],
             ["watchlist",  "Watchlist"],
+            ["dca",        "DCA Calculator"],
           ].map(([id, lbl]) => (
             <button key={id} onClick={() => setRoute(id)}
                     style={{

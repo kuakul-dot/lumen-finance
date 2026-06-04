@@ -98,6 +98,7 @@ export function TopNav({ route, setRoute, lang, setLang, ccy, setCcy, t, session
     { id: "tools",     label: t.nav.tools },
     { id: "planning",  label: t.nav.planning },
     { id: "watchlist", label: t.nav.watchlist || "Watchlist" },
+    { id: "dca",       label: t.nav.dca       || "DCA"       },
   ]
   const email    = session?.user?.email || ""
   const initials = email ? email.slice(0, 2).toUpperCase() : "ME"
@@ -385,6 +386,7 @@ export function BottomNav({ route, setRoute, lang }) {
     { id: "tools",     labelTh: "เครื่องมือ", labelEn: "Tools",    icon: "sort"      },
     { id: "planning",  labelTh: "วางแผน",    labelEn: "Plan",      icon: "leaf"      },
     { id: "watchlist", labelTh: "ติดตาม",    labelEn: "Watch",     icon: "eye"       },
+    { id: "dca",       labelTh: "DCA",       labelEn: "DCA",       icon: "calc"      },
   ]
   return (
     <nav className="bottom-nav" aria-label="Bottom navigation">
@@ -466,6 +468,7 @@ export function Icon({ name, size = 18 }) {
     case "refresh":  return (<svg {...props}><path d="M3 12a9 9 0 0 1 9-9 9.75 9.75 0 0 1 6.74 2.74L21 8"/><path d="M21 3v5h-5"/><path d="M21 12a9 9 0 0 1-9 9 9.75 9.75 0 0 1-6.74-2.74L3 16"/><path d="M8 16H3v5"/></svg>)
     case "chart":    return (<svg {...props}><line x1="3" y1="20" x2="21" y2="20"/><rect x="5" y="11" width="3" height="8"/><rect x="11" y="6" width="3" height="13"/><rect x="17" y="13" width="3" height="6"/></svg>)
     case "trash":    return (<svg {...props}><path d="M3 6h18"/><path d="M19 6l-1 14H6L5 6"/><path d="M8 6V4h8v2"/></svg>)
+    case "calc":     return (<svg {...props}><rect x="5" y="2" width="14" height="20" rx="2"/><path d="M9 7h6"/><circle cx="9" cy="12" r="0.8" fill="currentColor" stroke="none"/><circle cx="12" cy="12" r="0.8" fill="currentColor" stroke="none"/><circle cx="15" cy="12" r="0.8" fill="currentColor" stroke="none"/><circle cx="9" cy="17" r="0.8" fill="currentColor" stroke="none"/><circle cx="12" cy="17" r="0.8" fill="currentColor" stroke="none"/><circle cx="15" cy="17" r="0.8" fill="currentColor" stroke="none"/></svg>)
     default: return null
   }
 }
