@@ -1683,6 +1683,9 @@ function TransactionsTab({ transactions, holdings = [], loading, lang, ccy, fxRa
   const [customTo, setCustomTo] = useState("")     // custom range end
   const [visibleCount, setVisibleCount] = useState(TX_PAGE_SIZE)
 
+  // Reset page when any filter changes — must be before early returns (Rules of Hooks)
+  useEffect(() => { setVisibleCount(TX_PAGE_SIZE) }, [fType, fQuery, fPeriod, customFrom, customTo])
+
   const handleDelete = async (tx) => {
     if (!window.confirm(th ? `ลบรายการ ${tx.ticker || ''} ${tx.type} นี้?` : `Delete this ${tx.type} transaction for ${tx.ticker || ''}?`)) return
     setDeleting(tx.id)
@@ -1734,9 +1737,6 @@ function TransactionsTab({ transactions, holdings = [], loading, lang, ccy, fxRa
   const typeBg    = { Buy: "var(--gain-soft)", Sell: "var(--loss-soft)", Dividend: "var(--accent-soft)", Deposit: "var(--bg-2)", Withdraw: "var(--bg-2)" }
   const typeLabel = { en: { Buy: "Buy", Sell: "Sell", Dividend: "Dividend", Deposit: "Deposit", Withdraw: "Withdraw" }, th: { Buy: "ซื้อ", Sell: "ขาย", Dividend: "ปันผล", Deposit: "ฝาก", Withdraw: "ถอน" } }
   const typeIcon  = { Buy: "buy", Sell: "sell", Dividend: "dividend", Deposit: "deposit", Withdraw: "deposit" }
-
-  // Reset page when any filter changes
-  useEffect(() => { setVisibleCount(TX_PAGE_SIZE) }, [fType, fQuery, fPeriod, customFrom, customTo])
 
   // Filter chips (only show types that actually exist) + ticker/name search
   const typesPresent = [...new Set(transactions.map(tx => tx.type || "Buy"))]
