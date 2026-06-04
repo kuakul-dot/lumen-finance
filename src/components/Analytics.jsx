@@ -39,22 +39,13 @@ export function AnalyticsPage({ t, lang, ccy, dataState, liveHoldings = [], pric
         if (cancelled) return
         const nowSec = Date.now() / 1000
         const divTxs = transactions.filter(tx => tx.type === 'Dividend')
-        const toXdStr = (sec) => new Date((sec + 43200) * 1000).toISOString().slice(0, 10)
-        const alreadyRecorded = (ticker, xdDateStr) =>
-          divTxs.filter(tx => tx.ticker === ticker && tx.transacted_at).some(tx => {
-            if (tx.note?.includes(`xd:${xdDateStr}`)) return true
-            const noteXd = tx.note?.match(/xd:(\d{4}-\d{2}-\d{2})/)?.[1]
-            const refDate = noteXd ?? tx.transacted_at.slice(0, 10)
-            return Math.abs(new Date(refDate) - new Date(xdDateStr)) < 28 * 86400 * 1000
-          })
         // Count XD events that passed and haven't been recorded
         let count = 0
         liveHoldings.forEach(h => {
           const sym = toYahooSymbol(h.ticker, h.region || 'TH', h.asset_class || 'Equity')
           ;(history[sym] || []).forEach(e => {
             if (e.date > nowSec) return
-            const xdDateStr = toXdStr(e.date)
-            if (!alreadyRecorded(h.ticker, xdDateStr)) count++
+            if (!isDivRecorded(divTxs, h.ticker, toXdStr(e.date))) count++
           })
         })
         setPendingDivCount(count)
@@ -179,6 +170,19 @@ export function AnalyticsPage({ t, lang, ccy, dataState, liveHoldings = [], pric
     </div>
   )
 }
+
+/* ─── Shared helpers ────────────────────────────────────────────────────────── */
+// Convert Yahoo Finance Unix timestamp → YYYY-MM-DD (add 12h to handle midnight-UTC edge)
+const toXdStr = (sec) => new Date((sec + 43200) * 1000).toISOString().slice(0, 10)
+
+// Returns true if a dividend for (ticker, xdDateStr) is already in divTxs
+const isDivRecorded = (divTxs, ticker, xdDateStr) =>
+  divTxs.filter(tx => tx.ticker === ticker && tx.transacted_at).some(tx => {
+    if (tx.note?.includes(`xd:${xdDateStr}`)) return true
+    const noteXd = tx.note?.match(/xd:(\d{4}-\d{2}-\d{2})/)?.[1]
+    const refDate = noteXd ?? tx.transacted_at.slice(0, 10)
+    return Math.abs(new Date(refDate) - new Date(xdDateStr)) < 28 * 86400 * 1000
+  })
 
 /* ─── Helper: merge same-ticker lots into a single row ──────────────────────── */
 function groupRowsByTicker(rows) {
@@ -757,6 +761,111 @@ function DivCard({ title, data, className }) {
   )
 }
 
+/* ─── Dividend Calendar ──────────────────────────────────────────────────────── */
+function DividendCalendar({ divHistory, transactions, liveHoldings, lang }) {
+  const th = lang === "th"
+  const todayStr = new Date().toISOString().slice(0, 10)
+  const [calDate, setCalDate] = useState(() => {
+    const d = new Date(); return new Date(d.getFullYear(), d.getMonth(), 1)
+  })
+
+  // Build map: "YYYY-MM-DD" → [{ticker, status}]
+  // status: 'received' | 'pending' | 'upcoming'
+  const eventMap = useMemo(() => {
+    if (!divHistory) return {}
+    const map = {}
+    const nowSec = Date.now() / 1000
+    const divTxs = transactions.filter(tx => tx.type === 'Dividend')
+    liveHoldings.forEach(h => {
+      const sym = toYahooSymbol(h.ticker, h.region || 'TH', h.asset_class || 'Equity')
+      ;(divHistory[sym] || []).forEach(e => {
+        const xdDateStr = toXdStr(e.date)
+        const status = e.date > nowSec ? 'upcoming'
+          : isDivRecorded(divTxs, h.ticker, xdDateStr) ? 'received'
+          : 'pending'
+        if (!map[xdDateStr]) map[xdDateStr] = []
+        // Avoid duplicates if same ticker has multiple lots
+        if (!map[xdDateStr].some(x => x.ticker === h.ticker))
+          map[xdDateStr].push({ ticker: h.ticker, status })
+      })
+    })
+    return map
+  }, [divHistory, transactions, liveHoldings])
+
+  const year = calDate.getFullYear()
+  const month = calDate.getMonth()
+  const firstDOW = (new Date(year, month, 1).getDay() + 6) % 7  // Mon=0
+  const daysInMonth = new Date(year, month + 1, 0).getDate()
+  const cells = [...Array(firstDOW).fill(null), ...Array.from({ length: daysInMonth }, (_, i) => i + 1)]
+
+  const monthLabel = calDate.toLocaleString(th ? "th-TH" : "en-US", { month: "long", year: "numeric" })
+  const dayHdrs = th ? ["จ","อ","พ","พฤ","ศ","ส","อา"] : ["Mon","Tue","Wed","Thu","Fri","Sat","Sun"]
+
+  const btnStyle = { background: "none", border: "1px solid var(--line)", borderRadius: 6, cursor: "pointer", padding: "4px 10px", fontSize: 14, color: "var(--ink-2)" }
+  const dotStyle = (color) => ({ display: "inline-block", width: 7, height: 7, borderRadius: "50%", background: color, marginRight: 4 })
+
+  return (
+    <div className="card col-span-12">
+      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 12, flexWrap: "wrap", gap: 8 }}>
+        <h3 className="section-title">{th ? "ปฏิทินปันผล" : "Dividend Calendar"}</h3>
+        <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+          {/* Legend */}
+          <span style={{ fontSize: 11, color: "var(--ink-3)", display: "flex", gap: 12, marginRight: 8 }}>
+            <span><span style={dotStyle("var(--gain)")} />{th ? "รับแล้ว" : "Received"}</span>
+            <span><span style={dotStyle("var(--loss)")} />{th ? "รอ Sync" : "Pending"}</span>
+            <span><span style={dotStyle("var(--accent-ink)")} />{th ? "กำลังมา" : "Upcoming"}</span>
+          </span>
+          <button style={btnStyle} onClick={() => setCalDate(d => new Date(d.getFullYear(), d.getMonth() - 1, 1))}>◀</button>
+          <span style={{ fontFamily: "var(--font-mono)", fontSize: 13, minWidth: 148, textAlign: "center" }}>{monthLabel}</span>
+          <button style={btnStyle} onClick={() => setCalDate(d => new Date(d.getFullYear(), d.getMonth() + 1, 1))}>▶</button>
+        </div>
+      </div>
+
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(7, 1fr)", gap: 3 }}>
+        {/* Day headers */}
+        {dayHdrs.map(h => (
+          <div key={h} style={{ textAlign: "center", fontSize: 11, fontWeight: 600, color: "var(--ink-3)", padding: "4px 2px" }}>{h}</div>
+        ))}
+        {/* Day cells */}
+        {cells.map((day, i) => {
+          if (!day) return <div key={`e${i}`} />
+          const dateStr = `${year}-${String(month + 1).padStart(2, '0')}-${String(day).padStart(2, '0')}`
+          const events = eventMap[dateStr] || []
+          const isToday = dateStr === todayStr
+          const hasPending = events.some(e => e.status === 'pending')
+          return (
+            <div key={day} style={{
+              minHeight: 52, padding: "4px 5px", borderRadius: 6,
+              background: isToday ? "var(--accent-soft)"
+                : events.length > 0 ? "var(--bg-2)" : "transparent",
+              border: `1px solid ${isToday ? "var(--accent)" : hasPending ? "var(--loss)" : "transparent"}`,
+            }}>
+              <div style={{ fontSize: 11, fontWeight: isToday ? 700 : 400, color: isToday ? "var(--accent-ink)" : "var(--ink-2)", marginBottom: 2 }}>
+                {day}
+              </div>
+              {events.map((ev, j) => (
+                <div key={j} style={{
+                  fontSize: 9, fontWeight: 700, fontFamily: "var(--font-mono)",
+                  borderRadius: 3, padding: "1px 4px", marginBottom: 2,
+                  background: ev.status === 'received' ? "var(--gain-soft)"
+                    : ev.status === 'pending' ? "var(--loss-soft)"
+                    : "var(--accent-soft)",
+                  color: ev.status === 'received' ? "var(--gain)"
+                    : ev.status === 'pending' ? "var(--loss)"
+                    : "var(--accent-ink)",
+                  whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis",
+                }}>
+                  {ev.ticker}
+                </div>
+              ))}
+            </div>
+          )
+        })}
+      </div>
+    </div>
+  )
+}
+
 /* ─── Dividends tab ──────────────────────────────────────────────────────────── */
 function AnalyticsDiv2({ t, lang, ccy, rows, totalValue, dataState, liveHoldings = [], fxRate = 36, transactions = [], portfolio = null, onTransactionAdded, onTransactionUpdated, onTransactionDeleted }) {
   const FMT = LUMEN_FMT
@@ -952,24 +1061,7 @@ function AnalyticsDiv2({ t, lang, ccy, rows, totalValue, dataState, liveHoldings
 
       const nowSec = Date.now() / 1000
       const divTxs = transactions.filter(tx => tx.type === 'Dividend')
-      // Convert Yahoo Unix timestamp → "YYYY-MM-DD" string (add 12 h to handle midnight-UTC edge)
-      const toXdStr = (sec) => new Date((sec + 43200) * 1000).toISOString().slice(0, 10)
-      // Already recorded? Primary: exact xd: tag match. Fallback: ±28-day proximity.
-      // IMPORTANT: for the proximity fallback, compare against the XD date extracted from
-      // the note (if present) rather than transacted_at — because transacted_at may be a
-      // pay date weeks after XD, which would falsely block the next month's dividend.
-      // e.g. O March XD=03-29 saved with pay=04-11 → must NOT block April XD=04-29 (18 days away).
-      const alreadyRecorded = (ticker, xdDateStr) =>
-        divTxs
-          .filter(tx => tx.ticker === ticker && tx.transacted_at)
-          .some(tx => {
-            if (tx.note?.includes(`xd:${xdDateStr}`)) return true
-            // Use the xd: date from note for comparison; fall back to transacted_at for old records
-            const noteXd = tx.note?.match(/xd:(\d{4}-\d{2}-\d{2})/)?.[1]
-            const refDate = noteXd ?? tx.transacted_at.slice(0, 10)
-            const diffMs = Math.abs(new Date(refDate).getTime() - new Date(xdDateStr).getTime())
-            return diffMs < 28 * 86400 * 1000
-          })
+      const alreadyRecorded = (ticker, xdDateStr) => isDivRecorded(divTxs, ticker, xdDateStr)
       // Shares actually held BEFORE the ex-dividend date (from the transaction ledger).
       // Uses date-string comparison to be timezone-safe.
       // Shares bought on or after XD date are excluded — you need to hold before XD to receive the dividend.
@@ -1127,6 +1219,16 @@ function AnalyticsDiv2({ t, lang, ccy, rows, totalValue, dataState, liveHoldings
               : (th ? "ตรวจสอบปันผลใหม่" : "Sync dividends")}
           </button>
         </div>
+      )}
+
+      {/* ── Dividend Calendar (live mode, history loaded) ── */}
+      {dataState === "live" && divHistory && (
+        <DividendCalendar
+          divHistory={divHistory}
+          transactions={transactions}
+          liveHoldings={liveHoldings}
+          lang={lang}
+        />
       )}
 
       {/* ── Historical received by year (only when real data exists) ── */}
