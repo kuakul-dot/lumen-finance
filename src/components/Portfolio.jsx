@@ -1673,7 +1673,7 @@ function TransactionsTab({ transactions, holdings = [], loading, lang, ccy, fxRa
   const th = lang === "th"
   const [editTx, setEditTx] = useState(null)     // tx object being edited
   const [deleting, setDeleting] = useState(null)  // id being deleted
-  const [showImport, setShowImport] = useState(false)
+  const [showImport, setShowImport] = useState(null)  // null | 'pdf' | 'csv'
   const [fType, setFType] = useState("all")       // type filter
   const [fQuery, setFQuery] = useState("")        // ticker/name search
   const [fPeriod, setFPeriod] = useState("all")   // time-range filter (preset, "y:YYYY", or "custom")
@@ -1705,14 +1705,24 @@ function TransactionsTab({ transactions, holdings = [], loading, lang, ccy, fxRa
         <p className="muted" style={{ fontSize: 13 }}>
           {th ? "เมื่อคุณเพิ่มหลักทรัพย์ใหม่ มันจะถูกบันทึกที่นี่โดยอัตโนมัติ" : "When you add holdings they'll be logged here automatically."}
         </p>
-        <button className="btn btn-outline btn-sm" style={{ marginTop: 16 }} onClick={() => setShowImport(true)}>
-          <Icon name="upload" size={13} /> {th ? "นำเข้า PDF" : "Import PDF"}
-        </button>
+        <div style={{ display: "flex", gap: 6, marginTop: 16 }}>
+          <button className="btn btn-outline btn-sm" onClick={() => setShowImport('pdf')}>
+            <Icon name="upload" size={13} /> PDF
+          </button>
+          <button className="btn btn-outline btn-sm" onClick={() => setShowImport('csv')}>
+            <Icon name="upload" size={13} /> CSV
+          </button>
+        </div>
       </div>
-      {showImport && portfolioId && (
+      {showImport === 'pdf' && portfolioId && (
         <ImportPDFModal lang={lang} portfolioId={portfolioId}
-          onClose={() => setShowImport(false)}
-          onImported={() => { setShowImport(false); onReload?.() }} />
+          onClose={() => setShowImport(null)}
+          onImported={() => { setShowImport(null); onReload?.() }} />
+      )}
+      {showImport === 'csv' && portfolioId && (
+        <ImportCSVModal lang={lang} portfolioId={portfolioId}
+          onClose={() => setShowImport(null)}
+          onImported={() => { setShowImport(null); onReload?.() }} />
       )}
     </>
   )
@@ -1877,9 +1887,14 @@ function TransactionsTab({ transactions, holdings = [], loading, lang, ccy, fxRa
             <option key={t} value={t}>{(typeLabel[lang] || typeLabel.en)[t]}</option>
           ))}
         </select>
-        <button className="btn btn-outline btn-sm" onClick={() => setShowImport(true)}>
-          <Icon name="upload" size={13} /> {th ? "นำเข้า" : "Import"}
-        </button>
+        <div className="segmented" style={{ flexShrink: 0 }}>
+          <button className={showImport === 'pdf' ? "on" : ""} style={{ fontSize: 12, padding: "6px 12px" }} onClick={() => setShowImport('pdf')}>
+            <Icon name="upload" size={12} /> PDF
+          </button>
+          <button className={showImport === 'csv' ? "on" : ""} style={{ fontSize: 12, padding: "6px 12px" }} onClick={() => setShowImport('csv')}>
+            <Icon name="upload" size={12} /> CSV
+          </button>
+        </div>
       </div>
 
       <section className="card tbl-card" style={{ padding: 0, overflow: "hidden" }}>
@@ -1927,10 +1942,15 @@ function TransactionsTab({ transactions, holdings = [], loading, lang, ccy, fxRa
           }}
         />
       )}
-      {showImport && portfolioId && (
+      {showImport === 'pdf' && portfolioId && (
         <ImportPDFModal lang={lang} portfolioId={portfolioId}
-          onClose={() => setShowImport(false)}
-          onImported={() => { setShowImport(false); onReload?.() }} />
+          onClose={() => setShowImport(null)}
+          onImported={() => { setShowImport(null); onReload?.() }} />
+      )}
+      {showImport === 'csv' && portfolioId && (
+        <ImportCSVModal lang={lang} portfolioId={portfolioId}
+          onClose={() => setShowImport(null)}
+          onImported={() => { setShowImport(null); onReload?.() }} />
       )}
     </>
   )
@@ -2586,6 +2606,396 @@ function ImportPDFModal({ lang, portfolioId, onClose, onImported }) {
                     {importing
                       ? (th ? "กำลังนำเข้า…" : "Importing…")
                       : (th ? `นำเข้า ${selected.size} รายการ` : `Import ${selected.size} transactions`)}
+                  </button>
+                </div>
+              </>
+            )}
+          </div>
+        )}
+      </div>
+    </div>
+  )
+}
+
+// ─── CSV parser ───────────────────────────────────────────────────────────────
+// Flexible header detection + multi-format date parsing.
+// Supports Lumen's own export format and generic broker CSVs.
+function parseCSVText(rawText) {
+  if (!rawText?.trim()) return []
+  function parseLine(line) {
+    const cells = []; let cur = '', inQ = false
+    for (let i = 0; i < line.length; i++) {
+      const c = line[i]
+      if (c === '"') { if (inQ && line[i+1] === '"') { cur += '"'; i++; continue } inQ = !inQ; continue }
+      if (c === ',' && !inQ) { cells.push(cur.trim()); cur = ''; continue }
+      cur += c
+    }
+    cells.push(cur.trim()); return cells
+  }
+  const allRows = rawText.replace(/\r\n/g, '\n').replace(/\r/g, '\n')
+    .split('\n').map(parseLine).filter(r => r.some(c => c))
+  if (allRows.length < 2) return []
+  // Column header aliases (all lowercase)
+  const ALIASES = {
+    date:     ['date','transacted_at','trade_date','วันที่','date_time','settlement_date'],
+    type:     ['type','transaction_type','action','ประเภท','txtype','side'],
+    ticker:   ['ticker','symbol','stock','code','หลักทรัพย์','security','asset'],
+    shares:   ['shares','quantity','qty','volume','จำนวน','units','share'],
+    price:    ['price','unit_price','avg_price','ราคา','trade_price'],
+    amount:   ['amount','total','value','net_amount','มูลค่า','total_amount','net','consideration'],
+    fee:      ['fee','commission','ค่าธรรมเนียม','brokerage','fees'],
+    tax:      ['tax','withholding_tax','vat','ภาษี'],
+    currency: ['currency','ccy','สกุล','curr'],
+    note:     ['note','remark','description','หมายเหตุ','name','company_name','memo'],
+  }
+  const hdr = allRows[0].map(h => h.toLowerCase().replace(/\s+/g,'_'))
+  const col = {}
+  hdr.forEach((h, i) => {
+    for (const [f, aliases] of Object.entries(ALIASES)) {
+      if (col[f] != null) continue
+      if (aliases.some(a => h === a || h.includes(a))) col[f] = i
+    }
+  })
+  if (col.date == null) return []
+  function parseDate(s) {
+    if (!s) return ''
+    s = s.trim()
+    let m = s.match(/^(\d{4})[\/\-.](\d{1,2})[\/\-.](\d{1,2})/)
+    if (m) { let [,y,mo,d] = m; if (+y > 2500) y = String(+y-543); return `${y}-${mo.padStart(2,'0')}-${d.padStart(2,'0')}` }
+    m = s.match(/^(\d{1,2})[\/\-.](\d{1,2})[\/\-.](\d{2,4})$/)
+    if (m) { let [,d,mo,y] = m; if (y.length===2) y='20'+y; if (+y>2500) y=String(+y-543); return `${y}-${mo.padStart(2,'0')}-${d.padStart(2,'0')}` }
+    return ''
+  }
+  const TYPE_MAP = {
+    buy:'Buy',b:'Buy','ซื้อ':'Buy',purchase:'Buy',
+    sell:'Sell',s:'Sell','ขาย':'Sell',
+    dividend:'Dividend',div:'Dividend','ปันผล':'Dividend',
+    deposit:'Deposit',dep:'Deposit','ฝาก':'Deposit',
+    withdraw:'Withdraw',withdrawal:'Withdraw',wth:'Withdraw','ถอน':'Withdraw',
+  }
+  const parseType = s => { if (!s) return 'Buy'; const k=s.trim().toLowerCase().replace(/[^a-zก-ฮ]/g,''); return TYPE_MAP[k]||'Buy' }
+  const result = []
+  for (let i = 1; i < allRows.length; i++) {
+    const r = allRows[i]
+    if (!r || r.every(c => !c)) continue
+    const get = f => col[f] != null ? (r[col[f]] || '') : ''
+    const n   = s => { const v=parseFloat(s.replace(/,/g,'')); return isNaN(v)?null:v }
+    const date = parseDate(get('date'))
+    if (!date) continue
+    const shares = n(get('shares')), price = n(get('price'))
+    let amount = n(get('amount'))
+    if (amount == null && shares != null && price != null) amount = +(shares * price).toFixed(2)
+    result.push({
+      transacted_at: date, type: parseType(get('type')),
+      ticker: get('ticker').toUpperCase() || null,
+      shares, price, amount,
+      fee: n(get('fee')) ?? 0, tax: n(get('tax')) ?? 0,
+      currency: (get('currency') || 'THB').toUpperCase(),
+      note: get('note') || null,
+    })
+  }
+  return result
+}
+
+// ─── Import CSV Modal ─────────────────────────────────────────────────────────
+function ImportCSVModal({ lang, portfolioId, onClose, onImported }) {
+  const th = lang === "th"
+  const fileRef = useRef(null)
+  const [step, setStep] = useState(1)
+  const [rows, setRows] = useState([])
+  const [selected, setSelected] = useState(new Set())
+  const [importing, setImporting] = useState(false)
+  const [importResult, setImportResult] = useState(null)
+  const [dragOver, setDragOver] = useState(false)
+  const [parseError, setParseError] = useState(null)
+  const [csvInfo, setCsvInfo] = useState(null)
+  const [pasteText, setPasteText] = useState('')
+  const [showPaste, setShowPaste] = useState(false)
+
+  const TX_TYPES = ['Buy', 'Sell', 'Dividend', 'Deposit', 'Withdraw']
+  const typeLabel = {
+    en: { Buy: "Buy", Sell: "Sell", Dividend: "Dividend", Deposit: "Deposit", Withdraw: "Withdraw" },
+    th: { Buy: "ซื้อ", Sell: "ขาย", Dividend: "ปันผล", Deposit: "ฝาก", Withdraw: "ถอน" },
+  }
+  const toggleRow = (i) => setSelected(s => { const n = new Set(s); n.has(i) ? n.delete(i) : n.add(i); return n })
+  const toggleAll = () => setSelected(s => s.size === rows.length ? new Set() : new Set(rows.map((_, i) => i)))
+  const updateRow = (i, f, v) => setRows(rs => rs.map((r, ri) => ri === i ? { ...r, [f]: v } : r))
+
+  const processText = (text, filename = '') => {
+    setParseError(null)
+    const detected = parseCSVText(text)
+    if (!detected.length) {
+      setParseError(th
+        ? 'ไม่พบข้อมูลธุรกรรม\n\nตรวจสอบให้แน่ใจว่ามีแถวหัวตาราง เช่น Date, Type, Ticker'
+        : 'No transactions found.\n\nMake sure the file has a header row with Date, Type, Ticker columns.')
+      return
+    }
+    setRows(detected)
+    setSelected(new Set(detected.map((_, i) => i)))
+    setCsvInfo({ filename, total: detected.length })
+    setStep(2)
+  }
+
+  const handleFile = (file) => {
+    if (!file) return
+    const ext = file.name.toLowerCase().split('.').pop()
+    if (!['csv', 'txt'].includes(ext)) { setParseError(th ? 'กรุณาเลือกไฟล์ .csv' : 'Please select a .csv file'); return }
+    const reader = new FileReader()
+    reader.onload = e => processText(e.target.result, file.name)
+    reader.onerror = () => setParseError(th ? 'อ่านไฟล์ไม่ได้' : 'Could not read file')
+    reader.readAsText(file, 'UTF-8')
+  }
+
+  const downloadTemplate = () => {
+    const hdr = 'Date,Type,Ticker,Shares,Price,Amount,Fee,Tax,Currency,Note'
+    const ex  = ['2024-01-15,Buy,ADVANC,100,245.50,,,,THB,Advanced Info Service',
+                 '2024-03-20,Dividend,ADVANC,100,2.50,,,,THB,',
+                 '2024-02-01,Buy,NVDA,5,600.00,,,,USD,NVIDIA Corporation'].join('\n')
+    const blob = new Blob(['﻿'+hdr+'\n'+ex], { type:'text/csv;charset=utf-8;' })
+    const url  = URL.createObjectURL(blob)
+    const a = document.createElement('a'); a.href = url; a.download = 'lumen-import-template.csv'; a.click()
+    URL.revokeObjectURL(url)
+  }
+
+  const handleImport = async () => {
+    const toImport = rows.filter((_, i) => selected.has(i))
+    setImporting(true)
+    const nameCache = {}
+    for (const tx of toImport) {
+      const tk = (tx.ticker || '').toUpperCase()
+      if (!tk || nameCache[tk] !== undefined) continue
+      nameCache[tk] = await fetchTickerName(tk)
+    }
+    let ok = 0; const errors = []; const imported = []
+    for (const tx of toImport) {
+      const tk = (tx.ticker || '').toUpperCase()
+      const enriched = { ...tx, note: tx.note || nameCache[tk] || null }
+      const { error } = await addTransaction(portfolioId, enriched)
+      if (error) errors.push(`${tx.ticker||'?'} ${tx.transacted_at}: ${error.message}`)
+      else { ok++; imported.push(enriched) }
+    }
+    if (imported.length) {
+      const { errors: hErr } = await syncHoldingsFromTransactions(portfolioId, imported)
+      hErr.forEach(e => errors.push(`holding ${e}`))
+    }
+    setImporting(false)
+    setImportResult({ ok, errors })
+    if (!errors.length) setTimeout(() => { onImported(); onClose() }, 1400)
+  }
+
+  return (
+    <div style={{ position:"fixed", inset:0, background:"rgba(0,0,0,0.45)", backdropFilter:"blur(4px)",
+      display:"flex", alignItems:"center", justifyContent:"center", zIndex:1100,
+      overflowY:"auto", padding:"24px 16px",
+    }} onClick={e => e.target === e.currentTarget && onClose()}>
+      <div style={{ background:"var(--bg)", borderRadius:20, padding:"32px 28px 40px",
+        width:"100%", maxWidth: step===2 ? 760 : 600, margin:"auto",
+        boxShadow:"0 8px 48px rgba(0,0,0,0.18)", maxHeight:"calc(100dvh - 48px)", overflowY:"auto",
+      }}>
+        {/* Header */}
+        <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:8 }}>
+          <h3 style={{ margin:0, fontSize:20, fontFamily:"var(--font-display)" }}>
+            {th ? "นำเข้า Transactions จาก CSV" : "Import Transactions from CSV"}
+          </h3>
+          <button onClick={onClose} style={{ background:"none", border:"none", cursor:"pointer", fontSize:22, color:"var(--ink-3)", lineHeight:1 }}>✕</button>
+        </div>
+
+        {/* Step indicators */}
+        <div style={{ display:"flex", gap:8, alignItems:"center", marginBottom:24 }}>
+          {[th ? "อัปโหลด" : "Upload", th ? "ตรวจสอบ" : "Review"].map((label, i) => (
+            <Fragment key={i}>
+              {i > 0 && <div style={{ flex:1, height:1, background:"var(--line)" }} />}
+              <div style={{ display:"flex", alignItems:"center", gap:6 }}>
+                <div style={{ width:22, height:22, borderRadius:999, fontSize:11, fontWeight:700,
+                  background: i+1===step ? "var(--ink)" : "var(--bg-2)",
+                  color: i+1===step ? "var(--bg)" : "var(--ink-3)",
+                  display:"grid", placeItems:"center", flexShrink:0 }}>{i+1}</div>
+                <div style={{ fontSize:12, color:i+1===step ? "var(--ink)" : "var(--ink-4)", fontWeight:i+1===step?700:400 }}>{label}</div>
+              </div>
+            </Fragment>
+          ))}
+        </div>
+
+        {/* Step 1 */}
+        {step === 1 && (
+          <div>
+            <p style={{ fontSize:13, color:"var(--ink-2)", marginBottom:16, lineHeight:1.6 }}>
+              {th
+                ? "อัปโหลดไฟล์ CSV ที่มีคอลัมน์ Date, Type, Ticker, Shares, Price, Amount, Currency — หรือ Export จาก Lumen แล้ว Import กลับได้เลย"
+                : "Upload a CSV with columns Date, Type, Ticker, Shares, Price, Amount, Currency — or use Lumen's own export file."}
+            </p>
+
+            {/* Format hint */}
+            <div style={{ marginBottom:16, padding:"12px 14px", borderRadius:12, background:"var(--bg-2)", border:"1px solid var(--line)" }}>
+              <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:8 }}>
+                <div style={{ fontSize:11, fontWeight:700, color:"var(--ink-2)" }}>
+                  {th ? "รูปแบบที่รองรับ" : "Expected columns"}
+                </div>
+                <button className="btn btn-outline btn-sm" style={{ fontSize:11 }} onClick={downloadTemplate}>
+                  ⬇ {th ? "ดาวน์โหลด Template" : "Download template"}
+                </button>
+              </div>
+              <div style={{ fontFamily:"var(--font-mono)", fontSize:10.5, color:"var(--ink-3)", overflowX:"auto", whiteSpace:"nowrap" }}>
+                Date, Type, Ticker, Shares, Price, Amount, Fee, Tax, Currency, Note
+              </div>
+              <div style={{ fontSize:10.5, color:"var(--ink-4)", marginTop:6, lineHeight:1.5 }}>
+                {th ? "วันที่: YYYY-MM-DD / DD/MM/YYYY / พ.ศ. ก็ได้ · ประเภท: Buy/Sell/Dividend/Deposit/Withdraw · ซื้อ/ขาย/ปันผล/ฝาก/ถอน ก็ได้" : "Date: YYYY-MM-DD or DD/MM/YYYY · Type: Buy/Sell/Dividend/Deposit/Withdraw"}
+              </div>
+            </div>
+
+            {/* Drop zone */}
+            <div
+              onDragOver={e => { e.preventDefault(); setDragOver(true) }}
+              onDragLeave={() => setDragOver(false)}
+              onDrop={e => { e.preventDefault(); setDragOver(false); handleFile(e.dataTransfer.files[0]) }}
+              onClick={() => !showPaste && fileRef.current?.click()}
+              style={{ border:`2px dashed ${dragOver?"var(--accent)":"var(--line)"}`,
+                borderRadius:16, padding:"44px 24px", textAlign:"center",
+                cursor:showPaste?"default":"pointer", transition:"all 0.2s",
+                background:dragOver?"var(--accent-soft)":"var(--bg-2)" }}
+            >
+              <div style={{ fontSize:32, marginBottom:10 }}>📊</div>
+              <div style={{ fontWeight:600, fontSize:15, marginBottom:6 }}>
+                {th ? "ลากไฟล์มาวาง หรือคลิกเพื่อเลือก" : "Drag & drop or click to select"}
+              </div>
+              <div style={{ fontSize:12, color:"var(--ink-3)" }}>.csv · .txt</div>
+            </div>
+            <input ref={fileRef} type="file" accept=".csv,.txt" style={{ display:"none" }}
+              onChange={e => { const f=e.target.files[0]; if(f) handleFile(f); e.target.value='' }} />
+
+            {/* Or paste */}
+            <div style={{ marginTop:12 }}>
+              <button className="btn btn-outline btn-sm" onClick={() => setShowPaste(v => !v)} style={{ width:"100%", justifyContent:"center" }}>
+                {showPaste ? (th?"ซ่อน":"Hide") : (th?"วางข้อความ CSV แทน":"Or paste CSV text")}
+              </button>
+              {showPaste && (
+                <div style={{ marginTop:10 }}>
+                  <textarea
+                    value={pasteText}
+                    onChange={e => { setPasteText(e.target.value); setParseError(null) }}
+                    placeholder={th ? "วาง CSV ที่นี่…\nDate,Type,Ticker,Shares,Price,Amount,Currency,Note\n2024-01-15,Buy,ADVANC,100,245,24550,THB," : "Paste CSV here…\nDate,Type,Ticker,Shares,Price,Amount,Currency,Note\n2024-01-15,Buy,ADVANC,100,245,24550,THB,"}
+                    rows={6}
+                    style={{ ...inputStyle, fontFamily:"var(--font-mono)", fontSize:12, resize:"vertical" }}
+                  />
+                  <button className="btn" style={{ marginTop:8, width:"100%" }} disabled={!pasteText.trim()} onClick={() => processText(pasteText, 'pasted')}>
+                    {th ? "วิเคราะห์ข้อความ" : "Parse text"}
+                  </button>
+                </div>
+              )}
+            </div>
+
+            {parseError && (
+              <div style={{ marginTop:14, padding:"12px 16px", borderRadius:10, background:"oklch(0.96 0.05 25)", color:"oklch(0.40 0.12 25)", fontSize:13, whiteSpace:"pre-line" }}>
+                {parseError}
+              </div>
+            )}
+
+            <div style={{ display:"flex", gap:10, marginTop:20 }}>
+              <button type="button" className="btn btn-outline" style={{ flex:1 }} onClick={onClose}>
+                {th ? "ยกเลิก" : "Cancel"}
+              </button>
+            </div>
+          </div>
+        )}
+
+        {/* Step 2: Review */}
+        {step === 2 && (
+          <div>
+            {importResult ? (
+              <div style={{ textAlign:"center", padding:"24px 0" }}>
+                <div style={{ fontSize:48, marginBottom:12 }}>{importResult.errors.length===0 ? "✅" : "⚠️"}</div>
+                <div style={{ fontWeight:600, fontSize:18, marginBottom:8 }}>
+                  {importResult.errors.length===0
+                    ? (th ? `นำเข้าสำเร็จ ${importResult.ok} รายการ!` : `Imported ${importResult.ok} transactions!`)
+                    : (th ? `สำเร็จ ${importResult.ok} · ล้มเหลว ${importResult.errors.length}` : `${importResult.ok} ok · ${importResult.errors.length} failed`)}
+                </div>
+                {importResult.errors.length > 0 && (
+                  <>
+                    <div style={{ textAlign:"left", marginTop:12, padding:"10px 14px", background:"oklch(0.97 0.02 25)", borderRadius:10, fontSize:12, color:"oklch(0.40 0.12 25)", maxHeight:160, overflowY:"auto" }}>
+                      {importResult.errors.map((e,i) => <div key={i} style={{ marginBottom:2 }}>{e}</div>)}
+                    </div>
+                    <button className="btn btn-outline" style={{ marginTop:16 }} onClick={onClose}>{th?"ปิด":"Close"}</button>
+                  </>
+                )}
+              </div>
+            ) : (
+              <>
+                {csvInfo && (
+                  <div style={{ display:"flex", alignItems:"center", justifyContent:"space-between", marginBottom:12, flexWrap:"wrap", gap:8 }}>
+                    <div style={{ fontSize:13, color:"var(--ink-2)" }}>
+                      {csvInfo.filename && <span style={{ fontWeight:500, marginRight:6 }}>{csvInfo.filename}</span>}
+                      {th ? `พบ ${csvInfo.total} รายการ · เลือก ${selected.size} รายการ` : `Found ${csvInfo.total} rows · ${selected.size} selected`}
+                    </div>
+                    <button className="btn btn-outline btn-sm" onClick={toggleAll}>
+                      {selected.size === rows.length ? (th?"ยกเลิกทั้งหมด":"Deselect all") : (th?"เลือกทั้งหมด":"Select all")}
+                    </button>
+                  </div>
+                )}
+                <div style={{ fontSize:12, color:"var(--ink-3)", marginBottom:8 }}>
+                  {th ? "✏️ แก้ไขวันที่ ประเภท หรือ Ticker ได้โดยตรงในตาราง" : "✏️ Edit date, type, and ticker inline below"}
+                </div>
+                <div style={{ maxHeight:380, overflowY:"auto", overflowX:"auto", border:"1px solid var(--line)", borderRadius:10 }}>
+                  <table className="table" style={{ fontSize:12 }}>
+                    <thead>
+                      <tr>
+                        <th style={{ width:32, textAlign:"center" }}><input type="checkbox" checked={selected.size===rows.length} onChange={toggleAll}/></th>
+                        <th>{th?"วันที่":"Date"}</th>
+                        <th>{th?"ประเภท":"Type"}</th>
+                        <th>Ticker</th>
+                        <th className="num">{th?"จำนวน":"Shares"}</th>
+                        <th className="num">{th?"ราคา":"Price"}</th>
+                        <th className="num">{th?"มูลค่า":"Amount"}</th>
+                        <th className="num">{th?"ค่าธ.":"Fee"}</th>
+                        <th>{th?"สกุล":"Ccy"}</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {rows.map((r, i) => (
+                        <tr key={i} style={{ opacity: selected.has(i) ? 1 : 0.35 }}>
+                          <td style={{ textAlign:"center" }}>
+                            <input type="checkbox" checked={selected.has(i)} onChange={() => toggleRow(i)} />
+                          </td>
+                          <td>
+                            <input type="date" value={r.transacted_at||''} onChange={e => updateRow(i,'transacted_at',e.target.value)}
+                              style={{ ...inputStyle, padding:"4px 6px", fontSize:11, width:120 }} />
+                          </td>
+                          <td>
+                            <select value={r.type} onChange={e => updateRow(i,'type',e.target.value)}
+                              style={{ ...inputStyle, padding:"4px 6px", fontSize:11, width:"auto" }}>
+                              {TX_TYPES.map(t => <option key={t} value={t}>{(typeLabel[lang]||typeLabel.en)[t]}</option>)}
+                            </select>
+                          </td>
+                          <td>
+                            <input value={r.ticker||''} onChange={e => updateRow(i,'ticker',e.target.value.toUpperCase())}
+                              placeholder="—" style={{ ...inputStyle, padding:"4px 6px", fontSize:11, width:80 }} />
+                          </td>
+                          <td className="num" style={{ color:"var(--ink-3)" }}>
+                            {r.shares!=null ? r.shares.toLocaleString(undefined,{maximumFractionDigits:4}) : "—"}
+                          </td>
+                          <td className="num" style={{ color:"var(--ink-3)" }}>
+                            {r.price!=null ? r.price.toLocaleString(undefined,{maximumFractionDigits:2}) : "—"}
+                          </td>
+                          <td className="num" style={{ fontWeight:500 }}>
+                            {r.amount!=null ? r.amount.toLocaleString(undefined,{maximumFractionDigits:2}) : "—"}
+                          </td>
+                          <td className="num" style={{ color:"var(--ink-3)" }}>
+                            {r.fee>0 ? r.fee.toLocaleString(undefined,{maximumFractionDigits:2}) : "—"}
+                          </td>
+                          <td style={{ fontSize:11, color:"var(--ink-3)" }}>{r.currency||'THB'}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+                <div style={{ marginTop:10, fontSize:11, color:"var(--ink-4)" }}>
+                  {th ? "* แก้ไขเพิ่มเติมได้หลังนำเข้าในหน้า Transactions" : "* You can edit further after import in the Transactions tab."}
+                </div>
+                <div style={{ display:"flex", gap:10, marginTop:16, position:"sticky", bottom:0, background:"var(--bg)", paddingTop:14, paddingBottom:2 }}>
+                  <button className="btn btn-outline" style={{ flex:1 }} onClick={() => { setStep(1); setImportResult(null) }} disabled={importing}>
+                    {th ? "← ย้อนกลับ" : "← Back"}
+                  </button>
+                  <button className="btn" style={{ flex:2 }} onClick={handleImport} disabled={importing || selected.size===0}>
+                    {importing ? (th?"กำลังนำเข้า…":"Importing…") : (th?`นำเข้า ${selected.size} รายการ`:`Import ${selected.size} transactions`)}
                   </button>
                 </div>
               </>
