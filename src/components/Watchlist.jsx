@@ -282,6 +282,8 @@ function WatchlistCard({ item, priceData, sr, onRemove, onNoteChange, showChart,
 
   // Fullscreen modal state
   const [fullscreen, setFullscreen] = useState(false)
+  // Compute fullscreen chart height once (used in modal)
+  const fsH = typeof window !== 'undefined' ? Math.max(380, window.innerHeight - 280) : 480
 
   // Reset state when card is collapsed
   useEffect(() => {
@@ -580,14 +582,31 @@ function WatchlistCard({ item, priceData, sr, onRemove, onNoteChange, showChart,
 
           {/* ── TradingView mode ───────────────────────────── */}
           {chartMode === 'tv' && (
-            <>
-              <TradingViewChart ticker={tvTicker} region={item.region} height={420} />
-              <p style={{ margin: '8px 0 0', fontSize: 11, color: 'var(--ink-3)', textAlign: 'center' }}>
-                {th
-                  ? 'TradingView — ใช้เครื่องมือวาดเส้น Fibonacci, แนวรับ/ต้าน, indicator ได้เลย'
-                  : 'TradingView — draw Fibonacci, trendlines, and indicators directly on the chart'}
-              </p>
-            </>
+            item.region === 'TH' ? (
+              // SET stocks not supported in free TradingView embed — show link instead
+              <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 12, padding: '24px 16px', textAlign: 'center' }}>
+                <div style={{ fontSize: 13, color: 'var(--ink-2)' }}>
+                  {th
+                    ? 'TradingView embed ไม่รองรับหุ้น SET ในแผน free — เปิดดูบน TradingView ได้เลย'
+                    : 'TradingView embed requires a paid plan for SET stocks — open the full chart in a new tab'}
+                </div>
+                <a href={`https://www.tradingview.com/chart/?symbol=SET%3A${encodeURIComponent(item.symbol)}`}
+                  target="_blank" rel="noopener noreferrer" style={{ textDecoration: 'none' }}>
+                  <button className="btn" style={{ fontSize: 12, padding: '8px 20px' }}>
+                    {th ? 'เปิด TradingView ↗' : 'Open TradingView ↗'}
+                  </button>
+                </a>
+              </div>
+            ) : (
+              <>
+                <TradingViewChart ticker={tvTicker} region={item.region} height={420} />
+                <p style={{ margin: '8px 0 0', fontSize: 11, color: 'var(--ink-3)', textAlign: 'center' }}>
+                  {th
+                    ? 'TradingView — ใช้เครื่องมือวาดเส้น Fibonacci, แนวรับ/ต้าน, indicator ได้เลย'
+                    : 'TradingView — draw Fibonacci, trendlines, and indicators directly on the chart'}
+                </p>
+              </>
+            )
           )}
         </div>
       )}
@@ -653,96 +672,127 @@ function WatchlistCard({ item, priceData, sr, onRemove, onNoteChange, showChart,
 
           {/* ── Modal body ────────────────────────────────────── */}
           <div style={{ flex: 1, minHeight: 0, overflow: 'auto', padding: '14px 20px 20px' }}>
-            {(() => {
-              const fsH = Math.max(380, (typeof window !== 'undefined' ? window.innerHeight : 800) - 280)
-              return chartMode === 'sr' ? (
-                <>
-                  {/* Range + Overlays */}
-                  <div style={{ display: 'flex', gap: 4, marginBottom: 8, flexWrap: 'wrap', alignItems: 'center' }}>
-                    {CHART_RANGES.map(r => (
-                      <button key={r} onClick={() => setChartRange(r)} style={{
-                        padding: '4px 12px', borderRadius: 6, fontSize: 12, fontWeight: 600, cursor: 'pointer',
-                        border: '1px solid var(--line)',
-                        background: chartRange === r ? 'var(--ink)' : 'transparent',
-                        color: chartRange === r ? 'var(--bg)' : 'var(--ink-2)',
-                      }}>{RANGE_LABEL[r]}</button>
-                    ))}
-                    {loadingChart && <span style={{ fontSize: 11, color: 'var(--ink-3)', marginLeft: 4 }}>…</span>}
-                    <span style={{ marginLeft: 8, fontSize: 10, color: 'var(--ink-3)' }}>Overlay:</span>
-                    {[
-                      { key: 'fib', label: 'Fibonacci',    color: 'oklch(0.65 0.14 55)'  },
-                      { key: 'ma',  label: 'MA20/50/200',  color: 'oklch(0.50 0.12 250)' },
-                      { key: 'vp',  label: 'Vol Profile',  color: 'oklch(0.60 0.14 90)'  },
-                    ].map(o => (
-                      <button key={o.key} onClick={() => toggleOverlay(o.key)} style={{
-                        padding: '3px 10px', borderRadius: 6, fontSize: 10, fontWeight: 600, cursor: 'pointer',
-                        border: `1.5px solid ${overlays[o.key] ? o.color : 'var(--line)'}`,
-                        background: overlays[o.key] ? o.color + '22' : 'transparent',
-                        color: overlays[o.key] ? o.color : 'var(--ink-3)',
-                      }}>{o.label}</button>
-                    ))}
-                  </div>
 
-                  {/* Full-height chart */}
-                  {lineSeries ? (
-                    <div style={{ background: 'var(--bg-2)', borderRadius: 12, padding: '12px 4px 6px', border: '1px solid var(--line)' }}>
-                      <LineChart series={lineSeries} height={fsH} hLines={hLines}
-                        fmt={v => fmtPrice(v, currency)} labelFmt={d => d.label} />
-                    </div>
-                  ) : loadingChart ? (
-                    <div style={{ height: 200, display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--ink-3)' }}>
-                      {th ? 'กำลังโหลดกราฟ…' : 'Loading chart…'}
-                    </div>
-                  ) : (
-                    <div style={{ height: 120, display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--ink-3)' }}>
-                      {th ? 'ไม่มีข้อมูล' : 'No data available'}
-                    </div>
+            {/* S/R Chart mode */}
+            {chartMode === 'sr' && (
+              <>
+                {/* Range + Overlays */}
+                <div style={{ display: 'flex', gap: 4, marginBottom: 8, flexWrap: 'wrap', alignItems: 'center' }}>
+                  {CHART_RANGES.map(r => (
+                    <button key={r} onClick={() => setChartRange(r)} style={{
+                      padding: '4px 12px', borderRadius: 6, fontSize: 12, fontWeight: 600, cursor: 'pointer',
+                      border: '1px solid var(--line)',
+                      background: chartRange === r ? 'var(--ink)' : 'transparent',
+                      color: chartRange === r ? 'var(--bg)' : 'var(--ink-2)',
+                    }}>{RANGE_LABEL[r]}</button>
+                  ))}
+                  {loadingChart && <span style={{ fontSize: 11, color: 'var(--ink-3)', marginLeft: 4 }}>…</span>}
+                  <span style={{ marginLeft: 8, fontSize: 10, color: 'var(--ink-3)' }}>Overlay:</span>
+                  {[
+                    { key: 'fib', label: 'Fibonacci',   color: 'oklch(0.65 0.14 55)'  },
+                    { key: 'ma',  label: 'MA20/50/200', color: 'oklch(0.50 0.12 250)' },
+                    { key: 'vp',  label: 'Vol Profile', color: 'oklch(0.60 0.14 90)'  },
+                  ].map(o => (
+                    <button key={o.key} onClick={() => toggleOverlay(o.key)} style={{
+                      padding: '3px 10px', borderRadius: 6, fontSize: 10, fontWeight: 600, cursor: 'pointer',
+                      border: `1.5px solid ${overlays[o.key] ? o.color : 'var(--line)'}`,
+                      background: overlays[o.key] ? o.color + '22' : 'transparent',
+                      color: overlays[o.key] ? o.color : 'var(--ink-3)',
+                    }}>{o.label}</button>
+                  ))}
+                </div>
+
+                {/* Full-height chart */}
+                {lineSeries ? (
+                  <div style={{ background: 'var(--bg-2)', borderRadius: 12, padding: '12px 4px 6px', border: '1px solid var(--line)' }}>
+                    <LineChart series={lineSeries} height={fsH} hLines={hLines}
+                      fmt={v => fmtPrice(v, currency)} labelFmt={d => d.label} />
+                  </div>
+                ) : loadingChart ? (
+                  <div style={{ height: 200, display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--ink-3)' }}>
+                    {th ? 'กำลังโหลดกราฟ…' : 'Loading chart…'}
+                  </div>
+                ) : (
+                  <div style={{ height: 120, display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--ink-3)' }}>
+                    {th ? 'ไม่มีข้อมูล' : 'No data available'}
+                  </div>
+                )}
+
+                {/* Legend */}
+                <div style={{ display: 'flex', gap: 12, marginTop: 10, flexWrap: 'wrap' }}>
+                  {displaySR && displaySR.resistances.map((lvl, i) => (
+                    <span key={`fsr${i}`} style={{ fontSize: 11, color: 'var(--loss)', display: 'flex', alignItems: 'center', gap: 5, fontFamily: 'var(--font-mono)' }}>
+                      <span style={{ width: 14, borderTop: '2px dashed var(--loss)', display: 'inline-block' }} />
+                      R{i + 1} {fmtPrice(lvl.price, currency)} <StrengthDots count={lvl.strength} color="var(--loss)" />
+                    </span>
+                  ))}
+                  {displaySR && displaySR.supports.map((lvl, i) => (
+                    <span key={`fss${i}`} style={{ fontSize: 11, color: 'var(--gain)', display: 'flex', alignItems: 'center', gap: 5, fontFamily: 'var(--font-mono)' }}>
+                      <span style={{ width: 14, borderTop: '2px dashed var(--gain)', display: 'inline-block' }} />
+                      S{i + 1} {fmtPrice(lvl.price, currency)} <StrengthDots count={lvl.strength} color="var(--gain)" />
+                    </span>
+                  ))}
+                  {chartMAs && overlays.ma && chartMAs.ma20 != null && (
+                    <span key="fsma20" style={{ fontSize: 11, color: 'oklch(0.60 0.14 300)', display: 'flex', alignItems: 'center', gap: 5, fontFamily: 'var(--font-mono)' }}>
+                      <span style={{ width: 14, borderTop: '2px dashed oklch(0.60 0.14 300)', display: 'inline-block' }} />
+                      MA20 {fmtPrice(chartMAs.ma20, currency)}
+                    </span>
                   )}
+                  {chartMAs && overlays.ma && chartMAs.ma50 != null && (
+                    <span key="fsma50" style={{ fontSize: 11, color: 'oklch(0.50 0.12 250)', display: 'flex', alignItems: 'center', gap: 5, fontFamily: 'var(--font-mono)' }}>
+                      <span style={{ width: 14, borderTop: '2px dashed oklch(0.50 0.12 250)', display: 'inline-block' }} />
+                      MA50 {fmtPrice(chartMAs.ma50, currency)}
+                    </span>
+                  )}
+                  {chartMAs && overlays.ma && chartMAs.ma200 != null && (
+                    <span key="fsma200" style={{ fontSize: 11, color: 'oklch(0.45 0.08 220)', display: 'flex', alignItems: 'center', gap: 5, fontFamily: 'var(--font-mono)' }}>
+                      <span style={{ width: 14, borderTop: '2px dashed oklch(0.45 0.08 220)', display: 'inline-block' }} />
+                      MA200 {fmtPrice(chartMAs.ma200, currency)}
+                    </span>
+                  )}
+                  {chartVP && overlays.vp && chartVP.poc != null && (
+                    <span key="fspoc" style={{ fontSize: 11, color: 'oklch(0.65 0.16 90)', display: 'flex', alignItems: 'center', gap: 5, fontFamily: 'var(--font-mono)' }}>
+                      <span style={{ width: 14, borderTop: '2px dashed oklch(0.65 0.16 90)', display: 'inline-block' }} />
+                      POC {fmtPrice(chartVP.poc, currency)}
+                    </span>
+                  )}
+                </div>
+                <p style={{ margin: '8px 0 0', fontSize: 10, color: 'var(--ink-3)' }}>
+                  {th
+                    ? '● = OHLC pivot touches · Fib = swing H→L · POC = ราคาที่ trade มากที่สุด'
+                    : '● = OHLC pivot touches · Fib = swing H→L · POC = highest-volume price'}
+                </p>
+              </>
+            )}
 
-                  {/* Legend */}
-                  <div style={{ display: 'flex', gap: 12, marginTop: 10, flexWrap: 'wrap' }}>
-                    {displaySR && <>
-                      {displaySR.resistances.map((lvl, i) => (
-                        <span key={`r${i}`} style={{ fontSize: 11, color: 'var(--loss)', display: 'flex', alignItems: 'center', gap: 5, fontFamily: 'var(--font-mono)' }}>
-                          <span style={{ width: 14, borderTop: '2px dashed var(--loss)', display: 'inline-block' }} />
-                          R{i + 1} {fmtPrice(lvl.price, currency)} <StrengthDots count={lvl.strength} color="var(--loss)" />
-                        </span>
-                      ))}
-                      {displaySR.supports.map((lvl, i) => (
-                        <span key={`s${i}`} style={{ fontSize: 11, color: 'var(--gain)', display: 'flex', alignItems: 'center', gap: 5, fontFamily: 'var(--font-mono)' }}>
-                          <span style={{ width: 14, borderTop: '2px dashed var(--gain)', display: 'inline-block' }} />
-                          S{i + 1} {fmtPrice(lvl.price, currency)} <StrengthDots count={lvl.strength} color="var(--gain)" />
-                        </span>
-                      ))}
-                    </>}
-                    {chartMAs && overlays.ma && [
-                      chartMAs.ma20  && { lbl: 'MA20',  c: 'oklch(0.60 0.14 300)', v: chartMAs.ma20  },
-                      chartMAs.ma50  && { lbl: 'MA50',  c: 'oklch(0.50 0.12 250)', v: chartMAs.ma50  },
-                      chartMAs.ma200 && { lbl: 'MA200', c: 'oklch(0.45 0.08 220)', v: chartMAs.ma200 },
-                    ].filter(Boolean).map(m => (
-                      <span key={m.lbl} style={{ fontSize: 11, color: m.c, display: 'flex', alignItems: 'center', gap: 5, fontFamily: 'var(--font-mono)' }}>
-                        <span style={{ width: 14, borderTop: `2px dashed ${m.c}`, display: 'inline-block' }} />
-                        {m.lbl} {fmtPrice(m.v, currency)}
-                      </span>
-                    ))}
-                    {chartVP && overlays.vp && (
-                      <span style={{ fontSize: 11, color: 'oklch(0.65 0.16 90)', display: 'flex', alignItems: 'center', gap: 5, fontFamily: 'var(--font-mono)' }}>
-                        <span style={{ width: 14, borderTop: '2px dashed oklch(0.65 0.16 90)', display: 'inline-block' }} />
-                        POC {fmtPrice(chartVP.poc, currency)}
-                      </span>
-                    )}
+            {/* TradingView mode */}
+            {chartMode === 'tv' && (
+              item.region === 'TH' ? (
+                // SET stocks not available in the free TradingView widget embed
+                <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', height: 280, gap: 16, textAlign: 'center' }}>
+                  <div style={{ fontSize: 36 }}>📊</div>
+                  <div style={{ fontSize: 15, fontWeight: 600 }}>
+                    {th ? 'TradingView Embed ไม่รองรับหุ้น SET' : 'TradingView embed does not support SET stocks'}
                   </div>
-                  <p style={{ margin: '8px 0 0', fontSize: 10, color: 'var(--ink-3)' }}>
+                  <p style={{ margin: 0, fontSize: 13, color: 'var(--ink-3)', maxWidth: 340 }}>
                     {th
-                      ? '● = OHLC pivot touches · Fib = swing H→L · POC = ราคาที่ trade มากที่สุด'
-                      : '● = OHLC pivot touches · Fib = swing H→L · POC = highest-volume price'}
+                      ? 'หุ้น SET ไม่ available บน free widget — เปิดดูบน TradingView โดยตรงได้เลย'
+                      : 'SET-listed stocks require a TradingView account. Open the full chart in a new tab instead.'}
                   </p>
-                </>
+                  <a
+                    href={`https://www.tradingview.com/chart/?symbol=SET%3A${encodeURIComponent(item.symbol)}`}
+                    target="_blank" rel="noopener noreferrer"
+                    style={{ textDecoration: 'none' }}>
+                    <button className="btn" style={{ padding: '10px 24px', fontSize: 14 }}>
+                      {th ? 'เปิด TradingView ↗' : 'Open TradingView ↗'}
+                    </button>
+                  </a>
+                </div>
               ) : (
-                // TradingView fullscreen
                 <TradingViewChart ticker={tvTicker} region={item.region} height={fsH} />
               )
-            })()}
+            )}
+
           </div>
         </div>
       </div>,
