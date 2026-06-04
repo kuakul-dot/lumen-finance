@@ -38,7 +38,7 @@ function makeGreetingSub(lang) {
   return lang === "th" ? subTh[slot] : subEn[slot]
 }
 
-export function DashboardPage({ t, lang, ccy, setRoute, dataState, liveHoldings = [], prices = {}, cashAccounts = [], portfolio, refreshHoldings, refreshCashAccounts, displayName = '', fxRate = 36 }) {
+export function DashboardPage({ t, lang, ccy, setRoute, dataState, liveHoldings = [], prices = {}, cashAccounts = [], portfolio, refreshHoldings, refreshCashAccounts, displayName = '', fxRate = 36, lastPriceUpdate = null }) {
   if (dataState === "empty") return <DashboardEmpty t={t} lang={lang} setRoute={setRoute} />
   if (dataState === "live") return (
     <LiveDashboardPage
@@ -49,6 +49,7 @@ export function DashboardPage({ t, lang, ccy, setRoute, dataState, liveHoldings 
       refreshCashAccounts={refreshCashAccounts}
       displayName={displayName}
       fxRate={fxRate}
+      lastPriceUpdate={lastPriceUpdate}
     />
   )
 
@@ -442,12 +443,15 @@ function groupRowsByTicker(rows) {
 }
 
 // ─── Live Dashboard — matches demo layout with real data ─────────────────────
-function LiveDashboardPage({ t, lang, ccy, setRoute, liveHoldings, prices = {}, cashAccounts = [], portfolio, refreshHoldings, refreshCashAccounts, displayName = '', fxRate = 36 }) {
+function LiveDashboardPage({ t, lang, ccy, setRoute, liveHoldings, prices = {}, cashAccounts = [], portfolio, refreshHoldings, refreshCashAccounts, displayName = '', fxRate = 36, lastPriceUpdate = null }) {
   const th = lang === "th"
   const [showCashModal, setShowCashModal] = useState(null)
   const [refreshing, setRefreshing] = useState(false)
-  const [lastRefreshedAt, setLastRefreshedAt] = useState(null)
+  const [manualRefreshedAt, setManualRefreshedAt] = useState(null)
   const [refreshCooldown, setRefreshCooldown] = useState(false)
+
+  // Show the most recent update: manual click takes priority, otherwise auto-refresh
+  const lastRefreshedAt = manualRefreshedAt ?? lastPriceUpdate
 
   const handleRefresh = async () => {
     if (refreshing || refreshCooldown || !refreshHoldings) return
@@ -455,7 +459,7 @@ function LiveDashboardPage({ t, lang, ccy, setRoute, liveHoldings, prices = {}, 
     clearPriceCache()
     try {
       await refreshHoldings()
-      setLastRefreshedAt(new Date())
+      setManualRefreshedAt(new Date())
     } finally {
       setRefreshing(false)
       setRefreshCooldown(true)
@@ -994,7 +998,10 @@ function LiveDashboardPage({ t, lang, ccy, setRoute, liveHoldings, prices = {}, 
             <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
               {lastRefreshedAt && !refreshing && (
                 <span style={{ fontSize: 11, color: "var(--ink-3)", fontFamily: "var(--font-mono)" }}>
-                  {th ? "อัปเดต " : "Updated "}{lastRefreshedAt.toLocaleTimeString(th ? "th-TH" : "en-US", { hour: "2-digit", minute: "2-digit" })}
+                  {lastPriceUpdate && !manualRefreshedAt
+                    ? (th ? "Auto " : "Auto ")
+                    : (th ? "อัปเดต " : "Updated ")}
+                  {lastRefreshedAt.toLocaleTimeString(th ? "th-TH" : "en-US", { hour: "2-digit", minute: "2-digit", second: "2-digit" })}
                 </span>
               )}
               <button

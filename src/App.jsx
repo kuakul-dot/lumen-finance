@@ -10,7 +10,7 @@ import { PlanningPage } from './components/Planning'
 import { LUMEN_I18N, setLiveFxRate } from './data'
 import { supabase } from './lib/supabase'
 import { getOrCreatePortfolio, getPortfolios, addPortfolio, updatePortfolio, deletePortfolioCascade, getHoldingsSafe, getCashAccounts, deriveHoldings, recordSnapshot, exportData, addTransaction, rebuildAllHoldings, upsertCashAccount, upsertGoal } from './lib/db'
-import { fetchPrices, fetchFxRate } from './lib/prices'
+import { fetchPrices, fetchFxRate, clearPriceCache } from './lib/prices'
 
 const TWEAK_DEFAULTS = {
   accent:  "oklch(0.55 0.06 175)",
@@ -173,6 +173,39 @@ export default function App() {
       console.error('[Lumen] refreshHoldings error:', err)
     }
   }, [portfolio])
+
+  // ── Auto-refresh prices every 2 minutes while the tab is visible ─────────────
+  const AUTO_REFRESH_MS = 2 * 60 * 1000
+  const [lastPriceUpdate, setLastPriceUpdate] = useState(null)
+
+  useEffect(() => {
+    if (!session?.user) return
+
+    const doRefresh = async () => {
+      if (document.visibilityState !== 'visible') return
+      clearPriceCache()
+      await refreshHoldings()
+      setLastPriceUpdate(new Date())
+    }
+
+    const intervalId = setInterval(doRefresh, AUTO_REFRESH_MS)
+
+    // Also refresh immediately when the user switches back to this tab
+    // after being away for at least one interval
+    let lastTs = Date.now()
+    const onVisibility = () => {
+      if (document.visibilityState === 'visible' && Date.now() - lastTs >= AUTO_REFRESH_MS) {
+        doRefresh()
+        lastTs = Date.now()
+      }
+    }
+    document.addEventListener('visibilitychange', onVisibility)
+
+    return () => {
+      clearInterval(intervalId)
+      document.removeEventListener('visibilitychange', onVisibility)
+    }
+  }, [session?.user?.id, refreshHoldings])
 
   const refreshCashAccounts = useCallback(async () => {
     if (!portfolio) return
@@ -370,6 +403,7 @@ export default function App() {
         refreshCashAccounts={refreshCashAccounts}
         displayName={displayName}
         fxRate={fxRate}
+        lastPriceUpdate={lastPriceUpdate}
       />
     )
   } else if (route === "portfolio") {
