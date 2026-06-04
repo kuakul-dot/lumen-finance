@@ -7,6 +7,7 @@
 // Confirmed working (tested against real PDFs):
 //   ✅ Dime! (ไดม์)          — Confirmation Note / Tax Invoice (US stocks, USD)
 //   ✅ InnovestX (อินโนเวสท์) — Confirmation Note / Tax Invoice (TH stocks, THB)
+//   ✅ Webull Securities (TH) — Trade Confirmation (US stocks, USD, fractional shares)
 //
 // May work via the generic header/heuristic parsers (NOT yet verified):
 //   🟡 Settrade / Bualuang / KGI / Finansia / other text-based broker PDFs
@@ -73,6 +74,7 @@ const HEADER_PATS = {
     /ประเภท/i,
     /transaction.?type/i,     // Dime! English
     /order.?type/i,
+    /buy.?sell/i,              // Webull: "Buy/Sell"
     /^type$/i,
     /^action$/i,
     /^side$/i,
@@ -81,7 +83,7 @@ const HEADER_PATS = {
     /ชื่อหลักทรัพย์/i,        // Dime! Thai: ชื่อหลักทรัพย์ [ตลาด]
     /หลักทรัพย์/i,
     /securities/i,             // Dime! English: Securities [Exchange]
-    /^symbol$/i,
+    /^symbol/i,                // Webull: "Symbol & Name"
     /^ticker$/i,
     /^code$/i,
     /scrip/i,
@@ -250,9 +252,99 @@ function pickTicker(texts) {
   })?.replace(/\[.*?\]/g, '').trim() ?? null
 }
 
+// ── Mode W: Webull Securities (Thailand) Trade Confirmation ───────────────────
+// Layout per trade (3-5 physical rows after pdfjs Y-grouping):
+//   [row -1] TICKER          — ticker symbol alone (e.g. "AAPL")
+//   [row  0] COMPANY NAME    DD/MM/YYYY  HH:MM:SS,GMT+07  DD/MM/YYYY  BUY  qty  price  gross  net
+//   [row +1] Comm  0.00
+//   [row +2] Exchange (NSQ / NYSE)
+//   [row +3] Total  0.00
+// Currency comes from section header rows: "Currency: USD"
+
+const WEBULL_TIME_RE = /\d{2}:\d{2}:\d{2},GMT/i   // "21:30:04,GMT+07"
+
+function isWebull(rows) {
+  return rows.slice(0, 25).some(r => r.some(c => /webull/i.test(c.text)))
+}
+
+function parseWebull(rows) {
+  let currency = 'USD'   // Webull Thailand defaults to USD for US stocks
+  const results = []
+
+  for (let i = 0; i < rows.length; i++) {
+    const texts = rows[i].map(c => c.text)
+    const line  = texts.join(' ')
+
+    // Track currency section header: "Currency: USD" or "Currency: THB"
+    const ccyM = line.match(/Currency[:\s]+\s*(USD|THB)/i)
+    if (ccyM) { currency = ccyM[1].toUpperCase(); continue }
+
+    // Anchor: row with a DD/MM/YYYY date + Webull time stamp + BUY or SELL
+    if (!DATE_RE.test(line) || !WEBULL_TIME_RE.test(line)) continue
+    const typeMatch = line.match(/\b(BUY|SELL)\b/i)
+    if (!typeMatch) continue
+
+    const type = mapType(typeMatch[1])
+
+    // First DD/MM/YYYY in the row is the trade date (second is settlement date)
+    const dateStr = (line.match(/\b\d{1,2}\/\d{1,2}\/\d{4}\b/g) || [])[0]
+    const tradeDate = parseDate(dateStr)
+    if (!tradeDate) continue
+
+    // Numbers after "BUY"/"SELL": qty, traded_price, gross_amount, net_amount
+    const typeIdx = texts.findIndex(t => /^(BUY|SELL)$/i.test(t.trim()))
+    const afterType = (typeIdx >= 0 ? texts.slice(typeIdx + 1) : texts)
+      .filter(t => ISNUM_RE.test(t.trim()))
+      .map(t => toNum(t))
+    const qty    = afterType[0] ?? null
+    const price  = afterType[1] ?? null
+    // Net amount is the 4th number; fall back to gross (3rd) or compute
+    const amount = afterType[3] ?? afterType[2] ?? (qty != null && price != null ? +(qty * price).toFixed(6) : null)
+
+    // Ticker: scan up to 3 rows above for a standalone uppercase ticker
+    let ticker = null
+    for (let d = 1; d <= 3 && !ticker; d++) {
+      if (i - d < 0) break
+      const up = rows[i - d].map(c => c.text)
+      // Prefer a lone 1-6 char uppercase word that is not a keyword
+      const lone = up.find(t => {
+        const s = t.trim()
+        return /^[A-Z][A-Z0-9.\-]{0,5}$/.test(s) && !SKIP_TICKER.has(s)
+      })
+      if (lone) { ticker = lone.trim(); break }
+      if (!ticker) ticker = pickTicker(up)
+    }
+    // Fallback: try current row (company name row may contain short names that look like tickers)
+    if (!ticker) ticker = pickTicker(texts)
+
+    // Fee: scan forward for "Comm" line
+    let fee = 0
+    for (let d = 1; d <= 4 && !fee; d++) {
+      if (i + d >= rows.length) break
+      const fTexts = rows[i + d].map(c => c.text)
+      if (/\bComm\b/i.test(fTexts.join(' '))) {
+        const commNums = fTexts.filter(t => ISNUM_RE.test(t.trim())).map(t => toNum(t))
+        fee = commNums[0] ?? 0
+      }
+    }
+
+    results.push({
+      transacted_at: tradeDate,
+      type, ticker, shares: qty, price, amount, fee, tax: 0, currency, note: null,
+    })
+  }
+  return results
+}
+
 // ─── Main export ──────────────────────────────────────────────────────────────
 
 export function detectTransactions(rows) {
+  // Mode W: Webull Trade Confirmation — checked first (unique time stamp "HH:MM:SS,GMT+07")
+  if (isWebull(rows)) {
+    const r = parseWebull(rows)
+    if (r.length > 0) return r
+  }
+
   const header = findHeader(rows)
 
   // Try detectors in order of precision; use the first that yields results.

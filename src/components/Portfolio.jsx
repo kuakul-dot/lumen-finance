@@ -2348,7 +2348,7 @@ function ImportPDFModal({ lang, portfolioId, onClose, onImported }) {
                 {th ? "โบรกเกอร์ที่รองรับ" : "Supported brokers"}
               </div>
               <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
-                {["Dime!", "InnovestX"].map(b => (
+                {["Dime!", "InnovestX", "Webull Securities (TH)"].map(b => (
                   <span key={b} style={{
                     fontSize: 11, fontWeight: 600, padding: "3px 9px", borderRadius: 999,
                     background: "var(--accent-soft)", color: "var(--accent-ink)",
