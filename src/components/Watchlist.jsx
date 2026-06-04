@@ -255,7 +255,7 @@ function WatchlistCard({ item, priceData, sr, onRemove, onNoteChange, showChart,
 
   // ── Chart-specific state (self-contained in the card) ──────────────────────
   const [chartMode,    setChartMode]    = useState('sr')   // 'sr' | 'tv'
-  const [chartRange,   setChartRange]   = useState('3mo')
+  const [chartRange,   setChartRange]   = useState('6mo')
   const [chartBars,    setChartBars]    = useState(null)   // [{t,o,h,l,c,v}]
   const [loadingChart, setLoadingChart] = useState(false)
   // Overlay toggles — Fibonacci, Moving Averages, Volume Profile
@@ -619,7 +619,7 @@ function WatchlistFullscreen({ item, priceData, sr, lang, onClose }) {
   const gain = changePct > 0, loss = changePct < 0
 
   const [chartMode,    setChartMode]    = useState('sr')
-  const [chartRange,   setChartRange]   = useState('3mo')
+  const [chartRange,   setChartRange]   = useState('6mo')
   const [chartBars,    setChartBars]    = useState(null)
   const [loadingChart, setLoadingChart] = useState(false)
   const [overlays,     setOverlays]     = useState({ fib: false, ma: false, vp: false })
@@ -1199,7 +1199,7 @@ export function WatchlistPage({ lang, ccy, fxRate = 36 }) {
     for (const item of items) {
       const sym = toYahooSymbol(item.symbol, item.region || 'US', item.cls || 'Equity')
       try {
-        const { series } = await fetchHistory(sym, '3mo')
+        const { series } = await fetchHistory(sym, '6mo')
         // Store full OHLC bars; filter only rows with a valid close
         const bars = series.filter(p => p.c != null && Number.isFinite(p.c) && p.c > 0)
         if (bars.length >= 12) {
