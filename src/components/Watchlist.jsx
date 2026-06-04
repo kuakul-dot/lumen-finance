@@ -1,6 +1,7 @@
 import { useState, useEffect, useCallback, useRef } from 'react'
 import { PageHead, Icon, TickerLogo } from './Nav'
 import { TradingViewChart } from './TradingViewChart'
+import { LineChart } from './Charts'
 import { fetchHistory, fetchPrices, toYahooSymbol } from '../lib/prices'
 
 const WATCHLIST_KEY = 'lumen_watchlist_v1'
@@ -161,6 +162,9 @@ function SRLadder({ sr, livePrice, currency }) {
   )
 }
 
+const CHART_RANGES = ['1mo', '3mo', '6mo', '1y']
+const RANGE_LABEL  = { '1mo': '1M', '3mo': '3M', '6mo': '6M', '1y': '1Y' }
+
 // ── Watchlist card ────────────────────────────────────────────────────────────
 function WatchlistCard({ item, priceData, sr, onRemove, onNoteChange, showChart, onToggleChart, lang }) {
   const th = lang === 'th'
@@ -169,10 +173,61 @@ function WatchlistCard({ item, priceData, sr, onRemove, onNoteChange, showChart,
   const currency  = priceData?.currency ?? (item.region === 'TH' ? 'THB' : 'USD')
   const gain = changePct > 0, loss = changePct < 0
 
-  // Clean ticker for TradingView: BTC-USD → BTC (TradingView resolves to BINANCE:BTCUSD)
+  // ── Chart-specific state (self-contained in the card) ──────────────────────
+  const [chartMode,  setChartMode]  = useState('sr')    // 'sr' | 'tv'
+  const [chartRange, setChartRange] = useState('3mo')
+  const [chartPts,   setChartPts]   = useState(null)    // [{t, c}] from fetchHistory
+  const [loadingChart, setLoadingChart] = useState(false)
+
+  // Fetch price history when chart opens or range changes
+  useEffect(() => {
+    if (!showChart || chartMode !== 'sr') return
+    const sym = toYahooSymbol(item.symbol, item.region || 'US', item.cls || 'Equity')
+    let cancelled = false
+    setLoadingChart(true)
+    fetchHistory(sym, chartRange)
+      .then(({ series }) => {
+        if (cancelled) return
+        const pts = series.filter(p => p.c != null && Number.isFinite(p.c) && p.c > 0)
+        setChartPts(pts.length >= 5 ? pts : null)
+      })
+      .catch(() => { if (!cancelled) setChartPts(null) })
+      .finally(() => { if (!cancelled) setLoadingChart(false) })
+    return () => { cancelled = true }
+  }, [showChart, chartMode, chartRange, item.symbol, item.region, item.cls])
+
+  // Reset chart mode when card is collapsed
+  useEffect(() => { if (!showChart) setChartMode('sr') }, [showChart])
+
+  // Clean ticker for TradingView: BTC-USD → BTC
   const tvTicker = item.cls === 'Crypto'
     ? item.symbol.replace(/[-/](USD|USDT|USDC|BTC|ETH)$/i, '')
     : item.symbol
+
+  // Build LineChart series + hLines from price history and S/R levels
+  const lineSeries = chartPts ? [{
+    name: item.symbol,
+    color: 'var(--accent)',
+    fill: true,
+    data: chartPts.map(p => ({
+      x: p.t,
+      y: p.c,
+      label: new Date(p.t * 1000).toLocaleDateString('en', { month: 'short', day: 'numeric' }),
+    })),
+  }] : null
+
+  const hLines = sr ? [
+    ...sr.resistances.map((lvl, i) => ({
+      y: lvl.price,
+      color: 'var(--loss)',
+      label: `R${i + 1} ${fmtPrice(lvl.price, currency)}`,
+    })),
+    ...sr.supports.map((lvl, i) => ({
+      y: lvl.price,
+      color: 'var(--gain)',
+      label: `S${i + 1} ${fmtPrice(lvl.price, currency)}`,
+    })),
+  ] : []
 
   return (
     <div style={{
@@ -267,20 +322,111 @@ function WatchlistCard({ item, priceData, sr, onRemove, onNoteChange, showChart,
           }}>
           <Icon name="chart" size={13} />
           {th
-            ? (showChart ? 'ปิดกราฟ' : 'ดูกราฟ TradingView')
-            : (showChart ? 'Close chart' : 'View TradingView chart')}
+            ? (showChart ? 'ปิดกราฟ' : 'ดูกราฟ + แนวรับ/ต้าน')
+            : (showChart ? 'Close chart' : 'View chart with S/R')}
         </button>
       </div>
 
-      {/* ── Embedded TradingView chart ────────────────────── */}
+      {/* ── Expanded chart area ───────────────────────────── */}
       {showChart && (
         <div style={{ padding: '0 var(--pad-card) var(--pad-card)' }}>
-          <TradingViewChart ticker={tvTicker} region={item.region} height={440} />
-          <p style={{ margin: '8px 0 0', fontSize: 11, color: 'var(--ink-3)', textAlign: 'center' }}>
-            {th
-              ? 'กราฟจาก TradingView — ใช้เครื่องมือวิเคราะห์บนกราฟได้เลย'
-              : 'Powered by TradingView — use the toolbar to draw S/R lines and indicators'}
-          </p>
+
+          {/* Mode toggle: S/R Chart ↔ TradingView */}
+          <div style={{ display: 'flex', gap: 6, marginBottom: 12 }}>
+            <button onClick={() => setChartMode('sr')} style={{
+              flex: 1, padding: '7px 0', borderRadius: 8, fontSize: 11, fontWeight: 600, cursor: 'pointer',
+              border: '1.5px solid var(--line)',
+              background: chartMode === 'sr' ? 'var(--accent)' : 'var(--bg-2)',
+              color: chartMode === 'sr' ? '#fff' : 'var(--ink)',
+            }}>
+              📈 {th ? 'กราฟ + แนวรับ/ต้าน' : 'S/R Chart'}
+            </button>
+            <button onClick={() => setChartMode('tv')} style={{
+              flex: 1, padding: '7px 0', borderRadius: 8, fontSize: 11, fontWeight: 600, cursor: 'pointer',
+              border: '1.5px solid var(--line)',
+              background: chartMode === 'tv' ? 'var(--ink)' : 'var(--bg-2)',
+              color: chartMode === 'tv' ? 'var(--bg)' : 'var(--ink)',
+            }}>
+              📊 TradingView
+            </button>
+          </div>
+
+          {/* ── S/R Chart mode ─────────────────────────────── */}
+          {chartMode === 'sr' && (
+            <>
+              {/* Range selector */}
+              <div style={{ display: 'flex', gap: 4, marginBottom: 10 }}>
+                {CHART_RANGES.map(r => (
+                  <button key={r} onClick={() => setChartRange(r)} style={{
+                    padding: '4px 10px', borderRadius: 6, fontSize: 11, fontWeight: 600, cursor: 'pointer',
+                    border: '1px solid var(--line)',
+                    background: chartRange === r ? 'var(--ink)' : 'transparent',
+                    color: chartRange === r ? 'var(--bg)' : 'var(--ink-2)',
+                  }}>
+                    {RANGE_LABEL[r]}
+                  </button>
+                ))}
+                {loadingChart && <span style={{ fontSize: 11, color: 'var(--ink-3)', alignSelf: 'center', marginLeft: 4 }}>…</span>}
+              </div>
+
+              {/* Chart */}
+              {lineSeries ? (
+                <div style={{ background: 'var(--bg-2)', borderRadius: 10, padding: '10px 4px 4px', border: '1px solid var(--line)' }}>
+                  <LineChart
+                    series={lineSeries}
+                    height={240}
+                    hLines={hLines}
+                    fmt={v => fmtPrice(v, currency)}
+                    labelFmt={d => d.label}
+                  />
+                </div>
+              ) : loadingChart ? (
+                <div style={{ height: 100, display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--ink-3)', fontSize: 12 }}>
+                  {th ? 'กำลังโหลดกราฟ…' : 'Loading chart…'}
+                </div>
+              ) : (
+                <div style={{ height: 80, display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--ink-3)', fontSize: 12 }}>
+                  {th ? 'ไม่มีข้อมูลราคาย้อนหลัง' : 'No historical price data available'}
+                </div>
+              )}
+
+              {/* S/R legend */}
+              {sr && (
+                <div style={{ display: 'flex', gap: 14, marginTop: 8, flexWrap: 'wrap' }}>
+                  {sr.resistances.map((lvl, i) => (
+                    <span key={`r${i}`} style={{ fontSize: 10, color: 'var(--loss)', display: 'flex', alignItems: 'center', gap: 4, fontFamily: 'var(--font-mono)' }}>
+                      <span style={{ width: 14, borderTop: '2px dashed var(--loss)', display: 'inline-block' }} />
+                      R{i + 1} {fmtPrice(lvl.price, currency)} <StrengthDots count={lvl.strength} color="var(--loss)" />
+                    </span>
+                  ))}
+                  {sr.supports.map((lvl, i) => (
+                    <span key={`s${i}`} style={{ fontSize: 10, color: 'var(--gain)', display: 'flex', alignItems: 'center', gap: 4, fontFamily: 'var(--font-mono)' }}>
+                      <span style={{ width: 14, borderTop: '2px dashed var(--gain)', display: 'inline-block' }} />
+                      S{i + 1} {fmtPrice(lvl.price, currency)} <StrengthDots count={lvl.strength} color="var(--gain)" />
+                    </span>
+                  ))}
+                </div>
+              )}
+
+              <p style={{ margin: '8px 0 0', fontSize: 10, color: 'var(--ink-3)' }}>
+                {th
+                  ? '● = pivot touches · คำนวณจากข้อมูลปิด 3 เดือน'
+                  : '● = pivot touches · computed from 3-month closing prices'}
+              </p>
+            </>
+          )}
+
+          {/* ── TradingView mode ───────────────────────────── */}
+          {chartMode === 'tv' && (
+            <>
+              <TradingViewChart ticker={tvTicker} region={item.region} height={420} />
+              <p style={{ margin: '8px 0 0', fontSize: 11, color: 'var(--ink-3)', textAlign: 'center' }}>
+                {th
+                  ? 'TradingView — ใช้เครื่องมือวาดเส้น Fibonacci, แนวรับ/ต้าน, indicator ได้เลย'
+                  : 'TradingView — draw Fibonacci, trendlines, and indicators directly on the chart'}
+              </p>
+            </>
+          )}
         </div>
       )}
     </div>

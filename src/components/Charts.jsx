@@ -16,7 +16,7 @@ export function Sparkline({ data, width = 80, height = 24, stroke = "var(--ink)"
   )
 }
 
-export function LineChart({ series, height = 280, fmt, labelFmt }) {
+export function LineChart({ series, height = 280, fmt, labelFmt, hLines = [] }) {
   const wrapRef = useRef(null)
   const [w, setW] = useState(720)
   const [hover, setHover] = useState(null)
@@ -32,7 +32,11 @@ export function LineChart({ series, height = 280, fmt, labelFmt }) {
   const padL = 4, padR = 92, padT = 12, padB = 28
   const innerW = w - padL - padR
   const innerH = height - padT - padB
-  const allY = series.flatMap(s => s.data.map(d => d.y)).filter(Number.isFinite)
+  // Include hLines y-values so S/R lines that lie outside the price range are still visible
+  const allY = [
+    ...series.flatMap(s => s.data.map(d => d.y)),
+    ...hLines.map(h => h.y),
+  ].filter(Number.isFinite)
   const yMin = allY.length ? Math.min(...allY) : 0
   const yMax = allY.length ? Math.max(...allY) : 1
   const yRange = (yMax - yMin) || 1
@@ -82,6 +86,26 @@ export function LineChart({ series, height = 280, fmt, labelFmt }) {
               {s.fill ? <path d={area} fill={s.color} opacity="0.08" /> : null}
               <path d={d} fill="none" stroke={s.color} strokeWidth="2" strokeLinejoin="round" strokeLinecap="round"
                     strokeDasharray={s.dashed ? "4 4" : ""} />
+            </g>
+          )
+        })}
+        {/* Horizontal S/R reference lines — drawn above series fill, below hover layer */}
+        {hLines.map((hl, i) => {
+          if (!Number.isFinite(hl.y)) return null
+          const yy = yPos(hl.y)
+          // Clamp to chart bounds with a 2px tolerance
+          if (yy < padT - 2 || yy > padT + innerH + 2) return null
+          return (
+            <g key={`hl${i}`}>
+              <line x1={padL} x2={padL + innerW} y1={yy} y2={yy}
+                    stroke={hl.color || 'var(--ink-3)'} strokeWidth={1.5}
+                    strokeDasharray="5 3" opacity={0.75} />
+              {/* Label sits INSIDE the chart, right-aligned just before the right edge */}
+              <text x={padL + innerW - 4} y={yy - 4}
+                    textAnchor="end" fontSize={9} fontWeight="700"
+                    fill={hl.color || 'var(--ink-3)'} fontFamily="var(--font-mono)">
+                {hl.label}
+              </text>
             </g>
           )
         })}
