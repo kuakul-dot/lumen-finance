@@ -1746,6 +1746,26 @@ function AnalyticsGrowth({ t, lang, ccy, rows = [], fxRate = 36, totalValue, tot
 
   // ── Period picker for chart ────────────────────────────────────────────────
   const [chartPeriod, setChartPeriod] = useState("1Y")
+
+  // ── Benchmark comparison ───────────────────────────────────────────────────
+  const BENCHMARKS = {
+    none:    { label: th ? "ไม่เปรียบเทียบ" : "None",       symbol: null },
+    sp500:   { label: "S&P 500",   symbol: "^GSPC",   color: "var(--accent)" },
+    set:     { label: "SET Index", symbol: "^SET.BK", color: "var(--c3)" },
+    nasdaq:  { label: "Nasdaq 100",symbol: "^NDX",    color: "var(--c2)" },
+  }
+  const [benchKey, setBenchKey] = useState("none")
+  const [benchHistory, setBenchHistory] = useState({})  // { symbol: [{t, c}] }
+
+  useEffect(() => {
+    const sym = BENCHMARKS[benchKey]?.symbol
+    if (!sym || benchHistory[sym]) return   // already cached
+    let cancelled = false
+    fetchHistory(sym, "5y")
+      .then(d => { if (!cancelled) setBenchHistory(prev => ({ ...prev, [sym]: d.series || [] })) })
+      .catch(() => {})
+    return () => { cancelled = true }
+  }, [benchKey])
   const growthPeriodDaysMap = { "1Y": 365, "3Y": 365 * 3, "5Y": 365 * 5 }
   const isGrowthEnabled = k => dataState !== "live" || growthPeriodDaysMap[k] <= daysSinceFirst + 14
 
@@ -1821,8 +1841,50 @@ function AnalyticsGrowth({ t, lang, ccy, rows = [], fxRate = 36, totalValue, tot
   }, [isLive, snaps, chartPeriod, th])
 
   // Prefer real history; fall back to the estimated curve until snapshots exist.
-  const chartSeries = realSeries || liveSeries
+  const portSeries = realSeries || liveSeries
   const usingReal = !!realSeries
+
+  // ── Benchmark overlay: rebase to 0% at the same start date as the portfolio
+  const benchSeries = useMemo(() => {
+    const sym = BENCHMARKS[benchKey]?.symbol
+    const raw = sym ? (benchHistory[sym] || []) : []
+    if (!raw.length || !portSeries?.[0]?.data?.length) return null
+
+    const days = growthPeriodDaysMap[chartPeriod] || 365
+    const fromTs = (Date.now() - days * 86400000) / 1000
+    const window = raw.filter(p => p.t >= fromTs)
+    if (window.length < 2) return null
+
+    const base = window[0].c
+    const locale = th ? "th-TH" : "en-US"
+    const span = (window[window.length - 1].t - window[0].t) / 86400
+    const mkLabel = ts => {
+      const d = new Date(ts * 1000)
+      if (span < 60)  return d.toLocaleString(locale, { month: "short", day: "numeric" })
+      if (span < 730) return d.toLocaleString(locale, { month: "short" }) + " '" + String(d.getFullYear()).slice(2)
+      return "'" + String(d.getFullYear()).slice(2)
+    }
+
+    // Downsample to match portfolio series length
+    const targetPts = portSeries[0].data.length
+    const stride = Math.max(1, Math.floor(window.length / targetPts))
+    let sampled = window.filter((_, i) => i % stride === 0)
+    if (sampled[sampled.length - 1] !== window[window.length - 1])
+      sampled = [...sampled, window[window.length - 1]]
+
+    return {
+      name: BENCHMARKS[benchKey].label,
+      color: BENCHMARKS[benchKey].color,
+      dashed: true,
+      data: sampled.map((p, i) => ({ x: i, y: (p.c / base - 1) * 100, label: mkLabel(p.t) })),
+    }
+  }, [benchKey, benchHistory, portSeries, chartPeriod, th])
+
+  // Merge portfolio + benchmark into one series array for the chart
+  const chartSeries = useMemo(() => {
+    if (!portSeries) return null
+    return benchSeries ? [portSeries[0], benchSeries] : portSeries
+  }, [portSeries, benchSeries])
 
   // ── CAGR using actual holding period ─────────────────────────────────────
   // Formula: (market_value / cost_basis) ^ (1 / years) - 1
@@ -1931,7 +1993,7 @@ function AnalyticsGrowth({ t, lang, ccy, rows = [], fxRate = 36, totalValue, tot
       {dataState === "live" ? (
         chartSeries ? (
           <div className="card" style={{ marginBottom: 16 }}>
-            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-end", marginBottom: 16 }}>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 16, gap: 12, flexWrap: "wrap" }}>
               <div>
                 <h3 className="section-title">
                   {th ? "เส้นทางผลตอบแทนสะสม" : "Cumulative return path"}
@@ -1948,17 +2010,27 @@ function AnalyticsGrowth({ t, lang, ccy, rows = [], fxRate = 36, totalValue, tot
                           : "Start = 0% (cost) · End = current return · Estimated path — no daily NAV history yet")}
                 </div>
               </div>
-              <div className="segmented">
-                {["1Y","3Y","5Y"].map(k => {
-                  const enabled = isGrowthEnabled(k)
-                  return (
-                    <button key={k} className={chartPeriod === k ? "on" : ""}
-                      disabled={!enabled}
-                      title={!enabled ? (th ? "ข้อมูลย้อนหลังไม่พอ" : "Not enough history yet") : undefined}
-                      style={{ opacity: enabled ? 1 : 0.35, cursor: enabled ? "pointer" : "not-allowed" }}
-                      onClick={() => enabled && setChartPeriod(k)}>{k}</button>
-                  )
-                })}
+              <div style={{ display: "flex", gap: 8, alignItems: "center", flexShrink: 0 }}>
+                {/* Benchmark picker */}
+                <select value={benchKey} onChange={e => setBenchKey(e.target.value)}
+                  style={{ padding: "5px 24px 5px 10px", borderRadius: 8, fontSize: 12, border: "1.5px solid var(--line)", background: "var(--bg)", color: "var(--ink)", outline: "none", fontFamily: "var(--font-mono)", cursor: "pointer" }}>
+                  {Object.entries(BENCHMARKS).map(([k, b]) => (
+                    <option key={k} value={k}>{k === "none" ? (th ? "เทียบกับ…" : "Compare to…") : b.label}</option>
+                  ))}
+                </select>
+                {/* Period picker */}
+                <div className="segmented">
+                  {["1Y","3Y","5Y"].map(k => {
+                    const enabled = isGrowthEnabled(k)
+                    return (
+                      <button key={k} className={chartPeriod === k ? "on" : ""}
+                        disabled={!enabled}
+                        title={!enabled ? (th ? "ข้อมูลย้อนหลังไม่พอ" : "Not enough history yet") : undefined}
+                        style={{ opacity: enabled ? 1 : 0.35, cursor: enabled ? "pointer" : "not-allowed" }}
+                        onClick={() => enabled && setChartPeriod(k)}>{k}</button>
+                    )
+                  })}
+                </div>
               </div>
             </div>
             <LineChart series={chartSeries} height={300} fmt={v => (v >= 0 ? "+" : "") + v.toFixed(1) + "%"} />
