@@ -6,7 +6,7 @@ import { GoalRing } from './Dashboard'
 import { LUMEN_FMT, LUMEN_GOALS } from '../data'
 import { getGoals, upsertGoal, deleteGoal, deriveHoldings } from '../lib/db'
 
-export function PlanningPage({ t, lang, ccy, session, liveHoldings = [], prices = {} }) {
+export function PlanningPage({ t, lang, ccy, session, liveHoldings = [], prices = {}, fxRate = 36 }) {
   const th = lang === "th"
   const FMT = LUMEN_FMT
   const isLive = !!session
@@ -20,9 +20,9 @@ export function PlanningPage({ t, lang, ccy, session, liveHoldings = [], prices 
   // ── Portfolio value from live holdings ───────────────────────────────────────
   const portfolioValue = useMemo(() => {
     if (!isLive || liveHoldings.length === 0) return 0
-    const rows = deriveHoldings(liveHoldings, ccy, prices)
+    const rows = deriveHoldings(liveHoldings, ccy, prices, fxRate)
     return rows.reduce((s, r) => s + r.value, 0)
-  }, [isLive, liveHoldings, ccy, prices])
+  }, [isLive, liveHoldings, ccy, prices, fxRate])
 
   // ── Load goals ───────────────────────────────────────────────────────────────
   useEffect(() => {

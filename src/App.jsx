@@ -334,6 +334,7 @@ export default function App() {
         session={session}
         liveHoldings={liveHoldings}
         prices={prices}
+        fxRate={fxRate}
       />
     )
   }
