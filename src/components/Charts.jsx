@@ -92,10 +92,14 @@ export function LineChart({ series, height = 280, fmt, labelFmt }) {
           <g>
             <line x1={xPos(series[0].data[hover].x)} x2={xPos(series[0].data[hover].x)}
                   y1={padT} y2={padT + innerH} stroke="var(--ink)" strokeDasharray="2 3" opacity="0.4" />
-            {series.map((s, si) => (
-              <circle key={si} cx={xPos(s.data[hover].x)} cy={yPos(s.data[hover].y)}
-                      r="4" fill="var(--bg)" stroke={s.color} strokeWidth="2" />
-            ))}
+            {series.map((s, si) => {
+              const pt = s.data[hover]  // may be undefined if this series is shorter
+              if (!pt) return null
+              return (
+                <circle key={si} cx={xPos(pt.x)} cy={yPos(pt.y)}
+                        r="4" fill="var(--bg)" stroke={s.color} strokeWidth="2" />
+              )
+            })}
           </g>
         )}
       </svg>
@@ -117,13 +121,17 @@ export function LineChart({ series, height = 280, fmt, labelFmt }) {
             <div style={{ fontSize: 10, opacity: 0.7, marginBottom: 2 }}>
               {labelFmt ? labelFmt(series[0].data[hover]) : series[0].data[hover].label}
             </div>
-            {series.map((s, si) => (
-              <div key={si} style={{ display: "flex", alignItems: "center", gap: 8 }}>
-                <span className="dot" style={{ background: s.color }} />
-                <span>{s.name}</span>
-                <span style={{ marginLeft: "auto" }}>{fmt ? fmt(s.data[hover].y) : s.data[hover].y}</span>
-              </div>
-            ))}
+            {series.map((s, si) => {
+              const pt = s.data[hover]
+              if (!pt) return null  // skip series shorter than the hovered index
+              return (
+                <div key={si} style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                  <span className="dot" style={{ background: s.color }} />
+                  <span>{s.name}</span>
+                  <span style={{ marginLeft: "auto" }}>{fmt ? fmt(pt.y) : pt.y}</span>
+                </div>
+              )
+            })}
           </div>
         )
       })()}

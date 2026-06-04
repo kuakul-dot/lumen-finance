@@ -1685,6 +1685,14 @@ function SyncRow({ s, th, FMT, ccy, onChange }) {
   )
 }
 
+// Benchmark definitions — outside component so the reference is stable (no stale closure)
+const BENCHMARKS = {
+  none:   { labelTh: "ไม่เปรียบเทียบ", labelEn: "None",        symbol: null,        color: null },
+  sp500:  { labelTh: "S&P 500",         labelEn: "S&P 500",     symbol: "^GSPC",     color: "var(--accent)" },
+  set:    { labelTh: "SET Index",        labelEn: "SET Index",   symbol: "^SET.BK",   color: "var(--c3)" },
+  nasdaq: { labelTh: "Nasdaq 100",       labelEn: "Nasdaq 100",  symbol: "^NDX",      color: "var(--c2)" },
+}
+
 /* ─── Growth tab ─────────────────────────────────────────────────────────────── */
 function AnalyticsGrowth({ t, lang, ccy, rows = [], fxRate = 36, totalValue, totalCost, totalPL, totalPlPct, dataState, earliestHoldingDate, portfolio }) {
   const FMT = LUMEN_FMT
@@ -1749,12 +1757,6 @@ function AnalyticsGrowth({ t, lang, ccy, rows = [], fxRate = 36, totalValue, tot
   const [chartPeriod, setChartPeriod] = useState("1Y")
 
   // ── Benchmark comparison ───────────────────────────────────────────────────
-  const BENCHMARKS = {
-    none:    { label: th ? "ไม่เปรียบเทียบ" : "None",       symbol: null },
-    sp500:   { label: "S&P 500",   symbol: "^GSPC",   color: "var(--accent)" },
-    set:     { label: "SET Index", symbol: "^SET.BK", color: "var(--c3)" },
-    nasdaq:  { label: "Nasdaq 100",symbol: "^NDX",    color: "var(--c2)" },
-  }
   const [benchKey, setBenchKey] = useState("none")
   const [benchHistory, setBenchHistory] = useState({})  // { symbol: [{t, c}] }
 
@@ -1881,7 +1883,7 @@ function AnalyticsGrowth({ t, lang, ccy, rows = [], fxRate = 36, totalValue, tot
     if (data.length < 2) return null
 
     return {
-      name: BENCHMARKS[benchKey].label,
+      name: th ? BENCHMARKS[benchKey].labelTh : BENCHMARKS[benchKey].labelEn,
       color: BENCHMARKS[benchKey].color,
       dashed: true,
       data,
@@ -2023,7 +2025,7 @@ function AnalyticsGrowth({ t, lang, ccy, rows = [], fxRate = 36, totalValue, tot
                 <select value={benchKey} onChange={e => setBenchKey(e.target.value)}
                   style={{ padding: "5px 24px 5px 10px", borderRadius: 8, fontSize: 12, border: "1.5px solid var(--line)", background: "var(--bg)", color: "var(--ink)", outline: "none", fontFamily: "var(--font-mono)", cursor: "pointer" }}>
                   {Object.entries(BENCHMARKS).map(([k, b]) => (
-                    <option key={k} value={k}>{k === "none" ? (th ? "เทียบกับ…" : "Compare to…") : b.label}</option>
+                    <option key={k} value={k}>{k === "none" ? (th ? "เทียบกับ…" : "Compare to…") : (th ? b.labelTh : b.labelEn)}</option>
                   ))}
                 </select>
                 {/* Period picker */}
