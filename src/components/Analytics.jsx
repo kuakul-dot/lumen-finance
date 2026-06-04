@@ -10,6 +10,7 @@ import { fetchHistory, toYahooSymbol } from '../lib/prices'
 export function AnalyticsPage({ t, lang, ccy, dataState, liveHoldings = [], prices = {}, fxRate = 36, portfolio }) {
   const [tab, setTab] = useState("common")
   const [transactions, setTransactions] = useState([])
+  const [pendingDivCount, setPendingDivCount] = useState(0)
 
   // Fetch ALL transactions — the earliest-investment date and per-ticker
   // purchase dates must see the full history, not just the latest 50.
@@ -21,6 +22,46 @@ export function AnalyticsPage({ t, lang, ccy, dataState, liveHoldings = [], pric
       .catch(() => {})
     return () => { cancelled = true }
   }, [dataState, portfolio?.id])
+
+  // ── Proactively count pending (unsynced) dividends for the tab badge ─────────
+  // Runs when transactions load. Reuses the same /api/dividends endpoint that the
+  // full Sync uses, so results are consistent. Count resets to 0 after a sync
+  // (handleTransactionAdded fires → transactions changes → this re-runs).
+  useEffect(() => {
+    if (dataState !== "live" || liveHoldings.length === 0 || transactions.length === 0) return
+    let cancelled = false
+    const symbols = [...new Set(
+      liveHoldings.map(h => toYahooSymbol(h.ticker, h.region || 'TH', h.asset_class || 'Equity'))
+    )].join(',')
+    fetch(`/api/dividends?symbols=${encodeURIComponent(symbols)}`)
+      .then(r => r.json())
+      .then(history => {
+        if (cancelled) return
+        const nowSec = Date.now() / 1000
+        const divTxs = transactions.filter(tx => tx.type === 'Dividend')
+        const toXdStr = (sec) => new Date((sec + 43200) * 1000).toISOString().slice(0, 10)
+        const alreadyRecorded = (ticker, xdDateStr) =>
+          divTxs.filter(tx => tx.ticker === ticker && tx.transacted_at).some(tx => {
+            if (tx.note?.includes(`xd:${xdDateStr}`)) return true
+            const noteXd = tx.note?.match(/xd:(\d{4}-\d{2}-\d{2})/)?.[1]
+            const refDate = noteXd ?? tx.transacted_at.slice(0, 10)
+            return Math.abs(new Date(refDate) - new Date(xdDateStr)) < 28 * 86400 * 1000
+          })
+        // Count XD events that passed and haven't been recorded
+        let count = 0
+        liveHoldings.forEach(h => {
+          const sym = toYahooSymbol(h.ticker, h.region || 'TH', h.asset_class || 'Equity')
+          ;(history[sym] || []).forEach(e => {
+            if (e.date > nowSec) return
+            const xdDateStr = toXdStr(e.date)
+            if (!alreadyRecorded(h.ticker, xdDateStr)) count++
+          })
+        })
+        setPendingDivCount(count)
+      })
+      .catch(() => {})
+    return () => { cancelled = true }
+  }, [dataState, liveHoldings, transactions])
 
   // Called by AnalyticsDiv2 after new Dividend transactions are saved
   const handleTransactionAdded = useCallback((newTxs) => {
@@ -113,6 +154,18 @@ export function AnalyticsPage({ t, lang, ccy, dataState, liveHoldings = [], pric
           <button key={tb.id} className={"tab" + (tab === tb.id ? " active" : "")} onClick={() => setTab(tb.id)}>
             <span style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>
               <Icon name={tb.icon} size={13} /> {tb.label}
+              {tb.id === "dividends" && pendingDivCount > 0 && (
+                <span style={{
+                  display: "inline-flex", alignItems: "center", justifyContent: "center",
+                  minWidth: 16, height: 16, borderRadius: 8,
+                  padding: "0 4px",
+                  background: "var(--loss)", color: "#fff",
+                  fontSize: 9, fontWeight: 700, fontFamily: "var(--font-mono)",
+                  lineHeight: 1,
+                }}>
+                  {pendingDivCount > 9 ? "9+" : pendingDivCount}
+                </span>
+              )}
             </span>
           </button>
         ))}
