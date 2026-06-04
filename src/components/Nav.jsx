@@ -98,7 +98,6 @@ export function TopNav({ route, setRoute, lang, setLang, ccy, setCcy, t, session
     { id: "tools",     label: t.nav.tools },
     { id: "planning",  label: t.nav.planning },
     { id: "watchlist", label: t.nav.watchlist || "Watchlist" },
-    { id: "dca",       label: t.nav.dca       || "DCA"       },
   ]
   const email    = session?.user?.email || ""
   const initials = email ? email.slice(0, 2).toUpperCase() : "ME"
@@ -386,7 +385,6 @@ export function BottomNav({ route, setRoute, lang }) {
     { id: "tools",     labelTh: "เครื่องมือ", labelEn: "Tools",    icon: "sort"      },
     { id: "planning",  labelTh: "วางแผน",    labelEn: "Plan",      icon: "leaf"      },
     { id: "watchlist", labelTh: "ติดตาม",    labelEn: "Watch",     icon: "eye"       },
-    { id: "dca",       labelTh: "DCA",       labelEn: "DCA",       icon: "calc"      },
   ]
   return (
     <nav className="bottom-nav" aria-label="Bottom navigation">

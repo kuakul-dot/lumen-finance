@@ -590,7 +590,6 @@ export default function App() {
             ["tools",      lang === "th" ? "เครื่องมือ" : "Tools"],
             ["planning",   lang === "th" ? "วางแผน"     : "Planning"],
             ["watchlist",  "Watchlist"],
-            ["dca",        "DCA Calculator"],
           ].map(([id, lbl]) => (
             <button key={id} onClick={() => setRoute(id)}
                     style={{
