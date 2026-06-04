@@ -1,4 +1,4 @@
-import { useState, useMemo, useEffect, useCallback } from 'react'
+import { useState, useMemo, useEffect, useCallback, Fragment } from 'react'
 import { createPortal } from 'react-dom'
 import { PageHead, Delta, Icon, TickerLogo } from './Nav'
 import { CalcInput } from './CalcInput'
@@ -879,9 +879,10 @@ function DividendTaxSummary({ transactions, lang, ccy, fxRate = 36 }) {
           </thead>
           <tbody>
             {summary.map(yr => (
-              <>
+              // Fragment with key — required in React 18 when a list item renders multiple <tr> rows
+              <Fragment key={yr.year}>
                 {/* Year summary row */}
-                <tr key={yr.year}
+                <tr
                   style={{ cursor: "pointer", borderTop: "1px solid var(--line)" }}
                   onClick={() => toggleYear(yr.year)}>
                   <td style={{ fontSize: 14, fontWeight: 700, padding: "8px 0" }}>
@@ -911,7 +912,7 @@ function DividendTaxSummary({ transactions, lang, ccy, fxRate = 36 }) {
                     <td />
                   </tr>
                 ))}
-              </>
+              </Fragment>
             ))}
           </tbody>
         </table>
