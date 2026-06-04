@@ -324,7 +324,7 @@ function AddModal({ th, onClose, onAdd }) {
       try {
         const res  = await fetch(`/api/search?q=${encodeURIComponent(q)}`)
         const data = await res.json()
-        const items = Array.isArray(data) ? data.slice(0, 7) : []
+        const items = Array.isArray(data) ? data.slice(0, 20) : []
         setResults(items)
         setDropOpen(items.length > 0)
       } catch {
@@ -460,7 +460,7 @@ function AddModal({ th, onClose, onAdd }) {
                 position: 'absolute', top: 'calc(100% + 4px)', left: 0, right: 0, zIndex: 600,
                 background: 'var(--bg)', border: '1.5px solid var(--line)',
                 borderRadius: 12, boxShadow: '0 8px 32px rgba(0,0,0,0.16)',
-                overflow: 'hidden',
+                maxHeight: 340, overflowY: 'auto',
               }}>
                 {results.map((r, i) => {
                   const { label, bg } = exchangeLabel(r)
