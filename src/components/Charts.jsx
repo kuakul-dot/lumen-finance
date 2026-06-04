@@ -28,7 +28,8 @@ export function LineChart({ series, height = 280, fmt, labelFmt }) {
     return () => ro.disconnect()
   }, [])
 
-  const padL = 8, padR = 8, padT = 12, padB = 28
+  // padR must fit y-axis labels: up to "฿1,234,567.89" (13 chars × ~6.5px = ~85px) → 92px safe
+  const padL = 4, padR = 92, padT = 12, padB = 28
   const innerW = w - padL - padR
   const innerH = height - padT - padB
   const allY = series.flatMap(s => s.data.map(d => d.y))
@@ -61,12 +62,13 @@ export function LineChart({ series, height = 280, fmt, labelFmt }) {
     <div ref={wrapRef} style={{ position: "relative", width: "100%" }}>
       <svg width={w} height={height} viewBox={`0 0 ${w} ${height}`}
            onMouseMove={handleMove} onMouseLeave={() => setHover(null)}
-           style={{ cursor: "crosshair", display: "block" }}>
+           style={{ cursor: "crosshair", display: "block", overflow: "visible" }}>
         {gridYs.map((yv, i) => (
           <g key={i}>
-            <line x1={padL} x2={w - padR} y1={yPos(yv)} y2={yPos(yv)}
+            <line x1={padL} x2={padL + innerW} y1={yPos(yv)} y2={yPos(yv)}
                   stroke="var(--line)" strokeDasharray={i === 0 ? "" : "2 4"} />
-            <text x={w - padR} y={yPos(yv) - 4} textAnchor="end" fontSize="10" fill="var(--ink-3)" fontFamily="var(--font-mono)">
+            {/* Y-axis label sits in the right margin, left-aligned after the chart area */}
+            <text x={padL + innerW + 6} y={yPos(yv) + 3.5} textAnchor="start" fontSize="10" fill="var(--ink-3)" fontFamily="var(--font-mono)">
               {fmt ? fmt(yv) : yv.toFixed(0)}
             </text>
           </g>
@@ -97,26 +99,34 @@ export function LineChart({ series, height = 280, fmt, labelFmt }) {
           </g>
         )}
       </svg>
-      {hover != null && (
-        <div style={{
-          position: "absolute", left: xPos(series[0].data[hover].x), top: 0,
-          transform: "translate(-50%, -8px)",
-          background: "var(--ink)", color: "var(--bg)",
-          padding: "8px 12px", borderRadius: 8, fontSize: 12, fontFamily: "var(--font-mono)",
-          whiteSpace: "nowrap", pointerEvents: "none", boxShadow: "0 4px 16px rgba(0,0,0,0.18)",
-        }}>
-          <div style={{ fontSize: 10, opacity: 0.7, marginBottom: 2 }}>
-            {labelFmt ? labelFmt(series[0].data[hover]) : series[0].data[hover].label}
-          </div>
-          {series.map((s, si) => (
-            <div key={si} style={{ display: "flex", alignItems: "center", gap: 8 }}>
-              <span className="dot" style={{ background: s.color }} />
-              <span>{s.name}</span>
-              <span style={{ marginLeft: "auto" }}>{fmt ? fmt(s.data[hover].y) : s.data[hover].y}</span>
+      {hover != null && (() => {
+        const hx = xPos(series[0].data[hover].x)
+        // Flip tooltip to the left when hovering the right 40% of the chart area
+        const nearRight = hx > (padL + innerW) * 0.6
+        return (
+          <div style={{
+            position: "absolute",
+            ...(nearRight
+              ? { right: w - hx + 8, left: "auto", transform: "translateY(-8px)" }
+              : { left: hx, transform: "translate(-50%, -8px)" }),
+            top: 0,
+            background: "var(--ink)", color: "var(--bg)",
+            padding: "8px 12px", borderRadius: 8, fontSize: 12, fontFamily: "var(--font-mono)",
+            whiteSpace: "nowrap", pointerEvents: "none", boxShadow: "0 4px 16px rgba(0,0,0,0.18)",
+          }}>
+            <div style={{ fontSize: 10, opacity: 0.7, marginBottom: 2 }}>
+              {labelFmt ? labelFmt(series[0].data[hover]) : series[0].data[hover].label}
             </div>
-          ))}
-        </div>
-      )}
+            {series.map((s, si) => (
+              <div key={si} style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                <span className="dot" style={{ background: s.color }} />
+                <span>{s.name}</span>
+                <span style={{ marginLeft: "auto" }}>{fmt ? fmt(s.data[hover].y) : s.data[hover].y}</span>
+              </div>
+            ))}
+          </div>
+        )
+      })()}
     </div>
   )
 }
