@@ -39,13 +39,27 @@ export function AnalyticsPage({ t, lang, ccy, dataState, liveHoldings = [], pric
         if (cancelled) return
         const nowSec = Date.now() / 1000
         const divTxs = transactions.filter(tx => tx.type === 'Dividend')
-        // Count XD events that passed and haven't been recorded
+        // Count XD events that passed, haven't been recorded, AND user held shares before XD.
+        // Must mirror the sync-modal logic exactly (sharesAsOf check) so badge === modal count.
+        const sharesBeforeXd = (ticker, xdDateStr) => {
+          let s = 0
+          for (const tx of transactions) {
+            if (tx.ticker !== ticker || !tx.transacted_at) continue
+            if (tx.transacted_at.slice(0, 10) >= xdDateStr) continue // bought on/after XD → not entitled
+            const q = Number(tx.shares) || 0
+            if (tx.type === 'Buy')  s += q
+            else if (tx.type === 'Sell') s -= q
+          }
+          return Math.max(0, s)
+        }
         let count = 0
         liveHoldings.forEach(h => {
           const sym = toYahooSymbol(h.ticker, h.region || 'TH', h.asset_class || 'Equity')
           ;(history[sym] || []).forEach(e => {
             if (e.date > nowSec) return
-            if (!isDivRecorded(divTxs, h.ticker, toXdStr(e.date))) count++
+            const xdDateStr = toXdStr(e.date)
+            if (isDivRecorded(divTxs, h.ticker, xdDateStr)) return
+            if (sharesBeforeXd(h.ticker, xdDateStr) > 0) count++
           })
         })
         setPendingDivCount(count)
