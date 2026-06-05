@@ -85,9 +85,11 @@ function buildCurrentByClass(rows, cash) {
   const map = { "TH Equity": 0, "US Equity": 0, "Bonds": 0, "Gold": 0, "Crypto": 0, "Cash": cash }
   rows.forEach(r => {
     const k = (r.cls === "Equity" || r.cls === "ETF") ? (r.region === "TH" ? "TH Equity" : "US Equity")
-            : r.cls === "Bond"      ? "Bonds"
-            : r.cls === "Commodity" ? "Gold"
-            : r.cls === "Crypto"    ? "Crypto" : "Cash"
+            : r.cls === "Bond"       ? "Bonds"
+            : r.cls === "MutualFund" ? "Bonds"
+            : r.cls === "Commodity"  ? "Gold"
+            : r.cls === "GoldTH"     ? "Gold"
+            : r.cls === "Crypto"     ? "Crypto" : "Cash"
     map[k] = (map[k] || 0) + r.value
   })
   return map
@@ -100,7 +102,11 @@ const FEE_RATE = (region) => region === "TH" ? 0.0017 : 0
 
 // Map a holding to its asset-class bucket
 const CLASS_OF = (r) => (r.cls === "Equity" || r.cls === "ETF") ? (r.region === "TH" ? "TH Equity" : "US Equity")
-  : r.cls === "Bond" ? "Bonds" : r.cls === "Commodity" ? "Gold" : r.cls === "Crypto" ? "Crypto" : "Cash"
+  : r.cls === "Bond"       ? "Bonds"
+  : r.cls === "MutualFund" ? "Bonds"
+  : r.cls === "Commodity"  ? "Gold"
+  : r.cls === "GoldTH"     ? "Gold"
+  : r.cls === "Crypto"     ? "Crypto" : "Cash"
 
 // Icon + colour per asset class (for the rebalance editor)
 const CLASS_META = {
