@@ -2,8 +2,7 @@ import { useState, useMemo, useEffect, useCallback, Fragment } from 'react'
 import { createPortal } from 'react-dom'
 import { PageHead, Delta, Icon, TickerLogo } from './Nav'
 import { CalcInput } from './CalcInput'
-import { Donut, BarChart } from './Charts'
-import { LWLineChart } from './LWChart'
+import { LineChart, Donut, BarChart } from './Charts'
 import { LUMEN_FMT, LUMEN_DERIVE, LUMEN_HISTORY, LUMEN_BENCH } from '../data'
 import { deriveHoldings, getTransactions, getSnapshots, getAllTransactions, upsertSnapshots, buildSnapshotSeries, addTransaction, updateTransaction, deleteTransaction } from '../lib/db'
 import { fetchHistory, toYahooSymbol } from '../lib/prices'
@@ -388,7 +387,7 @@ function AnalyticsCommon({ t, lang, ccy, rows, totalValue, totalPL, totalPlPct, 
               const priceTHB = h.priceCcy === 'USD' ? price * fxRate : price
               val += h.shares * priceTHB
             })
-            return { x: ts, y: val, label: mkLabel(new Date(ts * 1000)), ts }
+            return { x: idx, y: val, label: mkLabel(new Date(ts * 1000)), ts }
           }).filter(p => p.y > 50)
           if (pts.length >= 2) realPortfolioPoints = pts
         }
@@ -407,7 +406,7 @@ function AnalyticsCommon({ t, lang, ccy, rows, totalValue, totalPL, totalPlPct, 
       const portfolioSeries = {
         name: th ? "พอร์ตของคุณ" : "Your portfolio",
         color: "var(--ink)", fill: true,
-        data: realPortfolioPoints.map((p) => ({ x: p.ts, y: p.y, label: p.label })),
+        data: realPortfolioPoints.map((p, i) => ({ x: i, y: p.y, label: p.label })),
       }
       if (!hasSpx) return [portfolioSeries]
 
@@ -420,7 +419,7 @@ function AnalyticsCommon({ t, lang, ccy, rows, totalValue, totalPL, totalPlPct, 
         color: "var(--accent)",
         data: realPortfolioPoints.map((p, i) => {
           const spxPrice = getPriceAt(spxSorted, p.ts)
-          return { x: p.ts, y: spxPrice != null ? firstPortVal * (spxPrice / spxAtStart) : firstPortVal, label: p.label }
+          return { x: i, y: spxPrice != null ? firstPortVal * (spxPrice / spxAtStart) : firstPortVal, label: p.label }
         }),
       }
       return [portfolioSeries, sp500Series]
@@ -444,7 +443,7 @@ function AnalyticsCommon({ t, lang, ccy, rows, totalValue, totalPL, totalPlPct, 
         data: Array.from({ length: portPts }, (_, i) => {
           const p = i / (portPts - 1)
           const d = new Date(now); d.setDate(d.getDate() - (portPts - 1 - i) * portStepD)
-          return { x: Math.floor(d.getTime() / 1000), y: totalCost + valRange * easeAt(p) + noiseAt(i, 1.7) * noiseScale * Math.sin(Math.PI * p), label: mkLabel(d) }
+          return { x: i, y: totalCost + valRange * easeAt(p) + noiseAt(i, 1.7) * noiseScale * Math.sin(Math.PI * p), label: mkLabel(d) }
         })
       }]
     }
@@ -463,13 +462,13 @@ function AnalyticsCommon({ t, lang, ccy, rows, totalValue, totalPL, totalPlPct, 
         color: "var(--ink)", fill: true,
         data: sampled.map((p, i) => {
           const prog = i / (N - 1)
-          return { x: p.t, y: totalCost + valRange * easeAt(prog) + noiseAt(i, 1.7) * noiseScale * Math.sin(Math.PI * prog), label: mkLabel(new Date(p.t * 1000)) }
+          return { x: i, y: totalCost + valRange * easeAt(prog) + noiseAt(i, 1.7) * noiseScale * Math.sin(Math.PI * prog), label: mkLabel(new Date(p.t * 1000)) }
         })
       },
       {
         name: "S&P 500",
         color: "var(--accent)",
-        data: sampled.map((p) => ({ x: p.t, y: totalCost * (p.c / baseClose), label: mkLabel(new Date(p.t * 1000)) }))
+        data: sampled.map((p, i) => ({ x: i, y: totalCost * (p.c / baseClose), label: mkLabel(new Date(p.t * 1000)) }))
       }
     ]
   }, [dataState, totalCost, totalValue, th, chartPeriod, periodDaysMap, daysSinceFirst, spxData, liveHoldings, holdingHistories, purchaseSecByTicker, fxRate])
@@ -517,11 +516,10 @@ function AnalyticsCommon({ t, lang, ccy, rows, totalValue, totalPL, totalPlPct, 
       if (i % stride !== 0 && i !== win.length - 1) return
       const gi = indexOf(s)
       const label = labelFor(new Date(s.date))
-      const ts = Math.floor(new Date(s.date + 'T00:00:00Z').getTime() / 1000)
-      port.push({ x: ts, y: 100 * (gi != null ? gi : base) / base, label })
+      port.push({ x: port.length, y: 100 * (gi != null ? gi : base) / base, label })
       if (spxBase) {
         const c = spxOnOrBefore(s.date)
-        sp.push({ x: ts, y: c ? 100 * c / spxBase : 100, label })
+        sp.push({ x: sp.length, y: c ? 100 * c / spxBase : 100, label })
       }
     })
     const out = [{ name: th ? "พอร์ตของคุณ" : "Your portfolio", color: "var(--ink)", fill: true, data: port }]
@@ -538,9 +536,8 @@ function AnalyticsCommon({ t, lang, ccy, rows, totalValue, totalPL, totalPlPct, 
     win.forEach((s, i) => {
       if (i % stride !== 0 && i !== win.length - 1) return
       const label = labelFor(new Date(s.date))
-      const ts = Math.floor(new Date(s.date + 'T00:00:00Z').getTime() / 1000)
-      val.push({ x: ts, y: Number(s.total_value) || 0, label })
-      cost.push({ x: ts, y: Number(s.total_cost) || 0, label })
+      val.push({ x: val.length, y: Number(s.total_value) || 0, label })
+      cost.push({ x: cost.length, y: Number(s.total_cost) || 0, label })
     })
     return [
       { name: th ? "มูลค่าตลาด" : "Market value", color: "var(--ink)", fill: true, data: val },
@@ -646,7 +643,7 @@ function AnalyticsCommon({ t, lang, ccy, rows, totalValue, totalPL, totalPlPct, 
               </div>
             </div>
           </div>
-          <LWLineChart
+          <LineChart
             series={dataState === "live" ? (snapSeries || liveSeries) : series}
             height={340}
             fmt={dataState === "live" && snapSeries && chartMode === "pct"
@@ -1831,7 +1828,7 @@ function AnalyticsGrowth({ t, lang, ccy, rows = [], fxRate = 36, totalValue, tot
         const fade = Math.sin(Math.PI * p)
         const y = finalPct * ease(p) + noise(i, 1.7) * noiseScale * fade
         const d = new Date(now); d.setDate(d.getDate() - (pts - 1 - i) * stepD)
-        return { x: Math.floor(d.getTime() / 1000), y, label: mkLabel(d) }
+        return { x: i, y, label: mkLabel(d) }
       })
     }]
   }, [dataState, totalCost, totalValue, totalPlPct, th, chartPeriod, daysSinceFirst])
@@ -1853,10 +1850,9 @@ function AnalyticsGrowth({ t, lang, ccy, rows = [], fxRate = 36, totalValue, tot
     return [{
       name: th ? "พอร์ตของคุณ" : "Your portfolio",
       color: "var(--ink)", fill: true,
-      data: w.map((s) => {
+      data: w.map((s, i) => {
         const c = Number(s.total_cost), v = Number(s.total_value)
-        const ts = Math.floor(new Date(s.date + 'T00:00:00Z').getTime() / 1000)
-        return { x: ts, y: c > 0 ? (v / c - 1) * 100 : 0, label: mkLabel(new Date(s.date)) }
+        return { x: i, y: c > 0 ? (v / c - 1) * 100 : 0, label: mkLabel(new Date(s.date)) }
       }),
     }]
   }, [isLive, snaps, chartPeriod, th])
@@ -1896,7 +1892,7 @@ function AnalyticsGrowth({ t, lang, ccy, rows = [], fxRate = 36, totalValue, tot
       sampled = [...sampled, window[window.length - 1]]
 
     const data = sampled
-      .map((p) => ({ x: p.t, y: (p.c / base - 1) * 100, label: mkLabel(p.t) }))
+      .map((p, i) => ({ x: i, y: (p.c / base - 1) * 100, label: mkLabel(p.t) }))
       .filter(d => Number.isFinite(d.y))   // drop any surviving NaN/Infinity points
     if (data.length < 2) return null
 
@@ -2061,7 +2057,7 @@ function AnalyticsGrowth({ t, lang, ccy, rows = [], fxRate = 36, totalValue, tot
                 </div>
               </div>
             </div>
-            <LWLineChart series={chartSeries} height={300} fmt={v => (v >= 0 ? "+" : "") + v.toFixed(1) + "%"} />
+            <LineChart series={chartSeries} height={300} fmt={v => (v >= 0 ? "+" : "") + v.toFixed(1) + "%"} />
           </div>
         ) : (
           <div className="card" style={{ marginBottom: 16, padding: "36px 48px", display: "flex", alignItems: "center", gap: 24 }}>
@@ -2091,7 +2087,7 @@ function AnalyticsGrowth({ t, lang, ccy, rows = [], fxRate = 36, totalValue, tot
                 ))}
               </div>
             </div>
-            <LWLineChart series={demoSeries} height={300} fmt={v => v.toFixed(0) + "%"} />
+            <LineChart series={demoSeries} height={300} fmt={v => v.toFixed(0) + "%"} />
           </div>
           <div className="card">
             <h3 className="section-title" style={{ marginBottom: 16 }}>{th ? "ผลตอบแทนรายปี (ข้อมูลตัวอย่าง)" : "Annual returns (demo data)"}</h3>

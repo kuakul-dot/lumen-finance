@@ -1,7 +1,7 @@
 import { useState, useEffect, useMemo } from 'react'
 import { PageHead, Icon } from './Nav'
 import { CalcInput } from './CalcInput'
-import { LWLineChart } from './LWChart'
+import { LineChart } from './Charts'
 import { GoalRing } from './Dashboard'
 import { LUMEN_FMT, LUMEN_GOALS } from '../data'
 import { getGoals, upsertGoal, deleteGoal, deriveHoldings } from '../lib/db'
@@ -304,7 +304,7 @@ export function PlanningPage({ t, lang, ccy, session, liveHoldings = [], prices 
                   <span><span className="dot" style={{ background: "var(--ink-4)" }} /> {th ? "เป้า" : "Target"}</span>
                 </div>
               </div>
-              <LWLineChart series={series} height={260} fmt={v => FMT.money(v, ccy, { compact: true })} />
+              <LineChart series={series} height={260} fmt={v => FMT.money(v, ccy, { compact: true })} />
             </div>
 
             {/* Suggested actions */}

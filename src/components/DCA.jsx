@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback, useRef } from 'react'
 import { PageHead, Icon } from './Nav'
-import { LWLineChart } from './LWChart'
+import { LineChart } from './Charts'
 import { fetchHistory } from '../lib/prices'
 
 // ── Constants ────────────────────────────────────────────────────────────────
@@ -279,7 +279,7 @@ export function DCAPage({ lang }) {
 
   // ── Render ─────────────────────────────────────────────────────────────────
   return (
-    <main className="shell-narrow fade-in">
+    <main className="page">
       <PageHead
         kicker={th ? 'เครื่องมือ' : 'Tools'}
         title="DCA Calculator"
@@ -513,7 +513,7 @@ export function DCAPage({ lang }) {
                   ))}
                 </div>
               </div>
-              <LWLineChart
+              <LineChart
                 series={chartSeries}
                 height={220}
                 fmt={(v) => fmt(v)}
