@@ -1,7 +1,7 @@
 import { useState, useEffect, useCallback, useRef, useMemo } from 'react'
 import { PageHead, Icon, TickerLogo } from './Nav'
 import { TradingViewChart } from './TradingViewChart'
-import { LineChart } from './Charts'
+import { LWChart } from './LWChart'
 import { fetchHistory, fetchPrices, toYahooSymbol } from '../lib/prices'
 
 const WATCHLIST_KEY = 'lumen_watchlist_v1'
@@ -108,25 +108,32 @@ const EMA_PERIODS = {
   '1y':   [20, 50, 200],   // same as 6mo — plenty of bars for EMA200
 }
 
-function calcEMA(closes, period) {
-  if (closes.length < period) return null
-  // Seed: SMA of first `period` values
-  let ema = closes.slice(0, period).reduce((s, c) => s + c, 0) / period
+// Returns both the current EMA value AND the full series [{time, value}]
+// so LWChart can render proper EMA curves (not just horizontal lines).
+function calcEMAFull(bars, period) {
+  const valid = bars.filter(b => b.c != null && Number.isFinite(b.c) && b.c > 0)
+  if (valid.length < period) return { current: null, series: [] }
+  // Seed = SMA of first `period` bars
+  let ema = valid.slice(0, period).reduce((s, b) => s + b.c, 0) / period
   const k = 2 / (period + 1)
-  for (let i = period; i < closes.length; i++) {
-    ema = closes[i] * k + ema * (1 - k)
+  const series = [{ time: valid[period - 1].t, value: +ema.toFixed(6) }]
+  for (let i = period; i < valid.length; i++) {
+    ema = valid[i].c * k + ema * (1 - k)
+    series.push({ time: valid[i].t, value: +ema.toFixed(6) })
   }
-  return +ema.toFixed(4)
+  return { current: +ema.toFixed(4), series }
 }
 
 function computeMAs(bars, range = '6mo') {
-  const closes  = bars.map(b => b.c).filter(v => v != null && Number.isFinite(v))
   const [p1, p2, p3] = EMA_PERIODS[range] || EMA_PERIODS['6mo']
+  const e1 = calcEMAFull(bars, p1)
+  const e2 = calcEMAFull(bars, p2)
+  const e3 = calcEMAFull(bars, p3)
   return {
-    ma20:  calcEMA(closes, p1),
-    ma50:  calcEMA(closes, p2),
-    ma200: calcEMA(closes, p3),
-    p1, p2, p3,   // store periods so labels can be dynamic
+    ma20:  e1.current, series20:  e1.series,
+    ma50:  e2.current, series50:  e2.series,
+    ma200: e3.current, series200: e3.series,
+    p1, p2, p3,
   }
 }
 
@@ -318,19 +325,15 @@ function WatchlistCard({ item, priceData, sr, onRemove, onNoteChange, showChart,
     ? item.symbol.replace(/[-/](USD|USDT|USDC|BTC|ETH)$/i, '')
     : item.symbol
 
-  // ── Build LineChart series from OHLC bars ─────────────────────────────────
-  const lineSeries = chartBars ? [{
-    name: item.symbol,
-    color: 'var(--accent)',
-    fill: true,
-    data: chartBars.map(p => ({
-      x: p.t,
-      y: p.c,
-      label: new Date(p.t * 1000).toLocaleDateString('en', { month: 'short', day: 'numeric' }),
-    })),
-  }] : null
+  // ── Build EMA overlay curves for LWChart ─────────────────────────────────
+  const emaLines = (overlays.ma && chartMAs) ? [
+    chartMAs.series20?.length  ? { data: chartMAs.series20  } : null,
+    chartMAs.series50?.length  ? { data: chartMAs.series50  } : null,
+    chartMAs.series200?.length ? { data: chartMAs.series200 } : null,
+  ].filter(Boolean) : []
 
-  // ── Build combined hLines: S/R + optional Fib / MA / Volume Profile ───────
+  // ── Build combined hLines: S/R + optional Fib / Volume Profile ───────────
+  // (EMA is rendered as full curves via emaLines — not horizontal price lines)
   const displaySR = chartSR ?? sr   // prefer OHLC-based SR from chart range; fall back to parent's
   const hLines = [
     // S/R pivot lines (always shown when available)
@@ -351,12 +354,7 @@ function WatchlistCard({ item, priceData, sr, onRemove, onNoteChange, showChart,
       label: `Fib ${lvl.label}`,
     })) : []),
 
-    // EMA lines (adaptive periods per time frame)
-    ...(chartMAs ? [
-      chartMAs.ma20  != null && { y: chartMAs.ma20,  color: 'oklch(0.60 0.14 300)', label: `EMA${chartMAs.p1}`  },
-      chartMAs.ma50  != null && { y: chartMAs.ma50,  color: 'oklch(0.50 0.12 250)', label: `EMA${chartMAs.p2}`  },
-      chartMAs.ma200 != null && { y: chartMAs.ma200, color: 'oklch(0.45 0.08 220)', label: `EMA${chartMAs.p3}` },
-    ].filter(Boolean) : []),
+    // EMA is rendered as full curves via emaLines prop — not horizontal price lines
 
     // Volume Profile levels
     ...(chartVP ? [
@@ -534,14 +532,14 @@ function WatchlistCard({ item, priceData, sr, onRemove, onNoteChange, showChart,
               </div>
 
               {/* Chart */}
-              {lineSeries ? (
-                <div style={{ background: 'var(--bg-2)', borderRadius: 10, padding: '10px 4px 4px', border: '1px solid var(--line)' }}>
-                  <LineChart
-                    series={lineSeries}
-                    height={240}
+              {chartBars ? (
+                <div style={{ background: 'var(--bg-2)', borderRadius: 10, overflow: 'hidden', border: '1px solid var(--line)' }}>
+                  <LWChart
+                    bars={chartBars}
                     hLines={hLines}
-                    fmt={v => fmtPrice(v, currency)}
-                    labelFmt={d => d.label}
+                    emaLines={emaLines}
+                    height={240}
+                    showVolume={true}
                   />
                 </div>
               ) : loadingChart ? (
@@ -685,13 +683,12 @@ function WatchlistFullscreen({ item, priceData, sr, lang, onClose }) {
 
   const displaySR = chartSR ?? sr
 
-  const lineSeries = chartBars ? [{
-    name: item.symbol, color: 'var(--accent)', fill: true,
-    data: chartBars.map(p => ({
-      x: p.t, y: p.c,
-      label: new Date(p.t * 1000).toLocaleDateString('en', { month: 'short', day: 'numeric' }),
-    })),
-  }] : null
+  // EMA full curves for LWChart
+  const emaLines = (overlays.ma && chartMAs) ? [
+    chartMAs.series20?.length  ? { data: chartMAs.series20  } : null,
+    chartMAs.series50?.length  ? { data: chartMAs.series50  } : null,
+    chartMAs.series200?.length ? { data: chartMAs.series200 } : null,
+  ].filter(Boolean) : []
 
   const hLines = [
     ...(displaySR ? [
@@ -699,11 +696,7 @@ function WatchlistFullscreen({ item, priceData, sr, lang, onClose }) {
       ...displaySR.supports.map((lvl, i)    => ({ y: lvl.price, color: 'var(--gain)', label: `S${i+1} ${fmtPrice(lvl.price, currency)}` })),
     ] : []),
     ...(chartFib ? chartFib.map(lvl => ({ y: lvl.price, color: 'oklch(0.65 0.14 55)', label: `Fib ${lvl.label}` })) : []),
-    ...(chartMAs ? [
-      chartMAs.ma20  != null && { y: chartMAs.ma20,  color: 'oklch(0.60 0.14 300)', label: 'MA20'  },
-      chartMAs.ma50  != null && { y: chartMAs.ma50,  color: 'oklch(0.50 0.12 250)', label: 'MA50'  },
-      chartMAs.ma200 != null && { y: chartMAs.ma200, color: 'oklch(0.45 0.08 220)', label: 'MA200' },
-    ].filter(Boolean) : []),
+    // EMA rendered as full curves via emaLines — not horizontal price lines
     ...(chartVP ? [
       { y: chartVP.poc, color: 'oklch(0.65 0.16 90)', label: `POC ${fmtPrice(chartVP.poc, currency)}` },
       { y: chartVP.vah, color: 'oklch(0.65 0.10 90)', label: 'VAH' },
@@ -798,10 +791,15 @@ function WatchlistFullscreen({ item, priceData, sr, lang, onClose }) {
                 ))}
               </div>
 
-              {lineSeries ? (
-                <div style={{ background: 'var(--bg-2)', borderRadius: 12, padding: '12px 4px 6px', border: '1px solid var(--line)' }}>
-                  <LineChart series={lineSeries} height={fsH} hLines={hLines}
-                    fmt={v => fmtPrice(v, currency)} labelFmt={d => d.label} />
+              {chartBars ? (
+                <div style={{ background: 'var(--bg-2)', borderRadius: 12, overflow: 'hidden', border: '1px solid var(--line)' }}>
+                  <LWChart
+                    bars={chartBars}
+                    hLines={hLines}
+                    emaLines={emaLines}
+                    height={fsH}
+                    showVolume={true}
+                  />
                 </div>
               ) : loadingChart ? (
                 <div style={{ height: 200, display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--ink-3)' }}>
