@@ -279,7 +279,7 @@ export function DCAPage({ lang }) {
 
   // ── Render ─────────────────────────────────────────────────────────────────
   return (
-    <main className="page">
+    <main className="shell-narrow fade-in">
       <PageHead
         kicker={th ? 'เครื่องมือ' : 'Tools'}
         title="DCA Calculator"

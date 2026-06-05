@@ -1265,87 +1265,88 @@ export function WatchlistPage({ lang, ccy, fxRate = 36 }) {
   }, [])
 
   return (
-    <div className="page">
-      <div className="page-inner">
-        <PageHead
-          kicker={th ? 'WATCHLIST' : 'WATCHLIST'}
-          title={th ? 'รายการติดตาม' : 'Watchlist'}
-          sub={th
-            ? 'ติดตามหุ้นที่น่าสนใจ พร้อมแนวรับ-แนวต้านอัตโนมัติ'
-            : 'Track stocks with auto-computed support & resistance levels'}
-          right={
-            <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-              {loadingPrices && (
-                <span style={{ fontSize: 12, color: 'var(--ink-3)' }}>
-                  {th ? 'กำลังดึงราคา…' : 'Fetching prices…'}
-                </span>
-              )}
-              <button className="btn" onClick={() => setShowAdd(true)}
-                style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-                <Icon name="plus" size={14} />
-                {th ? 'เพิ่มหุ้น' : 'Add stock'}
-              </button>
-            </div>
-          }
-        />
-
-        {items.length === 0 ? (
-          <EmptyState th={th} onAdd={() => setShowAdd(true)} />
-        ) : (
-          <>
-            {/* Legend */}
-            <div style={{ display: 'flex', gap: 16, marginBottom: 16, flexWrap: 'wrap' }}>
-              <span style={{ fontSize: 11, color: 'var(--ink-3)', display: 'flex', alignItems: 'center', gap: 5 }}>
-                <StrengthDots count={3} color="var(--loss)" />
-                {th ? 'แนวต้าน (Resistance)' : 'Resistance'}
+    <div className="shell fade-in" data-screen-label="Watchlist">
+      <PageHead
+        kicker={th ? 'WATCHLIST' : 'WATCHLIST'}
+        title={th ? 'รายการติดตาม' : 'Watchlist'}
+        sub={th
+          ? 'ติดตามหุ้นที่น่าสนใจ พร้อมแนวรับ-แนวต้านอัตโนมัติ'
+          : 'Track stocks with auto-computed support & resistance levels'}
+        right={
+          <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+            {loadingPrices && (
+              <span style={{ fontSize: 12, color: 'var(--ink-3)' }}>
+                {th ? 'กำลังดึงราคา…' : 'Fetching prices…'}
               </span>
-              <span style={{ fontSize: 11, color: 'var(--ink-3)', display: 'flex', alignItems: 'center', gap: 5 }}>
-                <StrengthDots count={3} color="var(--gain)" />
-                {th ? 'แนวรับ (Support)' : 'Support'}
-              </span>
-              <span style={{ fontSize: 11, color: 'var(--ink-3)' }}>
-                {th ? '● = จำนวนครั้งที่ราคาเคยทดสอบ (pivot touch)' : '● = number of historical price touches (pivot)'}
-              </span>
-            </div>
+            )}
+            <button className="btn" onClick={() => setShowAdd(true)}
+              style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+              <Icon name="plus" size={14} />
+              {th ? 'เพิ่มหุ้น' : 'Add stock'}
+            </button>
+          </div>
+        }
+      />
 
-            <div style={{
-              display: 'grid',
-              gridTemplateColumns: 'repeat(auto-fill, minmax(300px, 1fr))',
-              gap: 'var(--gap)',
-            }}>
-              {items.map((item, idx) => {
-                const yahooSym   = toYahooSymbol(item.symbol, item.region || 'US', item.cls || 'Equity')
-                const priceData  = prices[yahooSym]
-                const bars       = histories[yahooSym]   // [{t,o,h,l,c,v}]
-                const livePrice  = priceData?.price ?? null
-                const sr         = (bars && livePrice) ? computeSR(bars, livePrice) : null
-                const chartKey   = `${item.symbol}:${item.region}`
-                return (
-                  <WatchlistCard
-                    key={chartKey}
-                    item={item}
-                    priceData={priceData}
-                    sr={sr}
-                    onRemove={() => removeItem(idx)}
-                    onNoteChange={(note) => updateNote(idx, note)}
-                    showChart={expandedKey === chartKey}
-                    onToggleChart={() => setExpandedKey(prev => prev === chartKey ? null : chartKey)}
-                    onExpand={() => setFullscreenItem({ item, priceData, sr })}
-                    lang={lang}
-                  />
-                )
-              })}
-            </div>
+      {items.length === 0 ? (
+        <EmptyState th={th} onAdd={() => setShowAdd(true)} />
+      ) : (
+        <>
+          {/* Legend */}
+          <div style={{ display: 'flex', gap: 16, marginBottom: 20, flexWrap: 'wrap', alignItems: 'center' }}>
+            <span style={{ fontSize: 11, color: 'var(--ink-3)', display: 'flex', alignItems: 'center', gap: 5 }}>
+              <StrengthDots count={3} color="var(--loss)" />
+              {th ? 'แนวต้าน (Resistance)' : 'Resistance'}
+            </span>
+            <span style={{ fontSize: 11, color: 'var(--ink-3)', display: 'flex', alignItems: 'center', gap: 5 }}>
+              <StrengthDots count={3} color="var(--gain)" />
+              {th ? 'แนวรับ (Support)' : 'Support'}
+            </span>
+            <span style={{ fontSize: 11, color: 'var(--ink-3)' }}>
+              {th ? '● = จำนวนครั้งที่ราคาเคยทดสอบ (pivot touch)' : '● = number of historical price touches (pivot)'}
+            </span>
+          </div>
 
-            {/* Refresh hint */}
-            <p style={{ fontSize: 11, color: 'var(--ink-3)', textAlign: 'center', marginTop: 24 }}>
-              {th
-                ? 'แนวรับ-แนวต้านคำนวณจาก pivot point ของ 3 เดือนย้อนหลัง · ราคาจาก Yahoo Finance'
-                : 'S/R levels computed from 3-month pivot points · Prices via Yahoo Finance'}
-            </p>
-          </>
-        )}
-      </div>
+          {/* Card grid — max 3 columns, min 320px each */}
+          <div style={{
+            display: 'grid',
+            gridTemplateColumns: 'repeat(auto-fill, minmax(320px, 1fr))',
+            gap: 'var(--gap)',
+            maxWidth: 1200,
+          }}>
+            {items.map((item, idx) => {
+              const yahooSym  = toYahooSymbol(item.symbol, item.region || 'US', item.cls || 'Equity')
+              const priceData = prices[yahooSym]
+              const bars      = histories[yahooSym]
+              const livePrice = priceData?.price ?? null
+              const sr        = (bars && livePrice) ? computeSR(bars, livePrice) : null
+              const chartKey  = `${item.symbol}:${item.region}`
+              return (
+                <WatchlistCard
+                  key={chartKey}
+                  item={item}
+                  priceData={priceData}
+                  sr={sr}
+                  onRemove={() => removeItem(idx)}
+                  onNoteChange={(note) => updateNote(idx, note)}
+                  showChart={expandedKey === chartKey}
+                  onToggleChart={() => setExpandedKey(prev => prev === chartKey ? null : chartKey)}
+                  onExpand={() => setFullscreenItem({ item, priceData, sr })}
+                  lang={lang}
+                />
+              )
+            })}
+          </div>
+
+          {/* Footer note */}
+          <p style={{ fontSize: 11, color: 'var(--ink-4)', marginTop: 28, lineHeight: 1.6 }}>
+            {th
+              ? 'แนวรับ-แนวต้านคำนวณจาก pivot point ของ 6 เดือนย้อนหลัง · ราคาจาก Yahoo Finance'
+              : 'S/R levels computed from 6-month OHLC pivot points · Prices via Yahoo Finance'}
+          </p>
+        </>
+      )}
+    </div>
 
       {showAdd && <AddModal th={th} onClose={() => setShowAdd(false)} onAdd={addItem} />}
 
