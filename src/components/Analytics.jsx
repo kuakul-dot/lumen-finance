@@ -2,7 +2,8 @@ import { useState, useMemo, useEffect, useCallback, Fragment } from 'react'
 import { createPortal } from 'react-dom'
 import { PageHead, Delta, Icon, TickerLogo } from './Nav'
 import { CalcInput } from './CalcInput'
-import { LineChart, Donut, BarChart } from './Charts'
+import { Donut, BarChart } from './Charts'
+import { LWLineChart } from './LWChart'
 import { LUMEN_FMT, LUMEN_DERIVE, LUMEN_HISTORY, LUMEN_BENCH } from '../data'
 import { deriveHoldings, getTransactions, getSnapshots, getAllTransactions, upsertSnapshots, buildSnapshotSeries, addTransaction, updateTransaction, deleteTransaction } from '../lib/db'
 import { fetchHistory, toYahooSymbol } from '../lib/prices'
@@ -643,7 +644,7 @@ function AnalyticsCommon({ t, lang, ccy, rows, totalValue, totalPL, totalPlPct, 
               </div>
             </div>
           </div>
-          <LineChart
+          <LWLineChart
             series={dataState === "live" ? (snapSeries || liveSeries) : series}
             height={340}
             fmt={dataState === "live" && snapSeries && chartMode === "pct"
@@ -2057,7 +2058,7 @@ function AnalyticsGrowth({ t, lang, ccy, rows = [], fxRate = 36, totalValue, tot
                 </div>
               </div>
             </div>
-            <LineChart series={chartSeries} height={300} fmt={v => (v >= 0 ? "+" : "") + v.toFixed(1) + "%"} />
+            <LWLineChart series={chartSeries} height={300} fmt={v => (v >= 0 ? "+" : "") + v.toFixed(1) + "%"} />
           </div>
         ) : (
           <div className="card" style={{ marginBottom: 16, padding: "36px 48px", display: "flex", alignItems: "center", gap: 24 }}>
@@ -2087,7 +2088,7 @@ function AnalyticsGrowth({ t, lang, ccy, rows = [], fxRate = 36, totalValue, tot
                 ))}
               </div>
             </div>
-            <LineChart series={demoSeries} height={300} fmt={v => v.toFixed(0) + "%"} />
+            <LWLineChart series={demoSeries} height={300} fmt={v => v.toFixed(0) + "%"} />
           </div>
           <div className="card">
             <h3 className="section-title" style={{ marginBottom: 16 }}>{th ? "ผลตอบแทนรายปี (ข้อมูลตัวอย่าง)" : "Annual returns (demo data)"}</h3>

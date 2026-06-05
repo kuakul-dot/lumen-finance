@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback, useRef } from 'react'
 import { PageHead, Icon } from './Nav'
-import { LineChart } from './Charts'
+import { LWLineChart } from './LWChart'
 import { fetchHistory } from '../lib/prices'
 
 // ── Constants ────────────────────────────────────────────────────────────────
@@ -513,7 +513,7 @@ export function DCAPage({ lang }) {
                   ))}
                 </div>
               </div>
-              <LineChart
+              <LWLineChart
                 series={chartSeries}
                 height={220}
                 fmt={(v) => fmt(v)}

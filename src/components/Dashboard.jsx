@@ -1,7 +1,8 @@
 import { useState, useMemo, useEffect, useRef } from 'react'
 import { PageHead, Delta, Icon, TickerLogo, AllocCategoryIcon } from './Nav'
 import { CalcInput } from './CalcInput'
-import { Sparkline, LineChart, Donut } from './Charts'
+import { Sparkline, Donut } from './Charts'
+import { LWLineChart } from './LWChart'
 import { AiAnalysisModal } from './AiModal'
 import { useAiAnalysis } from '../lib/useAiAnalysis'
 import {
@@ -160,7 +161,7 @@ function DemoDashboardPage({ t, lang, ccy, setRoute }) {
                 ))}
               </div>
             </div>
-            <LineChart series={histSeries} height={220} fmt={v => LUMEN_FMT.money(v, ccy, { compact: true })} />
+            <LWLineChart series={histSeries} height={220} fmt={v => LUMEN_FMT.money(v, ccy, { compact: true })} />
           </div>
         </div>
       </section>
@@ -1109,7 +1110,7 @@ function LiveDashboardPage({ t, lang, ccy, setRoute, liveHoldings, prices = {}, 
               </div>
             </div>
             {histSeries.length > 0
-              ? <LineChart series={histSeries} height={220} fmt={v => LUMEN_FMT.money(v, ccy, { compact: true })} />
+              ? <LWLineChart series={histSeries} height={220} fmt={v => LUMEN_FMT.money(v, ccy, { compact: true })} />
               : <div className="muted" style={{ paddingTop: 80, textAlign: "center", fontSize: 13 }}>{th ? "กำลังโหลด…" : "Loading…"}</div>
             }
           </div>

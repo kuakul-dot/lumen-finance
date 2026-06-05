@@ -1,13 +1,9 @@
 /**
- * LWChart — TradingView Lightweight Charts v5 wrapper
+ * LWChart.jsx — TradingView Lightweight Charts v5 wrappers
  *
- * Features:
- *  · Area series (price) with crosshair
- *  · Horizontal price lines for S/R, Fibonacci, Volume Profile
- *  · EMA full-curve line series (proper overlay, not just horizontal line)
- *  · Volume histogram (optional, bottom pane)
- *  · Responsive via ResizeObserver
- *  · Theme-aware (reads data-theme attribute)
+ * Exports:
+ *  · LWChart      — OHLC area + volume + EMA curves + S/R price lines (Watchlist)
+ *  · LWLineChart  — Multi-series area/line chart with tooltip (Analytics, Dashboard, DCA, Planning)
  */
 import { useEffect, useRef } from 'react'
 import {
@@ -20,30 +16,49 @@ import {
 } from 'lightweight-charts'
 
 // ── Color resolver ────────────────────────────────────────────────────────────
-// Converts CSS color values (var(), oklch()) that canvas can't parse
-// into safe hex values.
+// Handles var(), oklch(), hex, rgb — canvas-safe on modern browsers.
+// oklch is passed through directly (Chrome/FF/Safari 2023+ support it in canvas).
+// CSS variables are read via getComputedStyle so theme changes work correctly.
 function resolveColor(c) {
   if (!c) return '#94a3b8'
-  // CSS variables
-  if (c === 'var(--loss)')  return '#f87171'  // red-400
-  if (c === 'var(--gain)')  return '#4ade80'  // green-400
-  if (c === 'var(--ink-3)') return '#94a3b8'
-  if (c === 'var(--accent)')return '#2dd4bf'
-  // Already a safe color
-  if (c.startsWith('#') || c.startsWith('rgb')) return c
-  // oklch → approximate by hue
-  const m = c.match(/oklch\([\d.]+ [\d.]+ ([\d.]+)\)/)
-  if (m) {
-    const h = parseFloat(m[1])
-    if (h <  40)  return '#f87171'   // red
-    if (h <  80)  return '#fbbf24'   // amber  (Fibonacci)
-    if (h < 160)  return '#4ade80'   // green  (Volume Profile)
-    if (h < 220)  return '#38bdf8'   // sky
-    if (h < 270)  return '#818cf8'   // indigo (EMA long)
-    if (h < 330)  return '#c084fc'   // purple (EMA short)
-    return '#f87171'
+  if (c.startsWith('#') || c.startsWith('rgb') || c.startsWith('hsl')) return c
+  if (c.startsWith('oklch')) return c   // modern browsers handle oklch in canvas
+  if (c.startsWith('var(')) {
+    const name = c.slice(4, -1).trim()
+    try {
+      const v = getComputedStyle(document.documentElement).getPropertyValue(name).trim()
+      if (v) return v   // return computed value (may be oklch — that's fine)
+    } catch {}
+    // Hardcoded fallbacks for common tokens
+    const fb = {
+      '--loss':   '#f87171', '--gain':   '#4ade80',
+      '--accent': '#2dd4bf', '--ink':    '#0f172a',
+      '--ink-2':  '#475569', '--ink-3':  '#94a3b8', '--ink-4': '#cbd5e1',
+    }
+    return fb[name] || '#94a3b8'
   }
   return '#94a3b8'
+}
+
+// Hex color → rgba string with given alpha (for area fill top color)
+function withAlpha(hex, a) {
+  const m = hex.match(/^#([0-9a-f]{6})$/i)
+  if (m) {
+    const [r, g, b] = [0, 2, 4].map(i => parseInt(m[1].slice(i, i + 2), 16))
+    return `rgba(${r},${g},${b},${a})`
+  }
+  return `rgba(100,100,100,${a})`  // fallback for oklch/rgb values
+}
+
+// Abbreviate large numbers for y-axis labels
+function abbrev(v) {
+  const a = Math.abs(v)
+  if (a >= 1e9)  return (v / 1e9).toFixed(1)  + 'B'
+  if (a >= 1e6)  return (v / 1e6).toFixed(1)  + 'M'
+  if (a >= 1e3)  return (v / 1e3).toFixed(1)  + 'K'
+  if (a >= 100)  return v.toFixed(0)
+  if (a >= 1)    return v.toFixed(2)
+  return v.toFixed(4)
 }
 
 // EMA curve colors (short → medium → long)
@@ -200,5 +215,146 @@ export function LWChart({
       ref={containerRef}
       style={{ width: '100%', borderRadius: 8, overflow: 'hidden' }}
     />
+  )
+}
+
+// ── LWLineChart ───────────────────────────────────────────────────────────────
+// Drop-in replacement for <LineChart> — same prop interface:
+//   series  = [{name, data:[{x:unixSec, y:number, label:string}], color, fill, dashed}]
+//   height  = number
+//   fmt     = (value: number) => string   (for tooltip values)
+//   labelFmt= (point) => string           (for tooltip date label — defaults to d.label)
+export function LWLineChart({ series = [], height = 280, fmt, labelFmt }) {
+  const containerRef = useRef(null)
+  const tooltipRef   = useRef(null)
+
+  useEffect(() => {
+    const el = containerRef.current
+    if (!el || !series[0]?.data?.length) return
+
+    const isDark = document.documentElement.getAttribute('data-theme') === 'dark'
+    const C = {
+      bg:      'transparent',
+      text:    isDark ? '#94a3b8' : '#64748b',
+      grid:    isDark ? '#1e293b' : '#f1f5f9',
+      border:  isDark ? '#334155' : '#e2e8f0',
+      xhair:   isDark ? '#475569' : '#cbd5e1',
+      xhBg:    isDark ? '#1e293b' : '#0f172a',
+    }
+
+    const chart = createChart(el, {
+      width:  el.clientWidth,
+      height,
+      layout: {
+        background: { type: ColorType.Solid, color: C.bg },
+        textColor: C.text, fontSize: 10,
+      },
+      grid:   { vertLines: { color: C.grid }, horzLines: { color: C.grid } },
+      crosshair: {
+        vertLine: { color: C.xhair, labelBackgroundColor: C.xhBg },
+        horzLine: { color: C.xhair, labelBackgroundColor: C.xhBg },
+      },
+      rightPriceScale: {
+        borderColor: C.border,
+        scaleMargins: { top: 0.08, bottom: 0.04 },
+      },
+      timeScale: {
+        borderColor: C.border, timeVisible: false, fixRightEdge: true,
+      },
+      handleScroll: { mouseWheel: true, pressedMouseMove: true },
+      handleScale:  { mouseWheel: true, pinch: true },
+    })
+
+    // y-axis: use abbreviated formatter so large numbers stay readable
+    const priceFmt = { type: 'custom', formatter: abbrev, minMove: 0.01 }
+
+    // Add each series
+    const refs = series.map(s => {
+      const color = resolveColor(s.color)
+      const style = s.dashed ? LineStyle.Dashed : LineStyle.Solid
+      let cs
+      if (s.fill) {
+        const top = color.startsWith('#') ? withAlpha(color, 0.14) : 'rgba(100,180,200,0.12)'
+        cs = chart.addSeries(AreaSeries, {
+          lineColor: color, topColor: top, bottomColor: 'rgba(0,0,0,0)',
+          lineWidth: 2, lineStyle: style,
+          priceFormat: priceFmt,
+          lastValueVisible: false, priceLineVisible: false,
+        })
+      } else {
+        cs = chart.addSeries(LineSeries, {
+          color, lineWidth: 1.5, lineStyle: style,
+          priceFormat: priceFmt,
+          lastValueVisible: false, priceLineVisible: false,
+        })
+      }
+      const valid = s.data.filter(d => Number.isFinite(d.y) && d.x > 0)
+      cs.setData(valid.map(d => ({ time: d.x, value: d.y })))
+      return cs
+    })
+
+    // ── Custom tooltip ──────────────────────────────────────────────────────
+    const tip = tooltipRef.current
+    chart.subscribeCrosshairMove(param => {
+      if (!tip) return
+      if (!param?.time || !param.point || param.point.x < 0 || param.point.y < 0) {
+        tip.style.display = 'none'; return
+      }
+      // Get date label from first series data
+      const pt0 = series[0]?.data?.find(d => d.x === param.time)
+      const label = labelFmt ? labelFmt(pt0 || {}) : (pt0?.label || '')
+
+      const rows = series.map((s, i) => {
+        const val = param.seriesData.get(refs[i])?.value
+        if (val == null) return ''
+        const color = resolveColor(s.color)
+        const valStr = fmt ? fmt(val) : abbrev(val)
+        return `<div style="display:flex;align-items:center;gap:6px;margin-top:4px">
+          <span style="width:8px;height:8px;border-radius:50%;background:${color};flex-shrink:0"></span>
+          <span>${s.name}</span>
+          <span style="margin-left:auto;font-weight:700;padding-left:12px">${valStr}</span>
+        </div>`
+      }).join('')
+
+      tip.innerHTML = `<div style="font-size:10px;opacity:0.65;margin-bottom:2px">${label}</div>${rows}`
+
+      const w = el.clientWidth
+      const lft = param.point.x > w * 0.6
+        ? param.point.x - tip.offsetWidth - 14
+        : param.point.x + 14
+      tip.style.left = `${Math.max(4, lft)}px`
+      tip.style.top  = `${Math.max(4, param.point.y - 44)}px`
+      tip.style.display = 'block'
+    })
+
+    chart.timeScale().fitContent()
+
+    const ro = new ResizeObserver(([e]) => {
+      if (e.contentRect.width > 0) chart.applyOptions({ width: e.contentRect.width })
+    })
+    ro.observe(el)
+
+    return () => { ro.disconnect(); chart.remove() }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [series, height])
+
+  return (
+    <div style={{ position: 'relative', width: '100%' }}>
+      <div ref={containerRef} style={{ width: '100%', borderRadius: 8, overflow: 'hidden' }} />
+      <div ref={tooltipRef} style={{
+        display:        'none',
+        position:       'absolute',
+        pointerEvents:  'none',
+        background:     'var(--ink)',
+        color:          'var(--bg)',
+        padding:        '8px 12px',
+        borderRadius:   8,
+        fontSize:       12,
+        fontFamily:     'var(--font-mono)',
+        whiteSpace:     'nowrap',
+        boxShadow:      '0 4px 16px rgba(0,0,0,0.22)',
+        zIndex:         10,
+      }} />
+    </div>
   )
 }
