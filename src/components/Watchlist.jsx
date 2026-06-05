@@ -327,9 +327,9 @@ function WatchlistCard({ item, priceData, sr, onRemove, onNoteChange, showChart,
 
   // ── Build EMA overlay curves for LWChart ─────────────────────────────────
   const emaLines = (overlays.ma && chartMAs) ? [
-    chartMAs.series20?.length  ? { data: chartMAs.series20  } : null,
-    chartMAs.series50?.length  ? { data: chartMAs.series50  } : null,
-    chartMAs.series200?.length ? { data: chartMAs.series200 } : null,
+    chartMAs.series20?.length  ? { data: chartMAs.series20,  label: `EMA${chartMAs.p1}` } : null,
+    chartMAs.series50?.length  ? { data: chartMAs.series50,  label: `EMA${chartMAs.p2}` } : null,
+    chartMAs.series200?.length ? { data: chartMAs.series200, label: `EMA${chartMAs.p3}` } : null,
   ].filter(Boolean) : []
 
   // ── Build combined hLines: S/R + optional Fib / Volume Profile ───────────
@@ -685,9 +685,9 @@ function WatchlistFullscreen({ item, priceData, sr, lang, onClose }) {
 
   // EMA full curves for LWChart
   const emaLines = (overlays.ma && chartMAs) ? [
-    chartMAs.series20?.length  ? { data: chartMAs.series20  } : null,
-    chartMAs.series50?.length  ? { data: chartMAs.series50  } : null,
-    chartMAs.series200?.length ? { data: chartMAs.series200 } : null,
+    chartMAs.series20?.length  ? { data: chartMAs.series20,  label: `EMA${chartMAs.p1}` } : null,
+    chartMAs.series50?.length  ? { data: chartMAs.series50,  label: `EMA${chartMAs.p2}` } : null,
+    chartMAs.series200?.length ? { data: chartMAs.series200, label: `EMA${chartMAs.p3}` } : null,
   ].filter(Boolean) : []
 
   const hLines = [

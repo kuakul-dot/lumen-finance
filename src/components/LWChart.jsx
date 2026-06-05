@@ -150,13 +150,16 @@ export function LWChart({
     for (let i = 0; i < emaLines.length; i++) {
       const e = emaLines[i]
       if (!e?.data?.length) continue
+      const color = EMA_CURVE_COLORS[i] || '#94a3b8'
       const ls = chart.addSeries(LineSeries, {
-        color:                  EMA_CURVE_COLORS[i] || '#94a3b8',
+        color,
         lineWidth:              1,
         lineStyle:              LineStyle.Solid,
         priceLineVisible:       false,
-        lastValueVisible:       false,
+        lastValueVisible:       true,   // show current value box on right axis
         crosshairMarkerVisible: false,
+        title:                  e.label || '',  // e.g. "EMA20", "EMA50"
+        priceFormat:            { type: 'price', precision, minMove },
       })
       ls.setData(e.data)
     }
