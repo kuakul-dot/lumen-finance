@@ -1031,7 +1031,7 @@ function AddHoldingModal({ lang, portfolioId, onClose, onSaved }) {
           <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 80px", gap: 12 }}>
             <Field label={
               form.asset_class === 'MutualFund' ? (th ? "จำนวนหน่วย" : "Units") :
-              form.asset_class === 'GoldTH'     ? (th ? "น้ำหนัก (บาท ทอง)" : "Weight (Thai บาท)") :
+              form.asset_class === 'GoldTH'     ? (th ? "น้ำหนัก (บาท ทอง)" : "Weight (Thai baht)") :
               (th ? "จำนวนหุ้น" : "Shares")
             }>
               <CalcInput required value={form.shares}
@@ -1040,7 +1040,7 @@ function AddHoldingModal({ lang, portfolioId, onClose, onSaved }) {
             </Field>
             <Field label={
               form.asset_class === 'MutualFund' ? (th ? "NAV ทุน/หน่วย" : "Cost NAV/unit") :
-              form.asset_class === 'GoldTH'     ? (th ? "ราคาทุน/บาท ทอง" : "Cost/Thai บาท") :
+              form.asset_class === 'GoldTH'     ? (th ? "ราคาทุน/บาท ทอง" : "Cost/Thai baht") :
               (th ? "ราคาทุน/หุ้น" : "Cost price/share")
             }>
               <CalcInput required value={form.cost_price}
