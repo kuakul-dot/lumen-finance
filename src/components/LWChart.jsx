@@ -268,6 +268,27 @@ export function LWLineChart({ series = [], height = 280, fmt, labelFmt }) {
     // y-axis: use abbreviated formatter so large numbers stay readable
     const priceFmt = { type: 'custom', formatter: abbrev, minMove: 0.01 }
 
+    // ── Timestamp conversion ──────────────────────────────────────────────────
+    // Analytics/Dashboard use x: index (0, 1, 2 …) for equal-spaced data.
+    // LW Charts needs proper Unix timestamps (> 1 billion). Detect and convert.
+    const allXs = series.flatMap(s => s.data.map(d => d.x)).filter(Number.isFinite)
+    const maxX   = allXs.length ? Math.max(...allXs) : 0
+    const isSeq  = maxX < 1_000_000_000   // real Unix ts > 1 billion (year 2001+)
+
+    // Spread sequential indices across time: each step ≈ 1 month, ending at now
+    const nowTs  = Math.floor(Date.now() / 1000)
+    const step   = isSeq && maxX > 0 ? Math.floor((365 * 86400) / Math.max(maxX, 1)) : 1
+    const baseTs = nowTs - maxX * step
+    const toTs   = x => isSeq ? baseTs + Math.round(x) * step : x
+
+    // Build timestamp → data-point lookup for tooltip labels
+    const tsMap = new Map()
+    series.forEach(s => s.data.forEach(d => {
+      if (!Number.isFinite(d.y) || !Number.isFinite(d.x)) return
+      const ts = toTs(d.x)
+      if (!tsMap.has(ts)) tsMap.set(ts, d)
+    }))
+
     // Add each series
     const refs = series.map(s => {
       const color = resolveColor(s.color)
@@ -288,8 +309,8 @@ export function LWLineChart({ series = [], height = 280, fmt, labelFmt }) {
           lastValueVisible: false, priceLineVisible: false,
         })
       }
-      const valid = s.data.filter(d => Number.isFinite(d.y) && d.x > 0)
-      cs.setData(valid.map(d => ({ time: d.x, value: d.y })))
+      const valid = s.data.filter(d => Number.isFinite(d.y) && Number.isFinite(d.x))
+      cs.setData(valid.map(d => ({ time: toTs(d.x), value: d.y })))
       return cs
     })
 
@@ -300,8 +321,8 @@ export function LWLineChart({ series = [], height = 280, fmt, labelFmt }) {
       if (!param?.time || !param.point || param.point.x < 0 || param.point.y < 0) {
         tip.style.display = 'none'; return
       }
-      // Get date label from first series data
-      const pt0 = series[0]?.data?.find(d => d.x === param.time)
+      // Recover original data point for label
+      const pt0 = tsMap.get(param.time) || series[0]?.data?.[0]
       const label = labelFmt ? labelFmt(pt0 || {}) : (pt0?.label || '')
 
       const rows = series.map((s, i) => {
