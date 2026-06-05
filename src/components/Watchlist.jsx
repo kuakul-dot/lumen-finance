@@ -340,11 +340,11 @@ function WatchlistCard({ item, priceData, sr, onRemove, onNoteChange, showChart,
     ...(displaySR ? [
       ...displaySR.resistances.map((lvl, i) => ({
         y: lvl.price, color: 'var(--loss)',
-        label: `R${i + 1} ${fmtPrice(lvl.price, currency)}`,
+        label: `R${i + 1}`,
       })),
       ...displaySR.supports.map((lvl, i) => ({
         y: lvl.price, color: 'var(--gain)',
-        label: `S${i + 1} ${fmtPrice(lvl.price, currency)}`,
+        label: `S${i + 1}`,
       })),
     ] : []),
 
@@ -358,7 +358,7 @@ function WatchlistCard({ item, priceData, sr, onRemove, onNoteChange, showChart,
 
     // Volume Profile levels
     ...(chartVP ? [
-      { y: chartVP.poc, color: 'oklch(0.65 0.16 90)', label: `POC ${fmtPrice(chartVP.poc, currency)}` },
+      { y: chartVP.poc, color: 'oklch(0.65 0.16 90)', label: 'POC' },
       { y: chartVP.vah, color: 'oklch(0.65 0.10 90)', label: `VAH` },
       { y: chartVP.val, color: 'oklch(0.65 0.10 90)', label: `VAL` },
     ] : []),
@@ -692,13 +692,13 @@ function WatchlistFullscreen({ item, priceData, sr, lang, onClose }) {
 
   const hLines = [
     ...(displaySR ? [
-      ...displaySR.resistances.map((lvl, i) => ({ y: lvl.price, color: 'var(--loss)', label: `R${i+1} ${fmtPrice(lvl.price, currency)}` })),
-      ...displaySR.supports.map((lvl, i)    => ({ y: lvl.price, color: 'var(--gain)', label: `S${i+1} ${fmtPrice(lvl.price, currency)}` })),
+      ...displaySR.resistances.map((lvl, i) => ({ y: lvl.price, color: 'var(--loss)', label: `R${i+1}` })),
+      ...displaySR.supports.map((lvl, i)    => ({ y: lvl.price, color: 'var(--gain)', label: `S${i+1}` })),
     ] : []),
     ...(chartFib ? chartFib.map(lvl => ({ y: lvl.price, color: 'oklch(0.65 0.14 55)', label: `Fib ${lvl.label}` })) : []),
     // EMA rendered as full curves via emaLines — not horizontal price lines
     ...(chartVP ? [
-      { y: chartVP.poc, color: 'oklch(0.65 0.16 90)', label: `POC ${fmtPrice(chartVP.poc, currency)}` },
+      { y: chartVP.poc, color: 'oklch(0.65 0.16 90)', label: 'POC' },
       { y: chartVP.vah, color: 'oklch(0.65 0.10 90)', label: 'VAH' },
       { y: chartVP.val, color: 'oklch(0.65 0.10 90)', label: 'VAL' },
     ] : []),

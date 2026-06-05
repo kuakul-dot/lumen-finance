@@ -170,7 +170,7 @@ export function LWChart({
         lineWidth:          1,
         lineStyle:          LineStyle.Dashed,
         title:              hl.label || '',
-        axisLabelVisible:   false,
+        axisLabelVisible:   true,   // show price value on right axis
       })
     }
 
