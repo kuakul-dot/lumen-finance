@@ -16,26 +16,39 @@ import {
 } from 'lightweight-charts'
 
 // ── Color resolver ────────────────────────────────────────────────────────────
-// Handles var(), oklch(), hex, rgb — canvas-safe on modern browsers.
-// oklch is passed through directly (Chrome/FF/Safari 2023+ support it in canvas).
-// CSS variables are read via getComputedStyle so theme changes work correctly.
+// LW Charts v5 uses canvas internally. Canvas accepts hex/rgb but may reject
+// oklch (which getComputedStyle returns for custom properties). We therefore
+// use a hardcoded hex map for all known design-token CSS variables and convert
+// oklch heuristically, so we always return a canvas-safe color string.
 function resolveColor(c) {
   if (!c) return '#94a3b8'
-  if (c.startsWith('#') || c.startsWith('rgb') || c.startsWith('hsl')) return c
-  if (c.startsWith('oklch')) return c   // modern browsers handle oklch in canvas
+  if (c.startsWith('#') || c.startsWith('rgb(') || c.startsWith('hsl(')) return c
+
   if (c.startsWith('var(')) {
     const name = c.slice(4, -1).trim()
-    try {
-      const v = getComputedStyle(document.documentElement).getPropertyValue(name).trim()
-      if (v) return v   // return computed value (may be oklch — that's fine)
-    } catch {}
-    // Hardcoded fallbacks for common tokens
-    const fb = {
-      '--loss':   '#f87171', '--gain':   '#4ade80',
-      '--accent': '#2dd4bf', '--ink':    '#0f172a',
+    const MAP = {
+      '--loss':   '#ef4444', '--gain':   '#22c55e',
+      '--accent': '#0d9488', '--ink':    '#1e293b',
       '--ink-2':  '#475569', '--ink-3':  '#94a3b8', '--ink-4': '#cbd5e1',
+      '--c1':     '#3b82f6', '--c2':     '#8b5cf6', '--c3':    '#f59e0b',
+      '--c4':     '#10b981', '--c5':     '#f97316', '--c6':    '#ec4899', '--c7': '#6366f1',
     }
-    return fb[name] || '#94a3b8'
+    return MAP[name] || '#94a3b8'
+  }
+
+  if (c.startsWith('oklch')) {
+    // Approximate by hue angle
+    const m = c.match(/oklch\([^)]*?([\d.]+)\s*\)/) || c.match(/oklch\([\d.]+ [\d.]+ ([\d.]+)/)
+    if (m) {
+      const h = parseFloat(m[1])
+      if (h <  40)  return '#ef4444'   // red
+      if (h <  80)  return '#f59e0b'   // amber  (Fibonacci)
+      if (h < 160)  return '#22c55e'   // green  (Volume Profile)
+      if (h < 220)  return '#38bdf8'   // sky
+      if (h < 270)  return '#818cf8'   // indigo
+      if (h < 330)  return '#c084fc'   // purple
+      return '#ef4444'
+    }
   }
   return '#94a3b8'
 }
@@ -224,13 +237,14 @@ export function LWChart({
 //   height  = number
 //   fmt     = (value: number) => string   (for tooltip values)
 //   labelFmt= (point) => string           (for tooltip date label — defaults to d.label)
-export function LWLineChart({ series = [], height = 280, fmt, labelFmt }) {
+export function LWLineChart({ series, height = 280, fmt, labelFmt }) {
   const containerRef = useRef(null)
   const tooltipRef   = useRef(null)
 
   useEffect(() => {
     const el = containerRef.current
-    if (!el || !series[0]?.data?.length) return
+    const safeS = Array.isArray(series) ? series : []
+    if (!el || !safeS[0]?.data?.length) return
 
     const isDark = document.documentElement.getAttribute('data-theme') === 'dark'
     const C = {
@@ -265,17 +279,18 @@ export function LWLineChart({ series = [], height = 280, fmt, labelFmt }) {
       handleScale:  { mouseWheel: true, pinch: true },
     })
 
-    // y-axis: use abbreviated formatter so large numbers stay readable
-    const priceFmt = { type: 'custom', formatter: abbrev, minMove: 0.01 }
+    // ── Precision for y-axis (type:'price' is safest — 'custom' can silently fail) ─
+    const allYs  = safeS.flatMap(s => s.data.map(d => d.y)).filter(Number.isFinite)
+    const maxAbs = allYs.length ? Math.max(...allYs.map(Math.abs)) : 1
+    const prec   = maxAbs >= 10000 ? 0 : maxAbs >= 100 ? 0 : maxAbs >= 1 ? 2 : 4
+    const priceFmt = { type: 'price', precision: prec, minMove: Math.pow(10, -prec) || 0.01 }
 
     // ── Timestamp conversion ──────────────────────────────────────────────────
-    // Analytics/Dashboard use x: index (0, 1, 2 …) for equal-spaced data.
-    // LW Charts needs proper Unix timestamps (> 1 billion). Detect and convert.
-    const allXs = series.flatMap(s => s.data.map(d => d.x)).filter(Number.isFinite)
+    // Some series still use sequential indices. Real Unix ts > 1 billion (year 2001+).
+    const allXs = safeS.flatMap(s => s.data.map(d => d.x)).filter(Number.isFinite)
     const maxX   = allXs.length ? Math.max(...allXs) : 0
-    const isSeq  = maxX < 1_000_000_000   // real Unix ts > 1 billion (year 2001+)
+    const isSeq  = maxX < 1_000_000_000
 
-    // Spread sequential indices across time: each step ≈ 1 month, ending at now
     const nowTs  = Math.floor(Date.now() / 1000)
     const step   = isSeq && maxX > 0 ? Math.floor((365 * 86400) / Math.max(maxX, 1)) : 1
     const baseTs = nowTs - maxX * step
@@ -283,19 +298,19 @@ export function LWLineChart({ series = [], height = 280, fmt, labelFmt }) {
 
     // Build timestamp → data-point lookup for tooltip labels
     const tsMap = new Map()
-    series.forEach(s => s.data.forEach(d => {
+    safeS.forEach(s => s.data.forEach(d => {
       if (!Number.isFinite(d.y) || !Number.isFinite(d.x)) return
       const ts = toTs(d.x)
       if (!tsMap.has(ts)) tsMap.set(ts, d)
     }))
 
     // Add each series
-    const refs = series.map(s => {
+    const refs = safeS.map(s => {
       const color = resolveColor(s.color)
       const style = s.dashed ? LineStyle.Dashed : LineStyle.Solid
       let cs
       if (s.fill) {
-        const top = color.startsWith('#') ? withAlpha(color, 0.14) : 'rgba(100,180,200,0.12)'
+        const top = color.startsWith('#') ? withAlpha(color, 0.14) : withAlpha('#0d9488', 0.12)
         cs = chart.addSeries(AreaSeries, {
           lineColor: color, topColor: top, bottomColor: 'rgba(0,0,0,0)',
           lineWidth: 2, lineStyle: style,
@@ -321,11 +336,10 @@ export function LWLineChart({ series = [], height = 280, fmt, labelFmt }) {
       if (!param?.time || !param.point || param.point.x < 0 || param.point.y < 0) {
         tip.style.display = 'none'; return
       }
-      // Recover original data point for label
-      const pt0 = tsMap.get(param.time) || series[0]?.data?.[0]
+      const pt0 = tsMap.get(param.time) || safeS[0]?.data?.[0]
       const label = labelFmt ? labelFmt(pt0 || {}) : (pt0?.label || '')
 
-      const rows = series.map((s, i) => {
+      const rows = safeS.map((s, i) => {
         const val = param.seriesData.get(refs[i])?.value
         if (val == null) return ''
         const color = resolveColor(s.color)
@@ -357,7 +371,7 @@ export function LWLineChart({ series = [], height = 280, fmt, labelFmt }) {
 
     return () => { ro.disconnect(); chart.remove() }
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [series, height])
+  }, [series, height])  // series ref change triggers rebuild
 
   return (
     <div style={{ position: 'relative', width: '100%' }}>
