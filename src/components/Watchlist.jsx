@@ -1346,7 +1346,6 @@ export function WatchlistPage({ lang, ccy, fxRate = 36 }) {
           </p>
         </>
       )}
-    </div>
 
       {showAdd && <AddModal th={th} onClose={() => setShowAdd(false)} onAdd={addItem} />}
 
