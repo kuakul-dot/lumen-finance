@@ -137,6 +137,67 @@ function computeMAs(bars, range = '6mo') {
   }
 }
 
+// ── Previous Week / Month High & Low ─────────────────────────────────────────
+function computePrevHL(bars) {
+  if (!bars || bars.length < 10) return null
+  const now = new Date()
+  const dow = now.getDay() || 7  // 1=Mon … 7=Sun
+  const lastMon = new Date(now); lastMon.setDate(now.getDate() - dow - 6); lastMon.setHours(0, 0, 0, 0)
+  const lastSun = new Date(lastMon); lastSun.setDate(lastMon.getDate() + 6); lastSun.setHours(23, 59, 59, 0)
+  const pmStart = new Date(now.getFullYear(), now.getMonth() - 1, 1)
+  const pmEnd   = new Date(now.getFullYear(), now.getMonth(), 0); pmEnd.setHours(23, 59, 59, 0)
+
+  const wk = bars.filter(b => { const t = b.t * 1000; return t >= lastMon && t <= lastSun })
+  const mo = bars.filter(b => { const t = b.t * 1000; return t >= pmStart && t <= pmEnd })
+
+  const r = {}
+  if (wk.length >= 2) {
+    r.pwh = Math.max(...wk.map(b => b.h ?? b.c))
+    r.pwl = Math.min(...wk.map(b => b.l ?? b.c))
+  }
+  if (mo.length >= 5) {
+    r.pmh = Math.max(...mo.map(b => b.h ?? b.c))
+    r.pml = Math.min(...mo.map(b => b.l ?? b.c))
+  }
+  return Object.keys(r).length ? r : null
+}
+
+// ── Round / Psychological Levels ──────────────────────────────────────────────
+function computeRoundLevels(price, n = 3) {
+  if (!price || price <= 0) return []
+  const inc = price >= 5000 ? 500 : price >= 1000 ? 100 : price >= 500 ? 50
+    : price >= 100 ? 10 : price >= 50 ? 5 : price >= 10 ? 1 : price >= 1 ? 0.5 : 0.1
+  const base = Math.round(price / inc) * inc
+  const lvls = []
+  for (let i = -n; i <= n; i++) {
+    const v = +(base + i * inc).toFixed(8)
+    if (v > 0 && Math.abs(v - price) / price > 0.005) lvls.push(v)
+  }
+  return lvls.sort((a, b) => a - b)
+}
+
+// ── VWAP (Volume-Weighted Average Price) ──────────────────────────────────────
+function computeVWAP(bars) {
+  const valid = (bars || []).filter(b => b.v > 0 && Number.isFinite(b.v) && Number.isFinite(b.c))
+  if (valid.length < 2) return null
+  let sumTPV = 0, sumV = 0
+  for (const b of valid) {
+    sumTPV += ((b.h ?? b.c) + (b.l ?? b.c) + b.c) / 3 * b.v
+    sumV   += b.v
+  }
+  return sumV > 0 ? +(sumTPV / sumV).toFixed(4) : null
+}
+
+// ── Bollinger Bands (SMA20 ± 2σ) ─────────────────────────────────────────────
+function computeBB(bars) {
+  const closes = (bars || []).map(b => b.c).filter(v => Number.isFinite(v) && v > 0)
+  if (closes.length < 20) return null
+  const recent = closes.slice(-20)
+  const mean = recent.reduce((s, c) => s + c, 0) / 20
+  const sd = Math.sqrt(recent.reduce((s, c) => s + (c - mean) ** 2, 0) / 20)
+  return { upper: +(mean + 2 * sd).toFixed(4), lower: +(mean - 2 * sd).toFixed(4) }
+}
+
 // ── Volume Profile — Point of Control (POC) ───────────────────────────────────
 // Divides the price range into BUCKETS equal-width buckets, distributes each
 // bar's volume proportionally across the buckets it spans (by wick), then finds
@@ -287,9 +348,7 @@ function WatchlistCard({ item, priceData, sr, onRemove, onNoteChange, showChart,
   const [chartRange,   setChartRange]   = useState('6mo')
   const [chartBars,    setChartBars]    = useState(null)   // [{t,o,h,l,c,v}]
   const [loadingChart, setLoadingChart] = useState(false)
-  // Overlay toggles — Fibonacci, Moving Averages, Volume Profile
-  const [overlays, setOverlays] = useState({ fib: false, ma: false, vp: false })
-
+  const [overlays, setOverlays] = useState({ fib: false, ma: false, vp: false, prevhl: false, round: false, vwap: false, bb: false })
   const toggleOverlay = (key) => setOverlays(prev => ({ ...prev, [key]: !prev[key] }))
 
   // Fetch OHLC history when chart opens or range changes
@@ -311,14 +370,18 @@ function WatchlistCard({ item, priceData, sr, onRemove, onNoteChange, showChart,
 
   // Reset state when card is collapsed
   useEffect(() => {
-    if (!showChart) { setChartMode('sr'); setOverlays({ fib: false, ma: false, vp: false }) }
+    if (!showChart) { setChartMode('sr'); setOverlays({ fib: false, ma: false, vp: false, prevhl: false, round: false, vwap: false, bb: false }) }
   }, [showChart])
 
   // ── Compute overlays from chartBars ────────────────────────────────────────
-  const chartSR  = useMemo(() => chartBars && livePrice ? computeSR(chartBars, livePrice) : null, [chartBars, livePrice])
-  const chartFib = useMemo(() => overlays.fib && chartBars ? computeFib(chartBars) : null, [chartBars, overlays.fib])
-  const chartMAs = useMemo(() => overlays.ma  && chartBars ? computeMAs(chartBars, chartRange) : null, [chartBars, overlays.ma, chartRange])
-  const chartVP  = useMemo(() => overlays.vp  && chartBars ? computeVolProfile(chartBars) : null, [chartBars, overlays.vp])
+  const chartSR     = useMemo(() => chartBars && livePrice ? computeSR(chartBars, livePrice) : null, [chartBars, livePrice])
+  const chartFib    = useMemo(() => overlays.fib    && chartBars ? computeFib(chartBars) : null, [chartBars, overlays.fib])
+  const chartMAs    = useMemo(() => overlays.ma     && chartBars ? computeMAs(chartBars, chartRange) : null, [chartBars, overlays.ma, chartRange])
+  const chartVP     = useMemo(() => overlays.vp     && chartBars ? computeVolProfile(chartBars) : null, [chartBars, overlays.vp])
+  const chartPrevHL = useMemo(() => overlays.prevhl && chartBars ? computePrevHL(chartBars) : null, [chartBars, overlays.prevhl])
+  const chartRound  = useMemo(() => overlays.round  && chartBars && livePrice ? computeRoundLevels(livePrice) : [], [livePrice, overlays.round])
+  const chartVWAP   = useMemo(() => overlays.vwap   && chartBars ? computeVWAP(chartBars) : null, [chartBars, overlays.vwap])
+  const chartBBands = useMemo(() => overlays.bb     && chartBars ? computeBB(chartBars) : null, [chartBars, overlays.bb])
 
   // Clean ticker for TradingView: BTC-USD → BTC
   const tvTicker = item.cls === 'Crypto'
@@ -359,8 +422,28 @@ function WatchlistCard({ item, priceData, sr, onRemove, onNoteChange, showChart,
     // Volume Profile levels
     ...(chartVP ? [
       { y: chartVP.poc, color: 'oklch(0.65 0.16 90)', label: 'POC' },
-      { y: chartVP.vah, color: 'oklch(0.65 0.10 90)', label: `VAH` },
-      { y: chartVP.val, color: 'oklch(0.65 0.10 90)', label: `VAL` },
+      { y: chartVP.vah, color: 'oklch(0.65 0.10 90)', label: 'VAH' },
+      { y: chartVP.val, color: 'oklch(0.65 0.10 90)', label: 'VAL' },
+    ] : []),
+
+    // Previous Week / Month High & Low
+    ...(chartPrevHL ? [
+      chartPrevHL.pwh && { y: chartPrevHL.pwh, color: 'oklch(0.68 0.14 55)', label: 'PWH' },
+      chartPrevHL.pwl && { y: chartPrevHL.pwl, color: 'oklch(0.68 0.14 55)', label: 'PWL' },
+      chartPrevHL.pmh && { y: chartPrevHL.pmh, color: 'oklch(0.58 0.16 55)', label: 'PMH' },
+      chartPrevHL.pml && { y: chartPrevHL.pml, color: 'oklch(0.58 0.16 55)', label: 'PML' },
+    ].filter(Boolean) : []),
+
+    // Round / Psychological levels
+    ...chartRound.map(v => ({ y: v, color: 'oklch(0.60 0.04 0)', label: String(v) })),
+
+    // VWAP
+    ...(chartVWAP != null ? [{ y: chartVWAP, color: 'oklch(0.62 0.14 195)', label: 'VWAP' }] : []),
+
+    // Bollinger Bands ±2σ
+    ...(chartBBands ? [
+      { y: chartBBands.upper, color: 'oklch(0.58 0.12 290)', label: 'BB+' },
+      { y: chartBBands.lower, color: 'oklch(0.58 0.12 290)', label: 'BB−' },
     ] : []),
   ]
 
@@ -515,9 +598,13 @@ function WatchlistCard({ item, priceData, sr, onRemove, onNoteChange, showChart,
               <div style={{ display: 'flex', gap: 4, marginBottom: 10, flexWrap: 'wrap', alignItems: 'center' }}>
                 <span style={{ fontSize: 10, color: 'var(--ink-3)', marginRight: 2 }}>Overlay:</span>
                 {[
-                  { key: 'fib', label: 'Fibonacci', color: 'oklch(0.65 0.14 55)' },
-                  { key: 'ma',  label: 'EMA',          color: 'oklch(0.50 0.12 250)' },
-                  { key: 'vp',  label: 'Vol Profile', color: 'oklch(0.60 0.14 90)' },
+                  { key: 'fib',    label: 'Fibonacci',  color: 'oklch(0.65 0.14 55)'  },
+                  { key: 'ma',     label: 'EMA',         color: 'oklch(0.50 0.12 250)' },
+                  { key: 'vp',     label: 'Vol Profile', color: 'oklch(0.60 0.14 90)'  },
+                  { key: 'prevhl', label: 'Prev H/L',    color: 'oklch(0.65 0.14 55)'  },
+                  { key: 'round',  label: 'Round $',     color: 'oklch(0.55 0.04 0)'   },
+                  { key: 'vwap',   label: 'VWAP',        color: 'oklch(0.62 0.14 195)' },
+                  { key: 'bb',     label: 'BB ±2σ',      color: 'oklch(0.58 0.12 290)' },
                 ].map(o => (
                   <button key={o.key} onClick={() => toggleOverlay(o.key)} style={{
                     padding: '3px 9px', borderRadius: 6, fontSize: 10, fontWeight: 600, cursor: 'pointer',
@@ -642,8 +729,7 @@ function WatchlistFullscreen({ item, priceData, sr, lang, onClose }) {
   const [chartRange,   setChartRange]   = useState('6mo')
   const [chartBars,    setChartBars]    = useState(null)
   const [loadingChart, setLoadingChart] = useState(false)
-  const [overlays,     setOverlays]     = useState({ fib: false, ma: false, vp: false })
-
+  const [overlays, setOverlays] = useState({ fib: false, ma: false, vp: false, prevhl: false, round: false, vwap: false, bb: false })
   const toggleOL = (key) => setOverlays(prev => ({ ...prev, [key]: !prev[key] }))
 
   // Escape to close
@@ -676,14 +762,17 @@ function WatchlistFullscreen({ item, priceData, sr, lang, onClose }) {
     return () => { cancelled = true }
   }, [chartMode, chartRange, item.symbol, item.region, item.cls])
 
-  const chartSR  = useMemo(() => chartBars && livePrice ? computeSR(chartBars, livePrice) : null, [chartBars, livePrice])
-  const chartFib = useMemo(() => overlays.fib && chartBars ? computeFib(chartBars) : null, [chartBars, overlays.fib])
-  const chartMAs = useMemo(() => overlays.ma  && chartBars ? computeMAs(chartBars, chartRange) : null, [chartBars, overlays.ma, chartRange])
-  const chartVP  = useMemo(() => overlays.vp  && chartBars ? computeVolProfile(chartBars) : null, [chartBars, overlays.vp])
+  const chartSR     = useMemo(() => chartBars && livePrice ? computeSR(chartBars, livePrice) : null, [chartBars, livePrice])
+  const chartFib    = useMemo(() => overlays.fib    && chartBars ? computeFib(chartBars) : null, [chartBars, overlays.fib])
+  const chartMAs    = useMemo(() => overlays.ma     && chartBars ? computeMAs(chartBars, chartRange) : null, [chartBars, overlays.ma, chartRange])
+  const chartVP     = useMemo(() => overlays.vp     && chartBars ? computeVolProfile(chartBars) : null, [chartBars, overlays.vp])
+  const chartPrevHL = useMemo(() => overlays.prevhl && chartBars ? computePrevHL(chartBars) : null, [chartBars, overlays.prevhl])
+  const chartRound  = useMemo(() => overlays.round  && chartBars && livePrice ? computeRoundLevels(livePrice) : [], [livePrice, overlays.round])
+  const chartVWAP   = useMemo(() => overlays.vwap   && chartBars ? computeVWAP(chartBars) : null, [chartBars, overlays.vwap])
+  const chartBBands = useMemo(() => overlays.bb     && chartBars ? computeBB(chartBars) : null, [chartBars, overlays.bb])
 
   const displaySR = chartSR ?? sr
 
-  // EMA full curves for LWChart
   const emaLines = (overlays.ma && chartMAs) ? [
     chartMAs.series20?.length  ? { data: chartMAs.series20,  label: `EMA${chartMAs.p1}` } : null,
     chartMAs.series50?.length  ? { data: chartMAs.series50,  label: `EMA${chartMAs.p2}` } : null,
@@ -696,11 +785,22 @@ function WatchlistFullscreen({ item, priceData, sr, lang, onClose }) {
       ...displaySR.supports.map((lvl, i)    => ({ y: lvl.price, color: 'var(--gain)', label: `S${i+1}` })),
     ] : []),
     ...(chartFib ? chartFib.map(lvl => ({ y: lvl.price, color: 'oklch(0.65 0.14 55)', label: `Fib ${lvl.label}` })) : []),
-    // EMA rendered as full curves via emaLines — not horizontal price lines
     ...(chartVP ? [
       { y: chartVP.poc, color: 'oklch(0.65 0.16 90)', label: 'POC' },
       { y: chartVP.vah, color: 'oklch(0.65 0.10 90)', label: 'VAH' },
       { y: chartVP.val, color: 'oklch(0.65 0.10 90)', label: 'VAL' },
+    ] : []),
+    ...(chartPrevHL ? [
+      chartPrevHL.pwh && { y: chartPrevHL.pwh, color: 'oklch(0.68 0.14 55)', label: 'PWH' },
+      chartPrevHL.pwl && { y: chartPrevHL.pwl, color: 'oklch(0.68 0.14 55)', label: 'PWL' },
+      chartPrevHL.pmh && { y: chartPrevHL.pmh, color: 'oklch(0.58 0.16 55)', label: 'PMH' },
+      chartPrevHL.pml && { y: chartPrevHL.pml, color: 'oklch(0.58 0.16 55)', label: 'PML' },
+    ].filter(Boolean) : []),
+    ...chartRound.map(v => ({ y: v, color: 'oklch(0.60 0.04 0)', label: String(v) })),
+    ...(chartVWAP != null ? [{ y: chartVWAP, color: 'oklch(0.62 0.14 195)', label: 'VWAP' }] : []),
+    ...(chartBBands ? [
+      { y: chartBBands.upper, color: 'oklch(0.58 0.12 290)', label: 'BB+' },
+      { y: chartBBands.lower, color: 'oklch(0.58 0.12 290)', label: 'BB−' },
     ] : []),
   ]
 
@@ -711,9 +811,13 @@ function WatchlistFullscreen({ item, priceData, sr, lang, onClose }) {
   const fsH = typeof window !== 'undefined' ? Math.max(380, window.innerHeight - 280) : 480
 
   const OVERLAYS_DEF = [
-    { key: 'fib', label: 'Fibonacci',  color: 'oklch(0.65 0.14 55)'  },
-    { key: 'ma',  label: 'EMA',        color: 'oklch(0.50 0.12 250)' },
-    { key: 'vp',  label: 'Vol Profile',color: 'oklch(0.60 0.14 90)'  },
+    { key: 'fib',    label: 'Fibonacci',  color: 'oklch(0.65 0.14 55)'  },
+    { key: 'ma',     label: 'EMA',        color: 'oklch(0.50 0.12 250)' },
+    { key: 'vp',     label: 'Vol Profile',color: 'oklch(0.60 0.14 90)'  },
+    { key: 'prevhl', label: 'Prev H/L',   color: 'oklch(0.65 0.14 55)'  },
+    { key: 'round',  label: 'Round $',    color: 'oklch(0.55 0.04 0)'   },
+    { key: 'vwap',   label: 'VWAP',       color: 'oklch(0.62 0.14 195)' },
+    { key: 'bb',     label: 'BB ±2σ',     color: 'oklch(0.58 0.12 290)' },
   ]
 
   return (
