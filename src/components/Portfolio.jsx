@@ -895,7 +895,7 @@ function AddHoldingModal({ lang, portfolioId, onClose, onSaved }) {
     if (k === 'region') patch.div_frequency = v === 'TH' ? '2' : '4'
     if (k === 'asset_class') {
       if (v === 'MutualFund') { patch.region = 'TH'; patch.currency = 'THB'; patch.div_frequency = '2' }
-      if (v === 'GoldTH')     { patch.currency = 'THB'; patch.region = 'Other'; patch.div_frequency = '1'; if (!patch.name) patch.name = 'ทองคำแท่ง' }
+      if (v === 'GoldTH')     { patch.currency = 'THB'; patch.region = 'Other'; patch.div_frequency = '1'; if (!patch.name) patch.name = th ? 'ทองคำแท่ง' : 'Gold Bars' }
     }
     return patch
   })
