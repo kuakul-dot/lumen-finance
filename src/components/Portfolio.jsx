@@ -895,7 +895,7 @@ function AddHoldingModal({ lang, portfolioId, onClose, onSaved }) {
     if (k === 'region') patch.div_frequency = v === 'TH' ? '2' : '4'
     if (k === 'asset_class') {
       if (v === 'MutualFund') { patch.region = 'TH'; patch.currency = 'THB'; patch.div_frequency = '2' }
-      if (v === 'GoldTH')     { patch.currency = 'THB'; patch.region = 'Other'; patch.div_frequency = '1'; if (!patch.name) patch.name = th ? 'ทองคำแท่ง' : 'Gold Bars' }
+      if (v === 'GoldTH')     { patch.currency = 'THB'; patch.region = 'Other'; patch.div_frequency = '0'; if (!patch.name) patch.name = th ? 'ทองคำแท่ง' : 'Gold Bars' }
     }
     return patch
   })
@@ -1064,6 +1064,7 @@ function AddHoldingModal({ lang, portfolioId, onClose, onSaved }) {
             </Field>
             <Field label={th ? "จ่ายปีละ (ครั้ง)" : "Payments / year"}>
               <select value={form.div_frequency} onChange={e => set('div_frequency', e.target.value)} style={inputStyle}>
+                <option value="0">{th ? "0× — ไม่มีปันผล" : "0× — No dividend"}</option>
                 <option value="1">{th ? "1× — รายปี" : "1× — Annual"}</option>
                 <option value="2">{th ? "2× — ราย 6 เดือน" : "2× — Semi-annual"}</option>
                 <option value="4">{th ? "4× — รายไตรมาส" : "4× — Quarterly"}</option>
@@ -1245,6 +1246,7 @@ function EditHoldingModal({ lang, holding, onClose, onSaved }) {
             </Field>
             <Field label={th ? "จ่ายปีละ (ครั้ง)" : "Payments / year"}>
               <select value={form.div_frequency} onChange={e => set('div_frequency', e.target.value)} style={inputStyle}>
+                <option value="0">{th ? "0× — ไม่มีปันผล" : "0× — No dividend"}</option>
                 <option value="1">{th ? "1× — รายปี" : "1× — Annual"}</option>
                 <option value="2">{th ? "2× — ราย 6 เดือน" : "2× — Semi-annual"}</option>
                 <option value="4">{th ? "4× — รายไตรมาส" : "4× — Quarterly"}</option>
