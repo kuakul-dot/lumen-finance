@@ -98,14 +98,36 @@ function computeFib(bars) {
   }))
 }
 
-// ── Moving Averages (MA20, MA50, MA200) ───────────────────────────────────────
-function computeMAs(bars) {
-  const closes = bars.map(b => b.c).filter(v => v != null && Number.isFinite(v))
-  const ma = (n) => {
-    if (closes.length < n) return null
-    return +(closes.slice(-n).reduce((s, c) => s + c, 0) / n).toFixed(4)
+// ── EMA (Exponential Moving Average) — adaptive periods per time frame ────────
+// EMA gives more weight to recent bars → reacts faster to price changes.
+// Periods scale down for shorter ranges so lines stay meaningful.
+const EMA_PERIODS = {
+  '1mo':  [5,  10,  20],   // ~1w / ~2w / ~1mo
+  '3mo':  [10, 20,  50],   // ~2w / ~1mo / ~2.5mo
+  '6mo':  [20, 50, 200],   // standard — ~1mo / ~2.5mo / ~10mo
+  '1y':   [20, 50, 200],   // same as 6mo — plenty of bars for EMA200
+}
+
+function calcEMA(closes, period) {
+  if (closes.length < period) return null
+  // Seed: SMA of first `period` values
+  let ema = closes.slice(0, period).reduce((s, c) => s + c, 0) / period
+  const k = 2 / (period + 1)
+  for (let i = period; i < closes.length; i++) {
+    ema = closes[i] * k + ema * (1 - k)
   }
-  return { ma20: ma(20), ma50: ma(50), ma200: ma(200) }
+  return +ema.toFixed(4)
+}
+
+function computeMAs(bars, range = '6mo') {
+  const closes  = bars.map(b => b.c).filter(v => v != null && Number.isFinite(v))
+  const [p1, p2, p3] = EMA_PERIODS[range] || EMA_PERIODS['6mo']
+  return {
+    ma20:  calcEMA(closes, p1),
+    ma50:  calcEMA(closes, p2),
+    ma200: calcEMA(closes, p3),
+    p1, p2, p3,   // store periods so labels can be dynamic
+  }
 }
 
 // ── Volume Profile — Point of Control (POC) ───────────────────────────────────
@@ -288,7 +310,7 @@ function WatchlistCard({ item, priceData, sr, onRemove, onNoteChange, showChart,
   // ── Compute overlays from chartBars ────────────────────────────────────────
   const chartSR  = useMemo(() => chartBars && livePrice ? computeSR(chartBars, livePrice) : null, [chartBars, livePrice])
   const chartFib = useMemo(() => overlays.fib && chartBars ? computeFib(chartBars) : null, [chartBars, overlays.fib])
-  const chartMAs = useMemo(() => overlays.ma  && chartBars ? computeMAs(chartBars) : null, [chartBars, overlays.ma])
+  const chartMAs = useMemo(() => overlays.ma  && chartBars ? computeMAs(chartBars, chartRange) : null, [chartBars, overlays.ma, chartRange])
   const chartVP  = useMemo(() => overlays.vp  && chartBars ? computeVolProfile(chartBars) : null, [chartBars, overlays.vp])
 
   // Clean ticker for TradingView: BTC-USD → BTC
@@ -329,11 +351,11 @@ function WatchlistCard({ item, priceData, sr, onRemove, onNoteChange, showChart,
       label: `Fib ${lvl.label}`,
     })) : []),
 
-    // Moving averages
+    // EMA lines (adaptive periods per time frame)
     ...(chartMAs ? [
-      chartMAs.ma20  != null && { y: chartMAs.ma20,  color: 'oklch(0.60 0.14 300)', label: 'MA20'  },
-      chartMAs.ma50  != null && { y: chartMAs.ma50,  color: 'oklch(0.50 0.12 250)', label: 'MA50'  },
-      chartMAs.ma200 != null && { y: chartMAs.ma200, color: 'oklch(0.45 0.08 220)', label: 'MA200' },
+      chartMAs.ma20  != null && { y: chartMAs.ma20,  color: 'oklch(0.60 0.14 300)', label: `EMA${chartMAs.p1}`  },
+      chartMAs.ma50  != null && { y: chartMAs.ma50,  color: 'oklch(0.50 0.12 250)', label: `EMA${chartMAs.p2}`  },
+      chartMAs.ma200 != null && { y: chartMAs.ma200, color: 'oklch(0.45 0.08 220)', label: `EMA${chartMAs.p3}` },
     ].filter(Boolean) : []),
 
     // Volume Profile levels
@@ -496,7 +518,7 @@ function WatchlistCard({ item, priceData, sr, onRemove, onNoteChange, showChart,
                 <span style={{ fontSize: 10, color: 'var(--ink-3)', marginRight: 2 }}>Overlay:</span>
                 {[
                   { key: 'fib', label: 'Fibonacci', color: 'oklch(0.65 0.14 55)' },
-                  { key: 'ma',  label: 'MA20/50/200', color: 'oklch(0.50 0.12 250)' },
+                  { key: 'ma',  label: 'EMA',          color: 'oklch(0.50 0.12 250)' },
                   { key: 'vp',  label: 'Vol Profile', color: 'oklch(0.60 0.14 90)' },
                 ].map(o => (
                   <button key={o.key} onClick={() => toggleOverlay(o.key)} style={{
@@ -549,9 +571,9 @@ function WatchlistCard({ item, priceData, sr, onRemove, onNoteChange, showChart,
                   ))}
                 </>}
                 {chartMAs && overlays.ma && [
-                  chartMAs.ma20  && { label: 'MA20',  color: 'oklch(0.60 0.14 300)', val: chartMAs.ma20 },
-                  chartMAs.ma50  && { label: 'MA50',  color: 'oklch(0.50 0.12 250)', val: chartMAs.ma50 },
-                  chartMAs.ma200 && { label: 'MA200', color: 'oklch(0.45 0.08 220)', val: chartMAs.ma200 },
+                  chartMAs.ma20  && { label: `EMA${chartMAs.p1}`,  color: 'oklch(0.60 0.14 300)', val: chartMAs.ma20  },
+                  chartMAs.ma50  && { label: `EMA${chartMAs.p2}`,  color: 'oklch(0.50 0.12 250)', val: chartMAs.ma50  },
+                  chartMAs.ma200 && { label: `EMA${chartMAs.p3}`,  color: 'oklch(0.45 0.08 220)', val: chartMAs.ma200 },
                 ].filter(Boolean).map(m => (
                   <span key={m.label} style={{ fontSize: 10, color: m.color, display: 'flex', alignItems: 'center', gap: 4, fontFamily: 'var(--font-mono)' }}>
                     <span style={{ width: 12, borderTop: `2px dashed ${m.color}`, display: 'inline-block' }} />
@@ -658,7 +680,7 @@ function WatchlistFullscreen({ item, priceData, sr, lang, onClose }) {
 
   const chartSR  = useMemo(() => chartBars && livePrice ? computeSR(chartBars, livePrice) : null, [chartBars, livePrice])
   const chartFib = useMemo(() => overlays.fib && chartBars ? computeFib(chartBars) : null, [chartBars, overlays.fib])
-  const chartMAs = useMemo(() => overlays.ma  && chartBars ? computeMAs(chartBars) : null, [chartBars, overlays.ma])
+  const chartMAs = useMemo(() => overlays.ma  && chartBars ? computeMAs(chartBars, chartRange) : null, [chartBars, overlays.ma, chartRange])
   const chartVP  = useMemo(() => overlays.vp  && chartBars ? computeVolProfile(chartBars) : null, [chartBars, overlays.vp])
 
   const displaySR = chartSR ?? sr
@@ -696,9 +718,9 @@ function WatchlistFullscreen({ item, priceData, sr, lang, onClose }) {
   const fsH = typeof window !== 'undefined' ? Math.max(380, window.innerHeight - 280) : 480
 
   const OVERLAYS_DEF = [
-    { key: 'fib', label: 'Fibonacci',   color: 'oklch(0.65 0.14 55)'  },
-    { key: 'ma',  label: 'MA20/50/200', color: 'oklch(0.50 0.12 250)' },
-    { key: 'vp',  label: 'Vol Profile', color: 'oklch(0.60 0.14 90)'  },
+    { key: 'fib', label: 'Fibonacci',  color: 'oklch(0.65 0.14 55)'  },
+    { key: 'ma',  label: 'EMA',        color: 'oklch(0.50 0.12 250)' },
+    { key: 'vp',  label: 'Vol Profile',color: 'oklch(0.60 0.14 90)'  },
   ]
 
   return (
@@ -805,9 +827,9 @@ function WatchlistFullscreen({ item, priceData, sr, lang, onClose }) {
                     S{i+1} {fmtPrice(lvl.price, currency)} <StrengthDots count={lvl.strength} color="var(--gain)" />
                   </span>
                 ))}
-                {chartMAs && overlays.ma && chartMAs.ma20  != null && <span style={{ fontSize: 11, color: 'oklch(0.60 0.14 300)', display: 'flex', alignItems: 'center', gap: 5, fontFamily: 'var(--font-mono)' }}><span style={{ width: 14, borderTop: '2px dashed oklch(0.60 0.14 300)', display: 'inline-block' }} />MA20 {fmtPrice(chartMAs.ma20, currency)}</span>}
-                {chartMAs && overlays.ma && chartMAs.ma50  != null && <span style={{ fontSize: 11, color: 'oklch(0.50 0.12 250)', display: 'flex', alignItems: 'center', gap: 5, fontFamily: 'var(--font-mono)' }}><span style={{ width: 14, borderTop: '2px dashed oklch(0.50 0.12 250)', display: 'inline-block' }} />MA50 {fmtPrice(chartMAs.ma50, currency)}</span>}
-                {chartMAs && overlays.ma && chartMAs.ma200 != null && <span style={{ fontSize: 11, color: 'oklch(0.45 0.08 220)', display: 'flex', alignItems: 'center', gap: 5, fontFamily: 'var(--font-mono)' }}><span style={{ width: 14, borderTop: '2px dashed oklch(0.45 0.08 220)', display: 'inline-block' }} />MA200 {fmtPrice(chartMAs.ma200, currency)}</span>}
+                {chartMAs && overlays.ma && chartMAs.ma20  != null && <span style={{ fontSize: 11, color: 'oklch(0.60 0.14 300)', display: 'flex', alignItems: 'center', gap: 5, fontFamily: 'var(--font-mono)' }}><span style={{ width: 14, borderTop: '2px dashed oklch(0.60 0.14 300)', display: 'inline-block' }} />EMA{chartMAs.p1} {fmtPrice(chartMAs.ma20, currency)}</span>}
+                {chartMAs && overlays.ma && chartMAs.ma50  != null && <span style={{ fontSize: 11, color: 'oklch(0.50 0.12 250)', display: 'flex', alignItems: 'center', gap: 5, fontFamily: 'var(--font-mono)' }}><span style={{ width: 14, borderTop: '2px dashed oklch(0.50 0.12 250)', display: 'inline-block' }} />EMA{chartMAs.p2} {fmtPrice(chartMAs.ma50, currency)}</span>}
+                {chartMAs && overlays.ma && chartMAs.ma200 != null && <span style={{ fontSize: 11, color: 'oklch(0.45 0.08 220)', display: 'flex', alignItems: 'center', gap: 5, fontFamily: 'var(--font-mono)' }}><span style={{ width: 14, borderTop: '2px dashed oklch(0.45 0.08 220)', display: 'inline-block' }} />EMA{chartMAs.p3} {fmtPrice(chartMAs.ma200, currency)}</span>}
                 {chartVP && overlays.vp && chartVP.poc != null && <span style={{ fontSize: 11, color: 'oklch(0.65 0.16 90)', display: 'flex', alignItems: 'center', gap: 5, fontFamily: 'var(--font-mono)' }}><span style={{ width: 14, borderTop: '2px dashed oklch(0.65 0.16 90)', display: 'inline-block' }} />POC {fmtPrice(chartVP.poc, currency)}</span>}
               </div>
               <p style={{ margin: '8px 0 0', fontSize: 10, color: 'var(--ink-3)' }}>
