@@ -563,8 +563,8 @@ function LivePortfolioPage({ t, lang, ccy, portfolio, liveHoldings, prices = {},
                       </td>
                       <td className="num">
                         {r.shares.toLocaleString(undefined, { maximumFractionDigits: 4 })}
-                        {r.cls === 'MutualFund' && <span className="muted" style={{ fontSize: 10, marginLeft: 3 }}>หน่วย</span>}
-                        {r.cls === 'GoldTH' && <span className="muted" style={{ fontSize: 10, marginLeft: 3 }}>บาท</span>}
+                        {r.cls === 'MutualFund' && <span className="muted" style={{ fontSize: 10, marginLeft: 3 }}>{th ? 'หน่วย' : 'units'}</span>}
+                        {r.cls === 'GoldTH' && <span className="muted" style={{ fontSize: 10, marginLeft: 3 }}>{th ? 'บาท' : 'baht'}</span>}
                       </td>
                       <td className="num hide-mob">
                         {r.hasLivePrice ? (
