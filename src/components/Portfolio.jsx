@@ -1006,7 +1006,7 @@ function AddHoldingModal({ lang, portfolioId, onClose, onSaved }) {
                 <option value="Crypto">{th ? "คริปโต" : "Crypto"}</option>
                 <option value="Commodity">{th ? "สินค้าโภคภัณฑ์" : "Commodity"}</option>
                 <option value="MutualFund">{th ? "กองทุนรวม" : "Mutual Fund"}</option>
-                <option value="GoldTH">{th ? "ทองคำแท่ง (บาท ทอง)" : "Gold Bars (Thai บาท)"}</option>
+                <option value="GoldTH">{th ? "ทองคำแท่ง (บาท ทอง)" : "Gold Bars (baht weight)"}</option>
               </select>
             </Field>
             <Field label={th ? "ตลาด" : "Region"}>
@@ -1197,7 +1197,7 @@ function EditHoldingModal({ lang, holding, onClose, onSaved }) {
                 <option value="Crypto">{th ? "คริปโต" : "Crypto"}</option>
                 <option value="Commodity">{th ? "สินค้าโภคภัณฑ์" : "Commodity"}</option>
                 <option value="MutualFund">{th ? "กองทุนรวม" : "Mutual Fund"}</option>
-                <option value="GoldTH">{th ? "ทองคำแท่ง (บาท ทอง)" : "Gold Bars (Thai บาท)"}</option>
+                <option value="GoldTH">{th ? "ทองคำแท่ง (บาท ทอง)" : "Gold Bars (baht weight)"}</option>
               </select>
             </Field>
             <Field label={th ? "ตลาด" : "Region"}>
@@ -2151,7 +2151,7 @@ function EditTransactionModal({ tx, holding, lang, onClose, onSaved }) {
                 <option value="Crypto">{th ? "คริปโต" : "Crypto"}</option>
                 <option value="Commodity">{th ? "สินค้าโภคภัณฑ์" : "Commodity"}</option>
                 <option value="MutualFund">{th ? "กองทุนรวม" : "Mutual Fund"}</option>
-                <option value="GoldTH">{th ? "ทองคำแท่ง (บาท ทอง)" : "Gold Bars (Thai บาท)"}</option>
+                <option value="GoldTH">{th ? "ทองคำแท่ง (บาท ทอง)" : "Gold Bars (baht weight)"}</option>
               </select>
             </Field>
             <Field label={th ? "ตลาด" : "Region"}>
