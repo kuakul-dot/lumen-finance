@@ -97,7 +97,7 @@ function DemoDashboardPage({ t, lang, ccy, setRoute }) {
         const noise = (Math.sin(i * 2.3) * 0.012 + Math.cos(i * 4.1) * 0.008) * cost
         const d = new Date(now.getFullYear(), now.getMonth() - (pts - 1 - i) * stepM, 1)
         const lbl = d.toLocaleString(lang === "th" ? "th-TH" : "en-US", { month: "short" }) + " '" + String(d.getFullYear()).slice(2)
-        return { x: i, y: cost + (value - cost) * ease + noise, label: lbl }
+        return { x: Math.floor(d.getTime() / 1000), y: cost + (value - cost) * ease + noise, label: lbl }
       }),
     }]
   }, [chartPeriod, value, cost, lang, t.dashboard.netWorth])
@@ -796,7 +796,7 @@ function LiveDashboardPage({ t, lang, ccy, setRoute, liveHoldings, prices = {}, 
       data: Array.from({ length: pts }, (_, i) => {
         const p = i / (pts - 1)
         const d = new Date(now); d.setDate(d.getDate() - (pts - 1 - i) * stepD)
-        return { x: i, y: totalCostBasis + diff * ease(p) + noise(i, 1.7) * noiseScale * Math.sin(Math.PI * p), label: mkLabel(d) }
+        return { x: Math.floor(d.getTime() / 1000), y: totalCostBasis + diff * ease(p) + noise(i, 1.7) * noiseScale * Math.sin(Math.PI * p), label: mkLabel(d) }
       })
     }]
   }, [liveHoldings, holdingHistories, purchaseSecByTicker, totalCostBasis, totalValue, th, chartPeriod, daysSinceFirst, fxRate])
