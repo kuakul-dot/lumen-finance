@@ -487,8 +487,10 @@ export function AllocCategoryIcon({ name, color, isCash, isEmergency }) {
     return <svg viewBox="0 0 24 24" style={s}><path d="M9 8h5a2 2 0 0 1 0 4H9m5 0h1a2 2 0 0 1 0 4H9m0-8v8m3-10v2m0 8v2M7 8h1m0 8H7"/></svg>
   if (name === "Bond" || name.includes("พันธบัตร"))
     return <svg viewBox="0 0 24 24" style={s}><path d="M4 4h10a4 4 0 0 1 4 4v10H8a4 4 0 0 1-4-4Z"/><path d="M4 14a4 4 0 0 1 4-4h10"/></svg>
-  if (name === "Commodity" || name.includes("ทองคำ"))
+  if (name === "Commodity" || name === "GoldTH" || name.includes("ทองคำ"))
     return <svg viewBox="0 0 24 24" style={s}><polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/></svg>
+  if (name === "MutualFund" || name.includes("กองทุน"))
+    return <svg viewBox="0 0 24 24" style={s}><rect x="2" y="3" width="20" height="14" rx="2"/><path d="M8 21h8M12 17v4"/><path d="M7 7h10M7 11h7"/></svg>
   if (name === "ETF")
     return <svg viewBox="0 0 24 24" style={s}><line x1="3" y1="20" x2="21" y2="20"/><rect x="5" y="11" width="3" height="8"/><rect x="11" y="6" width="3" height="13"/><rect x="17" y="13" width="3" height="6"/></svg>
   return <svg viewBox="0 0 24 24" style={s}><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/></svg>

@@ -642,21 +642,26 @@ export function deriveHoldings(holdings, currency = 'THB', prices = {}, fxRate =
     let pl = 0, plPct = 0, hasLivePrice = false, changePct = 0
 
     if (priceData?.price != null) {
-      // Yahoo Finance returns price in the asset's native currency
-      // .BK stocks → THB, US stocks & crypto → USD
-      const priceCcy = h.region === 'TH' ? 'THB' : 'USD'
-      currentPriceInTHB = toTHB(priceData.price, priceCcy)
-      currentValue = h.shares * currentPriceInTHB  // THB
-      pl = currentValue - costValue                 // THB
+      if (h.asset_class === 'GoldTH') {
+        // GC=F = USD/troy oz → THB per Thai บาท ทอง (15.244g = 0.48997 troy oz)
+        currentPriceInTHB = priceData.price * (15.244 / 31.1035) * fxRate
+      } else {
+        // .BK stocks → THB, US stocks & crypto → USD
+        const priceCcy = h.region === 'TH' ? 'THB' : 'USD'
+        currentPriceInTHB = toTHB(priceData.price, priceCcy)
+      }
+      currentValue = h.shares * currentPriceInTHB
+      pl = currentValue - costValue
       plPct = costValue > 0 ? (pl / costValue) * 100 : 0
       hasLivePrice = true
       changePct = priceData.changePct ?? 0
     }
 
     // Native (untransformed) price & cost — for per-share display columns
-    const nativeCcy = priceData?.currency || (h.region === 'TH' ? 'THB' : 'USD')
-    const priceNative = priceData?.price ?? h.cost_price  // in native currency
-    const costNative  = h.cost_price                      // in native currency
+    const isGoldTH   = h.asset_class === 'GoldTH'
+    const nativeCcy   = isGoldTH ? 'THB' : (priceData?.currency || (h.region === 'TH' ? 'THB' : 'USD'))
+    const priceNative = isGoldTH ? currentPriceInTHB : (priceData?.price ?? h.cost_price)
+    const costNative  = isGoldTH ? costPriceInTHB : h.cost_price
 
     return {
       id: h.id,

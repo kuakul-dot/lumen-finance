@@ -162,7 +162,9 @@ function LivePortfolioPage({ t, lang, ccy, portfolio, liveHoldings, prices = {},
       filter === "US"     ? (r.region === "US" && r.cls !== "Crypto") :
       filter === "ETF"    ? r.cls === "ETF"    :
       filter === "Bond"   ? r.cls === "Bond"   :
-      filter === "Crypto" ? r.cls === "Crypto" : true)
+      filter === "Crypto" ? r.cls === "Crypto" :
+      filter === "MF"     ? r.cls === "MutualFund" :
+      filter === "Gold"   ? r.cls === "GoldTH" : true)
   }, [rows, filter])
 
   const totalValue     = viewRows.reduce((s, r) => s + r.value, 0)
@@ -192,21 +194,25 @@ function LivePortfolioPage({ t, lang, ccy, portfolio, liveHoldings, prices = {},
 
   // Filter chip definitions — counts based on merged positions, not raw lots
   const filterDefs = useMemo(() => [
-    { id: "all",    label: th ? "ทั้งหมด" : "All",       count: allGrouped.length },
-    { id: "TH",     label: th ? "หุ้นไทย" : "TH",        count: allGrouped.filter(r => r.region === "TH").length },
-    { id: "US",     label: th ? "หุ้น US" : "US",        count: allGrouped.filter(r => r.region === "US" && r.cls !== "Crypto").length },
-    { id: "ETF",    label: "ETF",                         count: allGrouped.filter(r => r.cls === "ETF").length },
-    { id: "Bond",   label: th ? "พันธบัตร" : "Bonds",    count: allGrouped.filter(r => r.cls === "Bond").length },
-    { id: "Crypto", label: th ? "คริปโต" : "Crypto",     count: allGrouped.filter(r => r.cls === "Crypto").length },
+    { id: "all",    label: th ? "ทั้งหมด" : "All",          count: allGrouped.length },
+    { id: "TH",     label: th ? "หุ้นไทย" : "TH",           count: allGrouped.filter(r => r.region === "TH" && r.cls !== "MutualFund" && r.cls !== "GoldTH").length },
+    { id: "US",     label: th ? "หุ้น US" : "US",           count: allGrouped.filter(r => r.region === "US" && r.cls !== "Crypto").length },
+    { id: "ETF",    label: "ETF",                            count: allGrouped.filter(r => r.cls === "ETF").length },
+    { id: "Bond",   label: th ? "พันธบัตร" : "Bonds",       count: allGrouped.filter(r => r.cls === "Bond").length },
+    { id: "MF",     label: th ? "กองทุนรวม" : "Fund",       count: allGrouped.filter(r => r.cls === "MutualFund").length },
+    { id: "Gold",   label: th ? "ทองคำ" : "Gold",           count: allGrouped.filter(r => r.cls === "GoldTH").length },
+    { id: "Crypto", label: th ? "คริปโต" : "Crypto",        count: allGrouped.filter(r => r.cls === "Crypto").length },
   ].filter(f => f.id === "all" || f.count > 0), [allGrouped, th])
 
   const grouped = useMemo(() => {
     let list = rows
     if (filter !== "all") list = list.filter(r => {
-      if (filter === "TH")     return r.region === "TH"
+      if (filter === "TH")     return r.region === "TH" && r.cls !== "MutualFund" && r.cls !== "GoldTH"
       if (filter === "US")     return r.region === "US" && r.cls !== "Crypto"
       if (filter === "ETF")    return r.cls === "ETF"
       if (filter === "Bond")   return r.cls === "Bond"
+      if (filter === "MF")     return r.cls === "MutualFund"
+      if (filter === "Gold")   return r.cls === "GoldTH"
       if (filter === "Crypto") return r.cls === "Crypto"
       return true
     })
@@ -555,7 +561,11 @@ function LivePortfolioPage({ t, lang, ccy, portfolio, liveHoldings, prices = {},
                           </div>
                         </div>
                       </td>
-                      <td className="num">{r.shares.toLocaleString(undefined, { maximumFractionDigits: 4 })}</td>
+                      <td className="num">
+                        {r.shares.toLocaleString(undefined, { maximumFractionDigits: 4 })}
+                        {r.cls === 'MutualFund' && <span className="muted" style={{ fontSize: 10, marginLeft: 3 }}>หน่วย</span>}
+                        {r.cls === 'GoldTH' && <span className="muted" style={{ fontSize: 10, marginLeft: 3 }}>บาท</span>}
+                      </td>
                       <td className="num hide-mob">
                         {r.hasLivePrice ? (
                           <>
@@ -880,12 +890,15 @@ function AddHoldingModal({ lang, portfolioId, onClose, onSaved }) {
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState(null)
 
-  // Auto-update frequency default when region changes (TH=2×, US=4×)
-  const set = (k, v) => setForm(f => ({
-    ...f,
-    [k]: v,
-    ...(k === 'region' ? { div_frequency: v === 'TH' ? '2' : '4' } : {}),
-  }))
+  const set = (k, v) => setForm(f => {
+    const patch = { ...f, [k]: v }
+    if (k === 'region') patch.div_frequency = v === 'TH' ? '2' : '4'
+    if (k === 'asset_class') {
+      if (v === 'MutualFund') { patch.region = 'TH'; patch.currency = 'THB'; patch.div_frequency = '2' }
+      if (v === 'GoldTH')     { patch.currency = 'THB'; patch.region = 'Other'; patch.div_frequency = '1'; if (!patch.name) patch.name = 'ทองคำแท่ง' }
+    }
+    return patch
+  })
 
   const handleSubmit = async (e) => {
     e.preventDefault()
@@ -992,6 +1005,8 @@ function AddHoldingModal({ lang, portfolioId, onClose, onSaved }) {
                 <option value="Bond">{th ? "พันธบัตร" : "Bond"}</option>
                 <option value="Crypto">{th ? "คริปโต" : "Crypto"}</option>
                 <option value="Commodity">{th ? "สินค้าโภคภัณฑ์" : "Commodity"}</option>
+                <option value="MutualFund">{th ? "กองทุนรวม" : "Mutual Fund"}</option>
+                <option value="GoldTH">{th ? "ทองคำแท่ง (บาท ทอง)" : "Gold Bars (Thai บาท)"}</option>
               </select>
             </Field>
             <Field label={th ? "ตลาด" : "Region"}>
@@ -1014,12 +1029,20 @@ function AddHoldingModal({ lang, portfolioId, onClose, onSaved }) {
 
           {/* Shares + Cost + Currency */}
           <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 80px", gap: 12 }}>
-            <Field label={th ? "จำนวนหุ้น" : "Shares"}>
+            <Field label={
+              form.asset_class === 'MutualFund' ? (th ? "จำนวนหน่วย" : "Units") :
+              form.asset_class === 'GoldTH'     ? (th ? "น้ำหนัก (บาท ทอง)" : "Weight (Thai บาท)") :
+              (th ? "จำนวนหุ้น" : "Shares")
+            }>
               <CalcInput required value={form.shares}
                      onChange={e => set('shares', e.target.value)}
                      placeholder="0" style={inputStyle} />
             </Field>
-            <Field label={th ? "ราคาทุน/หุ้น" : "Cost price/share"}>
+            <Field label={
+              form.asset_class === 'MutualFund' ? (th ? "NAV ทุน/หน่วย" : "Cost NAV/unit") :
+              form.asset_class === 'GoldTH'     ? (th ? "ราคาทุน/บาท ทอง" : "Cost/Thai บาท") :
+              (th ? "ราคาทุน/หุ้น" : "Cost price/share")
+            }>
               <CalcInput required value={form.cost_price}
                      onChange={e => set('cost_price', e.target.value)}
                      placeholder="0.00" style={inputStyle} />
@@ -1173,6 +1196,8 @@ function EditHoldingModal({ lang, holding, onClose, onSaved }) {
                 <option value="Bond">{th ? "พันธบัตร" : "Bond"}</option>
                 <option value="Crypto">{th ? "คริปโต" : "Crypto"}</option>
                 <option value="Commodity">{th ? "สินค้าโภคภัณฑ์" : "Commodity"}</option>
+                <option value="MutualFund">{th ? "กองทุนรวม" : "Mutual Fund"}</option>
+                <option value="GoldTH">{th ? "ทองคำแท่ง (บาท ทอง)" : "Gold Bars (Thai บาท)"}</option>
               </select>
             </Field>
             <Field label={th ? "ตลาด" : "Region"}>
@@ -2125,6 +2150,8 @@ function EditTransactionModal({ tx, holding, lang, onClose, onSaved }) {
                 <option value="Bond">{th ? "พันธบัตร" : "Bond"}</option>
                 <option value="Crypto">{th ? "คริปโต" : "Crypto"}</option>
                 <option value="Commodity">{th ? "สินค้าโภคภัณฑ์" : "Commodity"}</option>
+                <option value="MutualFund">{th ? "กองทุนรวม" : "Mutual Fund"}</option>
+                <option value="GoldTH">{th ? "ทองคำแท่ง (บาท ทอง)" : "Gold Bars (Thai บาท)"}</option>
               </select>
             </Field>
             <Field label={th ? "ตลาด" : "Region"}>
@@ -3544,9 +3571,9 @@ function PortMetric({ label, value, sub, onClick }) {
 }
 
 function classBg(cls) {
-  return { Equity: "var(--bg-2)", ETF: "oklch(0.94 0.04 200)", Bond: "oklch(0.94 0.04 280)", Crypto: "oklch(0.94 0.05 65)", Commodity: "oklch(0.94 0.04 90)" }[cls] || "var(--bg-2)"
+  return { Equity: "var(--bg-2)", ETF: "oklch(0.94 0.04 200)", Bond: "oklch(0.94 0.04 280)", Crypto: "oklch(0.94 0.05 65)", Commodity: "oklch(0.94 0.04 90)", MutualFund: "oklch(0.94 0.04 160)", GoldTH: "oklch(0.95 0.06 80)" }[cls] || "var(--bg-2)"
 }
 function classFg(cls) {
-  return { Equity: "var(--ink-2)", ETF: "var(--c1)", Bond: "var(--c4)", Crypto: "var(--c2)", Commodity: "var(--c7)" }[cls] || "var(--ink-2)"
+  return { Equity: "var(--ink-2)", ETF: "var(--c1)", Bond: "var(--c4)", Crypto: "var(--c2)", Commodity: "var(--c7)", MutualFund: "var(--c5)", GoldTH: "var(--c3)" }[cls] || "var(--ink-2)"
 }
 

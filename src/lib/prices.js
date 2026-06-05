@@ -59,12 +59,14 @@ export async function fetchFxRate() {
 
 export function toYahooSymbol(ticker, region = 'TH', assetClass = 'Equity') {
   const t = ticker.toUpperCase()
-  if (assetClass === 'Crypto')    return t.includes('-') ? t : `${t}-USD`
+  if (assetClass === 'Crypto')     return t.includes('-') ? t : `${t}-USD`
+  if (assetClass === 'GoldTH')     return 'GC=F'   // Thai physical gold → gold futures
   if (assetClass === 'Commodity') {
     if (t === 'GOLD' || t === 'XAU')   return 'GC=F'
     if (t === 'SILVER' || t === 'XAG') return 'SI=F'
     if (t === 'OIL')                   return 'CL=F'
   }
+  if (assetClass === 'MutualFund') return `${t}.BK`  // Thai mutual funds listed on Yahoo
   if (region === 'TH') return `${t}.BK`
   return t
 }
