@@ -1447,31 +1447,55 @@ function AnalyticsDiv2({ t, lang, ccy, rows, totalValue, dataState, liveHoldings
         ) : (
           <div style={{
             display: "grid",
-            gridTemplateColumns: hasReceivedData ? "repeat(auto-fill, minmax(260px, 1fr))" : "1fr",
-            gap: 6,
+            gridTemplateColumns: "repeat(auto-fill, minmax(190px, 1fr))",
+            gap: 10,
           }}>
             {payers.slice(0, 6).map(p => {
               const received = receivedData?.byTicker?.[p.ticker] || 0
               return (
-                <div key={p.ticker} style={{ display: "grid", gridTemplateColumns: "auto 1fr auto auto", gap: 10, alignItems: "center", padding: "8px 0", borderTop: "1px solid var(--line)" }}>
-                  <TickerLogo ticker={p.ticker} logoUrl={p.logo_url} region={p.region} cls={p.cls} size={30} />
-                  <div>
-                    <div style={{ fontWeight: 500, fontSize: 13 }}>{p.ticker}</div>
-                    <div className="muted" style={{ fontSize: 11 }}>
-                      {FMT.pct(p.divYield, 1)} yield
-                      {received > 0 && (
-                        <span style={{ color: "var(--gain)", marginLeft: 6 }}>
-                          · {th ? "รับ " : "rcvd "}{FMT.money(received, ccy, { compact: true })}
-                        </span>
-                      )}
+                <div key={p.ticker} style={{
+                  display: "flex", flexDirection: "column", gap: 10,
+                  padding: "14px 16px", borderRadius: 12,
+                  background: "var(--bg-2)",
+                }}>
+                  {/* Header: logo + ticker + yield badge */}
+                  <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8 }}>
+                    <div style={{ display: "flex", alignItems: "center", gap: 9, minWidth: 0 }}>
+                      <TickerLogo ticker={p.ticker} logoUrl={p.logo_url} region={p.region} cls={p.cls} size={32} />
+                      <div style={{ minWidth: 0 }}>
+                        <div style={{ fontWeight: 600, fontSize: 13 }}>{p.ticker}</div>
+                        <div className="muted" style={{ fontSize: 10, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis", maxWidth: 90 }}>
+                          {p.name || ""}
+                        </div>
+                      </div>
+                    </div>
+                    <div style={{
+                      flexShrink: 0,
+                      background: "oklch(0.93 0.08 150)", color: "oklch(0.40 0.14 150)",
+                      borderRadius: 6, padding: "3px 7px", fontSize: 11, fontWeight: 700,
+                      fontFamily: "var(--font-mono)",
+                    }}>
+                      {FMT.pct(p.divYield, 1)}
                     </div>
                   </div>
-                  <div className="mono" style={{ fontSize: 12, color: "var(--ink-3)" }}>
-                    {FMT.money(p.value, ccy, { compact: true })}
+
+                  {/* Value + Annual payout */}
+                  <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline" }}>
+                    <span className="muted" style={{ fontSize: 11 }}>
+                      {FMT.money(p.value, ccy, { compact: true })}
+                    </span>
+                    <span style={{ fontFamily: "var(--font-mono)", fontSize: 13, fontWeight: 600, color: "var(--accent-ink)" }}>
+                      +{FMT.money(p.annual, ccy, { compact: true })}/y
+                    </span>
                   </div>
-                  <div className="mono" style={{ fontSize: 13, color: "var(--accent-ink)" }}>
-                    +{FMT.money(p.annual, ccy, { compact: true })}/y
-                  </div>
+
+                  {/* Received YTD */}
+                  {received > 0 && (
+                    <div style={{ fontSize: 11, color: "var(--gain)", display: "flex", alignItems: "center", gap: 4, marginTop: -4 }}>
+                      <svg width="11" height="11" viewBox="0 0 12 12" fill="none"><polyline points="2 6 5 9 10 3" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"/></svg>
+                      {th ? "รับแล้ว " : "received "}{FMT.money(received, ccy, { compact: true })}
+                    </div>
+                  )}
                 </div>
               )
             })}
