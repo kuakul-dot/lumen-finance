@@ -13,6 +13,19 @@ export function Brand() {
 //   custom logoUrl → TradingView resolver (US + Thai) → parqet (non-Thai) → initials.
 // Each failed source advances to the next; when exhausted we draw coloured initials.
 export function TickerLogo({ ticker = "", logoUrl, region, cls, size = 34 }) {
+  // GoldTH — always render a gold coin SVG (no remote image needed)
+  if (cls === 'GoldTH') {
+    const r = size / 2
+    return (
+      <svg width={size} height={size} viewBox="0 0 40 40" style={{ flexShrink: 0, display: 'block' }}>
+        <circle cx="20" cy="20" r="19" fill="oklch(0.76 0.13 79)" />
+        <circle cx="20" cy="20" r="15" fill="oklch(0.86 0.17 84)" />
+        <text x="20" y="24.5" textAnchor="middle" fontSize="11.5" fontWeight="900"
+              fill="oklch(0.38 0.10 74)" fontFamily="Georgia,serif" letterSpacing="-0.3">Au</text>
+      </svg>
+    )
+  }
+
   const base = String(ticker).replace(/\.BK$/i, "").toUpperCase()
   const isThai = region === "TH"
   const isCrypto = cls === "Crypto"

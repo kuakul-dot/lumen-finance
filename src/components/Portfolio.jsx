@@ -943,7 +943,7 @@ function AddHoldingModal({ lang, portfolioId, onClose, onSaved }) {
     if (k === 'region') patch.div_frequency = v === 'TH' ? '2' : '4'
     if (k === 'asset_class') {
       if (v === 'MutualFund') { patch.region = 'TH'; patch.currency = 'THB'; patch.div_frequency = '2' }
-      if (v === 'GoldTH')     { patch.currency = 'THB'; patch.region = 'Other'; patch.div_frequency = '0'; patch.sector = '96.5'; if (!patch.name) patch.name = th ? 'ทองคำแท่ง' : 'Gold Bars' }
+      if (v === 'GoldTH')     { patch.currency = 'THB'; patch.region = 'Other'; patch.div_frequency = '0'; patch.logo_url = patch.logo_url || '96.5'; if (!patch.ticker) patch.ticker = 'XAU'; if (!patch.name) patch.name = th ? 'ทองคำแท่ง' : 'Gold Bars' }
     }
     return patch
   })
@@ -973,6 +973,7 @@ function AddHoldingModal({ lang, portfolioId, onClose, onSaved }) {
       currency: form.currency,
       div_yield: form.div_yield ? parseFloat(form.div_yield) : 0,
       div_frequency: form.div_frequency ? parseInt(form.div_frequency) : 4,
+      logo_url: form.logo_url?.trim() || null,
     })
     setSaving(false)
     if (addErr) { setError(addErr.message); return }
@@ -1066,14 +1067,21 @@ function AddHoldingModal({ lang, portfolioId, onClose, onSaved }) {
             </Field>
           </div>
 
-          {/* Sector / Purity */}
+          {/* Sector / Purity — Add modal */}
           {form.asset_class === 'GoldTH' ? (
-            <Field label={th ? "ความบริสุทธิ์ทองคำ" : "Gold Purity"}>
-              <select value={form.sector} onChange={e => set('sector', e.target.value)} style={inputStyle}>
-                <option value="96.5">96.5% — {th ? "ทองรูปพรรณ / แม่ทองสุก" : "Gold Jewelry / Mae Thong Suk"}</option>
-                <option value="99.99">99.99% — {th ? "ทองแท่งบริสุทธิ์" : "Pure Gold Bars"}</option>
-              </select>
-            </Field>
+            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
+              <Field label={th ? "ความบริสุทธิ์" : "Gold Purity"}>
+                <select value={form.logo_url || '96.5'} onChange={e => set('logo_url', e.target.value)} style={inputStyle}>
+                  <option value="96.5">96.5% — {th ? "ทองรูปพรรณ" : "Gold Jewelry"}</option>
+                  <option value="99.99">99.99% — {th ? "ทองแท่งบริสุทธิ์" : "Pure Gold Bar"}</option>
+                </select>
+              </Field>
+              <Field label={th ? "กลุ่ม (Sector)" : "Sector (optional)"}>
+                <select value={form.sector} onChange={e => set('sector', e.target.value)} style={inputStyle}>
+                  {SECTORS.map(s => <option key={s.value} value={s.value}>{th ? s.th : s.en}</option>)}
+                </select>
+              </Field>
+            </div>
           ) : (
             <Field label={th ? "กลุ่มอุตสาหกรรม (Sector)" : "Sector (optional)"}>
               <select value={form.sector} onChange={e => set('sector', e.target.value)} style={inputStyle}>
@@ -1174,13 +1182,18 @@ function EditHoldingModal({ lang, holding, onClose, onSaved }) {
     name:        holding.name,
     asset_class: holding.asset_class || 'Equity',
     region:      holding.region || 'TH',
-    sector:      holding.sector || '',
+    // For GoldTH: purity now stored in logo_url; clear sector if it held a legacy purity value
+    sector:      (holding.asset_class === 'GoldTH' && ['96.5', '99.99'].includes(holding.sector))
+                   ? '' : (holding.sector || ''),
     shares:      String(holding.shares),
     cost_price:  String(holding.cost_price),
     currency:      holding.currency || 'THB',
     div_yield:     String(holding.div_yield || ''),
     div_frequency: String(holding.div_frequency || (holding.region === 'TH' ? 2 : 4)),
-    logo_url:      holding.logo_url || '',
+    // For GoldTH: migrate purity from legacy sector field into logo_url
+    logo_url:      holding.asset_class === 'GoldTH'
+                     ? (parseFloat(holding.logo_url) ? holding.logo_url : (holding.sector || '96.5'))
+                     : (holding.logo_url || ''),
   })
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState(null)
@@ -1267,14 +1280,21 @@ function EditHoldingModal({ lang, holding, onClose, onSaved }) {
             </Field>
           </div>
 
-          {/* Sector / Purity */}
+          {/* Sector / Purity — Edit modal */}
           {form.asset_class === 'GoldTH' ? (
-            <Field label={th ? "ความบริสุทธิ์ทองคำ" : "Gold Purity"}>
-              <select value={form.sector} onChange={e => set('sector', e.target.value)} style={inputStyle}>
-                <option value="96.5">96.5% — {th ? "ทองรูปพรรณ / แม่ทองสุก" : "Gold Jewelry / Mae Thong Suk"}</option>
-                <option value="99.99">99.99% — {th ? "ทองแท่งบริสุทธิ์" : "Pure Gold Bars"}</option>
-              </select>
-            </Field>
+            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
+              <Field label={th ? "ความบริสุทธิ์" : "Gold Purity"}>
+                <select value={form.logo_url || '96.5'} onChange={e => set('logo_url', e.target.value)} style={inputStyle}>
+                  <option value="96.5">96.5% — {th ? "ทองรูปพรรณ" : "Gold Jewelry"}</option>
+                  <option value="99.99">99.99% — {th ? "ทองแท่งบริสุทธิ์" : "Pure Gold Bar"}</option>
+                </select>
+              </Field>
+              <Field label={th ? "กลุ่ม (Sector)" : "Sector (optional)"}>
+                <select value={form.sector} onChange={e => set('sector', e.target.value)} style={inputStyle}>
+                  {SECTORS.map(s => <option key={s.value} value={s.value}>{th ? s.th : s.en}</option>)}
+                </select>
+              </Field>
+            </div>
           ) : (
             <Field label={th ? "กลุ่มอุตสาหกรรม (Sector)" : "Sector (optional)"}>
               <select value={form.sector} onChange={e => set('sector', e.target.value)} style={inputStyle}>
@@ -1321,14 +1341,16 @@ function EditHoldingModal({ lang, holding, onClose, onSaved }) {
             </Field>
           </div>
 
-          {/* Logo URL (optional) — overrides the auto logo / initials */}
-          <Field label={th ? "URL โลโก้ (ไม่บังคับ)" : "Logo URL (optional)"}>
-            <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-              <TickerLogo ticker={form.ticker} logoUrl={form.logo_url?.trim() || null} cls={form.asset_class} region={form.region} size={36} />
-              <input value={form.logo_url} onChange={e => set('logo_url', e.target.value)}
-                     placeholder="https://…/logo.png" style={inputStyle} />
-            </div>
-          </Field>
+          {/* Logo URL — hidden for GoldTH (logo_url stores purity; icon is auto gold coin) */}
+          {form.asset_class !== 'GoldTH' && (
+            <Field label={th ? "URL โลโก้ (ไม่บังคับ)" : "Logo URL (optional)"}>
+              <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+                <TickerLogo ticker={form.ticker} logoUrl={form.logo_url?.trim() || null} cls={form.asset_class} region={form.region} size={36} />
+                <input value={form.logo_url} onChange={e => set('logo_url', e.target.value)}
+                       placeholder="https://…/logo.png" style={inputStyle} />
+              </div>
+            </Field>
+          )}
 
           <div style={{ display: "flex", gap: 10, marginTop: 8, position: "sticky", bottom: 0, background: "var(--bg)", paddingTop: 14, paddingBottom: 2 }}>
             <button type="button" className="btn btn-outline" style={{ flex: 1 }} onClick={onClose}>
