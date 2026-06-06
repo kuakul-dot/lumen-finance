@@ -635,14 +635,21 @@ function AnalyticsCommon({ t, lang, ccy, rows, totalValue, totalPL, totalPlPct, 
             <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap", justifyContent: "flex-end" }}>
               {/* Benchmark picker — only in % growth mode */}
               {dataState === "live" && chartMode === "pct" && (
-                <select value={commonBenchKey} onChange={e => setCommonBenchKey(e.target.value)}
-                  style={{ padding: "5px 10px", borderRadius: 8, fontSize: 11, border: "1.5px solid var(--line)",
-                           background: "var(--bg)", color: "var(--ink)", cursor: "pointer", outline: "none",
-                           fontFamily: "var(--font-mono)" }}>
-                  {Object.entries(BENCHMARKS).map(([k, b]) => (
-                    <option key={k} value={k}>{k === 'none' ? (th ? 'เทียบกับ…' : 'vs…') : (th ? b.labelTh : b.labelEn)}</option>
-                  ))}
-                </select>
+                <div style={{ display: "flex", flexDirection: "column", alignItems: "flex-end", gap: 3 }}>
+                  <select value={commonBenchKey} onChange={e => setCommonBenchKey(e.target.value)}
+                    style={{ padding: "5px 10px", borderRadius: 8, fontSize: 11, border: "1.5px solid var(--line)",
+                             background: "var(--bg)", color: "var(--ink)", cursor: "pointer", outline: "none",
+                             fontFamily: "var(--font-mono)" }}>
+                    {Object.entries(BENCHMARKS).map(([k, b]) => (
+                      <option key={k} value={k}>{k === 'none' ? (th ? 'เทียบกับ…' : 'vs…') : (th ? b.labelTh : b.labelEn)}</option>
+                    ))}
+                  </select>
+                  {commonBenchKey !== "none" && spxData?.series?.length === 0 && (
+                    <span style={{ fontSize: 10, color: "var(--loss)" }}>
+                      {th ? "⚠ ไม่พบข้อมูล" : "⚠ no data"}
+                    </span>
+                  )}
+                </div>
               )}
               <div className="segmented">
                 {["1m","3m","6m","ytd","1y","5y","all"].map(k => {
@@ -1746,7 +1753,7 @@ function SyncRow({ s, th, FMT, ccy, onChange }) {
 const BENCHMARKS = {
   none:   { labelTh: "ไม่เปรียบเทียบ", labelEn: "None",        symbol: null,          color: null },
   sp500:  { labelTh: "S&P 500",         labelEn: "S&P 500",     symbol: "^GSPC",       color: "var(--accent)" },
-  set50:  { labelTh: "SET 50",           labelEn: "SET 50",      symbol: "^SET50.BK",   color: "var(--c7)" },
+  set50:  { labelTh: "SET 50 (TDEX)",     labelEn: "SET 50 (TDEX)", symbol: "TDEX.BK",   color: "var(--c7)" },
   set:    { labelTh: "SET Index",        labelEn: "SET Index",   symbol: "^SET.BK",     color: "var(--c3)" },
   nasdaq: { labelTh: "Nasdaq 100",       labelEn: "Nasdaq 100",  symbol: "^NDX",        color: "var(--c2)" },
 }
