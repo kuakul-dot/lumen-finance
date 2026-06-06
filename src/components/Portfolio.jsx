@@ -8,6 +8,7 @@ import { computeTA } from '../lib/ta'
 import { AiAnalysisModal } from './AiModal'
 import { useAiAnalysis } from '../lib/useAiAnalysis'
 import { TradingViewChart } from './TradingViewChart'
+import { SRPanel } from './SRPanel'
 import { CalcInput } from './CalcInput'
 
 export function PortfolioPage({ t, lang, ccy, setRoute, dataState, portfolio, liveHoldings = [], prices = {}, refreshHoldings, loadingData, dataError, retryLoad, fxRate = 36, cashAccounts = [], refreshCashAccounts, session }) {
@@ -99,8 +100,11 @@ function LivePortfolioPage({ t, lang, ccy, portfolio, liveHoldings, prices = {},
   }, [])
   // ── Investment journal — notes attached to a holding ─────────────────────
   const [notesHolding, setNotesHolding] = useState(null)   // raw holding row when notes modal is open
-  // ── TradingView chart modal (free widget, no API key) ────────────────────
+  // ── Chart / S/R modal ────────────────────────────────────────────────────
   const [chartHolding, setChartHolding] = useState(null)
+  const [chartMode,    setChartMode]    = useState('sr')   // 'sr' | 'tv'
+  // Reset to S/R tab whenever a new holding is opened
+  useEffect(() => { if (chartHolding) setChartMode('sr') }, [chartHolding])
 
   // Realized P/L — recompute from all transactions whenever holdings change
   useEffect(() => {
@@ -621,7 +625,7 @@ function LivePortfolioPage({ t, lang, ccy, portfolio, liveHoldings, prices = {},
                           <button
                             onClick={() => setChartHolding(r)}
                             style={{ background: "none", border: "none", cursor: "pointer", color: "var(--ink-3)", padding: "4px 6px", borderRadius: 6, lineHeight: 1, display: "inline-flex", alignItems: "center" }}
-                            title={th ? "ดูกราฟ (TradingView)" : "View chart (TradingView)"}
+                            title={th ? "แนวรับ/ต้าน + กราฟ" : "S/R levels + chart"}
                           ><Icon name="chart" size={14} /></button>
                           {aiAvailable && (
                             <button
@@ -738,29 +742,73 @@ function LivePortfolioPage({ t, lang, ccy, portfolio, liveHoldings, prices = {},
           onSaved={async () => { setNotesHolding(null); await refreshHoldings() }} />
       )}
 
-      {chartHolding && (
-        <div style={{ position: "fixed", inset: 0, zIndex: 1000, background: "rgba(0,0,0,0.45)", display: "flex", alignItems: "center", justifyContent: "center", padding: 16 }}
-          onClick={e => e.target === e.currentTarget && setChartHolding(null)}>
-          <div style={{ background: "var(--bg)", borderRadius: 18, padding: 20, width: "100%", maxWidth: 1000, maxHeight: "92vh", display: "flex", flexDirection: "column", gap: 12, boxShadow: "0 20px 60px rgba(0,0,0,0.2)" }}>
-            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 12 }}>
-              <div style={{ display: "flex", alignItems: "center", gap: 10, minWidth: 0 }}>
-                <TickerLogo ticker={chartHolding.ticker} logoUrl={chartHolding.logo_url} region={chartHolding.region} cls={chartHolding.cls} size={32} />
-                <div style={{ minWidth: 0 }}>
-                  <h3 style={{ margin: 0, fontSize: 16, fontWeight: 600 }}>{chartHolding.ticker} · {chartHolding.name}</h3>
-                  <div className="muted" style={{ fontSize: 11, marginTop: 2 }}>
-                    {th ? "กราฟจาก" : "Chart by"} <span style={{ color: "var(--accent-ink)", fontWeight: 500 }}>TradingView</span>
+      {chartHolding && (() => {
+        const yahooSym  = toYahooSymbol(chartHolding.ticker, chartHolding.region, chartHolding.cls)
+        const priceData = prices[yahooSym]
+        const srLivePrice = priceData?.price ?? null
+        const srCurrency  = priceData?.currency ?? (chartHolding.region === 'TH' ? 'THB' : 'USD')
+        return (
+          <div style={{ position: "fixed", inset: 0, zIndex: 1000, background: "rgba(0,0,0,0.45)", display: "flex", alignItems: "center", justifyContent: "center", padding: 16 }}
+            onClick={e => e.target === e.currentTarget && setChartHolding(null)}>
+            <div style={{ background: "var(--bg)", borderRadius: 18, padding: 20, width: "100%", maxWidth: 860, maxHeight: "92vh", overflowY: "auto", display: "flex", flexDirection: "column", gap: 12, boxShadow: "0 20px 60px rgba(0,0,0,0.2)" }}>
+
+              {/* Header */}
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 12 }}>
+                <div style={{ display: "flex", alignItems: "center", gap: 10, minWidth: 0 }}>
+                  <TickerLogo ticker={chartHolding.ticker} logoUrl={chartHolding.logo_url} region={chartHolding.region} cls={chartHolding.cls} size={32} />
+                  <div style={{ minWidth: 0 }}>
+                    <h3 style={{ margin: 0, fontSize: 16, fontWeight: 600 }}>{chartHolding.ticker} · {chartHolding.name}</h3>
+                    <div className="muted" style={{ fontSize: 11, marginTop: 2 }}>
+                      {th ? "วิเคราะห์แนวรับ-แนวต้าน" : "Support & Resistance Analysis"}
+                    </div>
                   </div>
                 </div>
+                <button onClick={() => setChartHolding(null)} style={{ background: "none", border: "none", cursor: "pointer", fontSize: 22, color: "var(--ink-3)", padding: 4, flexShrink: 0 }}>✕</button>
               </div>
-              <button onClick={() => setChartHolding(null)} style={{ background: "none", border: "none", cursor: "pointer", fontSize: 22, color: "var(--ink-3)", padding: 4 }}>✕</button>
+
+              {/* Mode tabs: S/R Chart | TradingView */}
+              <div style={{ display: "flex", gap: 6 }}>
+                <button onClick={() => setChartMode('sr')} style={{
+                  flex: 1, padding: "8px 0", borderRadius: 8, fontSize: 12, fontWeight: 600, cursor: "pointer",
+                  border: "1.5px solid var(--line)",
+                  background: chartMode === 'sr' ? "var(--accent)" : "var(--bg-2)",
+                  color: chartMode === 'sr' ? "#fff" : "var(--ink)",
+                }}>
+                  📈 {th ? "กราฟ + แนวรับ/ต้าน" : "S/R Chart"}
+                </button>
+                <button onClick={() => setChartMode('tv')} style={{
+                  flex: 1, padding: "8px 0", borderRadius: 8, fontSize: 12, fontWeight: 600, cursor: "pointer",
+                  border: "1.5px solid var(--line)",
+                  background: chartMode === 'tv' ? "var(--ink)" : "var(--bg-2)",
+                  color: chartMode === 'tv' ? "var(--bg)" : "var(--ink)",
+                }}>
+                  📊 TradingView
+                </button>
+              </div>
+
+              {/* Content */}
+              {chartMode === 'sr' ? (
+                <SRPanel
+                  ticker={chartHolding.ticker}
+                  region={chartHolding.region}
+                  cls={chartHolding.cls}
+                  livePrice={srLivePrice}
+                  currency={srCurrency}
+                  lang={lang}
+                  chartHeight={Math.min(320, Math.floor(window.innerHeight * 0.38))}
+                />
+              ) : (
+                <>
+                  <TradingViewChart ticker={chartHolding.ticker} region={chartHolding.region} height={Math.min(500, window.innerHeight * 0.6)} />
+                  <p className="muted" style={{ margin: 0, fontSize: 10, textAlign: "center" }}>
+                    {th ? "กราฟ TradingView สำหรับการศึกษา · ไม่ใช่คำแนะนำการลงทุน" : "TradingView chart for education only · not investment advice"}
+                  </p>
+                </>
+              )}
             </div>
-            <TradingViewChart ticker={chartHolding.ticker} region={chartHolding.region} height={Math.min(560, window.innerHeight * 0.7)} />
-            <p className="muted" style={{ margin: 0, fontSize: 10, textAlign: "center" }}>
-              {th ? "กราฟ TradingView สำหรับการศึกษา · ไม่ใช่คำแนะนำการลงทุน" : "TradingView chart for education only · not investment advice"}
-            </p>
           </div>
-        </div>
-      )}
+        )
+      })()}
 
       {splitModal && (
         <div style={{ position: "fixed", inset: 0, zIndex: 200, background: "rgba(0,0,0,0.45)", display: "flex", alignItems: "center", justifyContent: "center", padding: 16 }}
