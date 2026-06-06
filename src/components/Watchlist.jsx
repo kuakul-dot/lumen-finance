@@ -52,25 +52,35 @@ function computeSR(bars, current) {
 
   const toLevel = (g) => ({ price: +g.c.toFixed(4), strength: g.pts.length })
 
+  // Expand to 4 levels (R1–R4 / S1–S4)
   let resistances = cluster(pivotHighs.filter(v => v > current * 1.001))
-    .slice(0, 3).map(toLevel).sort((a, b) => a.price - b.price).slice(0, 2)
+    .slice(0, 8).map(toLevel).sort((a, b) => a.price - b.price).slice(0, 4)
   let supports = cluster(pivotLows.filter(v => v < current * 0.999))
-    .slice(0, 3).map(toLevel).sort((a, b) => b.price - a.price).slice(0, 2)
+    .slice(0, 8).map(toLevel).sort((a, b) => b.price - a.price).slice(0, 4)
 
-  // Rolling fallbacks when pivot data is insufficient
+  // Fallbacks: 30d / 60d / 90d / all-time extremes (deduplicated, sorted nearest-first)
   const allH = bars.map(b => b.h ?? b.c).filter(Number.isFinite)
   const allL = bars.map(b => b.l ?? b.c).filter(Number.isFinite)
-  const w30H = allH.slice(-30), w30L = allL.slice(-30)
-  const fbR = [Math.max(...w30H), Math.max(...allH)].filter(v => v > current * 1.005)
-  const fbS = [Math.min(...w30L), Math.min(...allL)].filter(v => v < current * 0.995)
+  const fbR = [...new Set([
+    Math.max(...allH.slice(-30)),
+    Math.max(...allH.slice(-60)),
+    Math.max(...allH.slice(-90)),
+    Math.max(...allH),
+  ])].filter(v => v > current * 1.005).sort((a, b) => a - b)
+  const fbS = [...new Set([
+    Math.min(...allL.slice(-30)),
+    Math.min(...allL.slice(-60)),
+    Math.min(...allL.slice(-90)),
+    Math.min(...allL),
+  ])].filter(v => v < current * 0.995).sort((a, b) => b - a)
 
   for (const v of fbR) {
-    if (resistances.length >= 2) break
+    if (resistances.length >= 4) break
     if (!resistances.some(r => Math.abs(r.price - v) / v < 0.02))
       resistances.push({ price: +v.toFixed(4), strength: 0 })
   }
   for (const v of fbS) {
-    if (supports.length >= 2) break
+    if (supports.length >= 4) break
     if (!supports.some(s => Math.abs(s.price - v) / v < 0.02))
       supports.push({ price: +v.toFixed(4), strength: 0 })
   }
@@ -288,7 +298,7 @@ function SRLadder({ sr, livePrice, currency }) {
     fontSize: 12,
   })
 
-  // Render resistances from highest (R2) to lowest (R1) so R1 is closest to NOW line
+  // Render resistances from highest (R4→R1) to lowest so R1 is closest to NOW line
   const rLevels = [...sr.resistances].reverse()
   const sLevels = sr.supports   // already sorted: S1 closest, S2 furthest
 
