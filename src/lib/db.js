@@ -643,8 +643,10 @@ export function deriveHoldings(holdings, currency = 'THB', prices = {}, fxRate =
 
     if (priceData?.price != null) {
       if (h.asset_class === 'GoldTH') {
-        // GC=F = USD/troy oz → THB per Thai บาท ทอง (15.244g = 0.48997 troy oz)
-        currentPriceInTHB = priceData.price * (15.244 / 31.1035) * fxRate
+        // GC=F = USD/troy oz → THB per Thai บาท ทอง
+        // sector field stores purity: "96.5" (ทองรูปพรรณ) or "99.99" (ทองแท่ง)
+        const purity = parseFloat(h.sector) || 96.5
+        currentPriceInTHB = priceData.price * (15.244 * (purity / 100) / 31.1035) * fxRate
       } else {
         // .BK stocks → THB, US stocks & crypto → USD
         const priceCcy = h.region === 'TH' ? 'THB' : 'USD'

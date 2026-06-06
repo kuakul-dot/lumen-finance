@@ -895,7 +895,7 @@ function AddHoldingModal({ lang, portfolioId, onClose, onSaved }) {
     if (k === 'region') patch.div_frequency = v === 'TH' ? '2' : '4'
     if (k === 'asset_class') {
       if (v === 'MutualFund') { patch.region = 'TH'; patch.currency = 'THB'; patch.div_frequency = '2' }
-      if (v === 'GoldTH')     { patch.currency = 'THB'; patch.region = 'Other'; patch.div_frequency = '0'; if (!patch.name) patch.name = th ? 'ทองคำแท่ง' : 'Gold Bars' }
+      if (v === 'GoldTH')     { patch.currency = 'THB'; patch.region = 'Other'; patch.div_frequency = '0'; patch.sector = '96.5'; if (!patch.name) patch.name = th ? 'ทองคำแท่ง' : 'Gold Bars' }
     }
     return patch
   })
@@ -1018,14 +1018,23 @@ function AddHoldingModal({ lang, portfolioId, onClose, onSaved }) {
             </Field>
           </div>
 
-          {/* Sector */}
-          <Field label={th ? "กลุ่มอุตสาหกรรม (Sector)" : "Sector (optional)"}>
-            <select value={form.sector} onChange={e => set('sector', e.target.value)} style={inputStyle}>
-              {SECTORS.map(s => (
-                <option key={s.value} value={s.value}>{th ? s.th : s.en}</option>
-              ))}
-            </select>
-          </Field>
+          {/* Sector / Purity */}
+          {form.asset_class === 'GoldTH' ? (
+            <Field label={th ? "ความบริสุทธิ์ทองคำ" : "Gold Purity"}>
+              <select value={form.sector} onChange={e => set('sector', e.target.value)} style={inputStyle}>
+                <option value="96.5">96.5% — {th ? "ทองรูปพรรณ / แม่ทองสุก" : "Gold Jewelry / Mae Thong Suk"}</option>
+                <option value="99.99">99.99% — {th ? "ทองแท่งบริสุทธิ์" : "Pure Gold Bars"}</option>
+              </select>
+            </Field>
+          ) : (
+            <Field label={th ? "กลุ่มอุตสาหกรรม (Sector)" : "Sector (optional)"}>
+              <select value={form.sector} onChange={e => set('sector', e.target.value)} style={inputStyle}>
+                {SECTORS.map(s => (
+                  <option key={s.value} value={s.value}>{th ? s.th : s.en}</option>
+                ))}
+              </select>
+            </Field>
+          )}
 
           {/* Shares + Cost + Currency */}
           <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 80px", gap: 12 }}>
@@ -1210,14 +1219,23 @@ function EditHoldingModal({ lang, holding, onClose, onSaved }) {
             </Field>
           </div>
 
-          {/* Sector */}
-          <Field label={th ? "กลุ่มอุตสาหกรรม (Sector)" : "Sector (optional)"}>
-            <select value={form.sector} onChange={e => set('sector', e.target.value)} style={inputStyle}>
-              {SECTORS.map(s => (
-                <option key={s.value} value={s.value}>{th ? s.th : s.en}</option>
-              ))}
-            </select>
-          </Field>
+          {/* Sector / Purity */}
+          {form.asset_class === 'GoldTH' ? (
+            <Field label={th ? "ความบริสุทธิ์ทองคำ" : "Gold Purity"}>
+              <select value={form.sector} onChange={e => set('sector', e.target.value)} style={inputStyle}>
+                <option value="96.5">96.5% — {th ? "ทองรูปพรรณ / แม่ทองสุก" : "Gold Jewelry / Mae Thong Suk"}</option>
+                <option value="99.99">99.99% — {th ? "ทองแท่งบริสุทธิ์" : "Pure Gold Bars"}</option>
+              </select>
+            </Field>
+          ) : (
+            <Field label={th ? "กลุ่มอุตสาหกรรม (Sector)" : "Sector (optional)"}>
+              <select value={form.sector} onChange={e => set('sector', e.target.value)} style={inputStyle}>
+                {SECTORS.map(s => (
+                  <option key={s.value} value={s.value}>{th ? s.th : s.en}</option>
+                ))}
+              </select>
+            </Field>
+          )}
 
           {/* Shares + Cost + Currency */}
           <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 80px", gap: 12 }}>
