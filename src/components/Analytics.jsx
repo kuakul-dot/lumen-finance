@@ -1,4 +1,4 @@
-import { useState, useMemo, useEffect, useCallback, Fragment } from 'react'
+import { useState, useMemo, useEffect, useCallback, useRef, Fragment } from 'react'
 import { createPortal } from 'react-dom'
 import { PageHead, Delta, Icon, TickerLogo } from './Nav'
 import { CalcInput } from './CalcInput'
@@ -245,6 +245,8 @@ function AnalyticsCommon({ t, lang, ccy, rows, totalValue, totalPL, totalPlPct, 
   const [chartPeriod, setChartPeriod] = useState(defaultPeriod)
   useEffect(() => { setChartPeriod(defaultPeriod) }, [defaultPeriod])
   const [chartMode, setChartMode] = useState("pct")   // "pct" = growth %, "value" = THB value
+  const [commonBenchKey, setCommonBenchKey] = useState("sp500")
+  const commonBench = BENCHMARKS[commonBenchKey] ?? BENCHMARKS.sp500
 
   // Which buttons are usable in live mode? (need enough history)
   const periodDaysMap = useMemo(() => {
@@ -254,19 +256,20 @@ function AnalyticsCommon({ t, lang, ccy, rows, totalValue, totalPL, totalPlPct, 
   }, [daysSinceFirst])
   const isPeriodEnabled = (k) => dataState !== "live" || periodDaysMap[k] <= daysSinceFirst + 7  // small tolerance
 
-  // Real S&P 500 historical close prices (USD) — fetched once, sliced per-period client-side.
-  // Request a range that covers the maximum enabled button so we don't refetch on click.
+  // Benchmark historical close prices — fetched when benchmark or time-range changes.
   const [spxData, setSpxData] = useState(null)  // { series, currency }
   useEffect(() => {
     if (dataState !== "live") return
+    const sym = commonBench?.symbol
+    if (!sym) { setSpxData(null); return }
     const range = daysSinceFirst >= 365 * 2 ? "5y"
                 : daysSinceFirst >= 365     ? "2y"
                 : daysSinceFirst >= 180     ? "1y"
                 : daysSinceFirst >= 90      ? "6mo" : "3mo"
     let cancelled = false
-    fetchHistory("^GSPC", range).then(d => { if (!cancelled) setSpxData(d) }).catch(() => {})
+    fetchHistory(sym, range).then(d => { if (!cancelled) setSpxData(d) }).catch(() => {})
     return () => { cancelled = true }
-  }, [dataState, daysSinceFirst])
+  }, [dataState, daysSinceFirst, commonBench?.symbol])
 
   // Daily portfolio value/cost snapshots — power the accurate, contribution-
   // neutral growth comparison against S&P 500.
@@ -410,13 +413,13 @@ function AnalyticsCommon({ t, lang, ccy, rows, totalValue, totalPL, totalPlPct, 
       }
       if (!hasSpx) return [portfolioSeries]
 
-      // Align S&P to same timestamps as portfolio — rebase so both start at same value
+      // Align benchmark to same timestamps as portfolio — rebase so both start at same value
       const firstPortVal = realPortfolioPoints[0].y
       const firstPortTs  = realPortfolioPoints[0].ts
       const spxAtStart   = getPriceAt(spxSorted, firstPortTs) || spxSorted[0]?.c || 1
       const sp500Series = {
-        name: "S&P 500",
-        color: "var(--accent)",
+        name: th ? commonBench.labelTh : commonBench.labelEn,
+        color: commonBench.color || "var(--accent)",
         data: realPortfolioPoints.map((p, i) => {
           const spxPrice = getPriceAt(spxSorted, p.ts)
           return { x: i, y: spxPrice != null ? firstPortVal * (spxPrice / spxAtStart) : firstPortVal, label: p.label }
@@ -466,12 +469,12 @@ function AnalyticsCommon({ t, lang, ccy, rows, totalValue, totalPL, totalPlPct, 
         })
       },
       {
-        name: "S&P 500",
-        color: "var(--accent)",
+        name: th ? commonBench.labelTh : commonBench.labelEn,
+        color: commonBench.color || "var(--accent)",
         data: sampled.map((p, i) => ({ x: i, y: totalCost * (p.c / baseClose), label: mkLabel(new Date(p.t * 1000)) }))
       }
     ]
-  }, [dataState, totalCost, totalValue, th, chartPeriod, periodDaysMap, daysSinceFirst, spxData, liveHoldings, holdingHistories, purchaseSecByTicker, fxRate])
+  }, [dataState, totalCost, totalValue, th, chartPeriod, periodDaysMap, daysSinceFirst, spxData, liveHoldings, holdingHistories, purchaseSecByTicker, fxRate, commonBenchKey])
 
   // Snapshots sliced to the selected period (shared by both chart modes)
   const windowSnaps = useMemo(() => {
@@ -523,9 +526,9 @@ function AnalyticsCommon({ t, lang, ccy, rows, totalValue, totalPL, totalPlPct, 
       }
     })
     const out = [{ name: th ? "พอร์ตของคุณ" : "Your portfolio", color: "var(--ink)", fill: true, data: port }]
-    if (sp.length >= 2) out.push({ name: "S&P 500", color: "var(--accent)", data: sp })
+    if (sp.length >= 2) out.push({ name: th ? commonBench.labelTh : commonBench.labelEn, color: commonBench.color || "var(--accent)", data: sp })
     return out
-  }, [dataState, windowSnaps, spxData, th, labelFor])
+  }, [dataState, windowSnaps, spxData, th, labelFor, commonBenchKey])
 
   // ── Mode B: actual value (THB) — market value vs cost basis over time ──────
   const valueSeries = useMemo(() => {
@@ -603,8 +606,8 @@ function AnalyticsCommon({ t, lang, ccy, rows, totalValue, totalPL, totalPlPct, 
                 dataState === "live" && snapSeries
                   ? (chartMode === "value"
                       ? (th ? "มูลค่าพอร์ต & ต้นทุน (฿)" : "Portfolio value & cost basis")
-                      : (th ? "การเติบโต: พอร์ต vs. S&P 500 (ฐาน 100%)" : "Growth: Portfolio vs. S&P 500 (rebased)"))
-                  : (th ? "มูลค่าพอร์ต vs. S&P 500" : "Portfolio value vs. S&P 500")}</h3>
+                      : (th ? `การเติบโต: พอร์ต vs. ${commonBench.labelTh} (ฐาน 100%)` : `Growth: Portfolio vs. ${commonBench.labelEn} (rebased)`))
+                  : (th ? `มูลค่าพอร์ต vs. ${commonBench.labelTh}` : `Portfolio value vs. ${commonBench.labelEn}`)}</h3>
               <div className="muted" style={{ fontSize: 12, marginTop: 4 }}>
                 <span className="dot" style={{ background: "var(--ink)" }} /> {dataState === "live" && snapSeries && chartMode === "value" ? (th ? "มูลค่าตลาด" : "Market value") : (th ? "พอร์ตของคุณ" : "Your portfolio")}
                 {dataState === "live" && chartMode !== "value" && (
@@ -614,7 +617,12 @@ function AnalyticsCommon({ t, lang, ccy, rows, totalValue, totalPL, totalPlPct, 
                       : (th ? "(กำลังโหลดข้อมูล…)" : "(loading real prices…)")}
                   </span>
                 )}
-                <span style={{ marginLeft: 12 }}><span className="dot" style={{ background: "var(--accent)" }} /> {dataState === "live" && snapSeries && chartMode === "value" ? (th ? "ต้นทุน" : "Cost basis") : "S&P 500"}</span>
+                {commonBenchKey !== "none" && (
+                  <span style={{ marginLeft: 12 }}>
+                    <span className="dot" style={{ background: commonBench.color || "var(--accent)" }} />
+                    {" "}{dataState === "live" && snapSeries && chartMode === "value" ? (th ? "ต้นทุน" : "Cost basis") : (th ? commonBench.labelTh : commonBench.labelEn)}
+                  </span>
+                )}
                 {dataState === "live" && earliestHoldingDate && (
                   <div style={{ fontSize: 11, color: "var(--ink-4)", marginTop: 2 }}>
                     {th
@@ -625,6 +633,17 @@ function AnalyticsCommon({ t, lang, ccy, rows, totalValue, totalPL, totalPlPct, 
               </div>
             </div>
             <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap", justifyContent: "flex-end" }}>
+              {/* Benchmark picker — only in % growth mode */}
+              {dataState === "live" && chartMode === "pct" && (
+                <select value={commonBenchKey} onChange={e => setCommonBenchKey(e.target.value)}
+                  style={{ padding: "5px 10px", borderRadius: 8, fontSize: 11, border: "1.5px solid var(--line)",
+                           background: "var(--bg)", color: "var(--ink)", cursor: "pointer", outline: "none",
+                           fontFamily: "var(--font-mono)" }}>
+                  {Object.entries(BENCHMARKS).map(([k, b]) => (
+                    <option key={k} value={k}>{k === 'none' ? (th ? 'เทียบกับ…' : 'vs…') : (th ? b.labelTh : b.labelEn)}</option>
+                  ))}
+                </select>
+              )}
               <div className="segmented">
                 {["1m","3m","6m","ytd","1y","5y","all"].map(k => {
                   const enabled = isPeriodEnabled(k)
@@ -1725,10 +1744,11 @@ function SyncRow({ s, th, FMT, ccy, onChange }) {
 
 // Benchmark definitions — outside component so the reference is stable (no stale closure)
 const BENCHMARKS = {
-  none:   { labelTh: "ไม่เปรียบเทียบ", labelEn: "None",        symbol: null,        color: null },
-  sp500:  { labelTh: "S&P 500",         labelEn: "S&P 500",     symbol: "^GSPC",     color: "var(--accent)" },
-  set:    { labelTh: "SET Index",        labelEn: "SET Index",   symbol: "^SET.BK",   color: "var(--c3)" },
-  nasdaq: { labelTh: "Nasdaq 100",       labelEn: "Nasdaq 100",  symbol: "^NDX",      color: "var(--c2)" },
+  none:   { labelTh: "ไม่เปรียบเทียบ", labelEn: "None",        symbol: null,          color: null },
+  sp500:  { labelTh: "S&P 500",         labelEn: "S&P 500",     symbol: "^GSPC",       color: "var(--accent)" },
+  set50:  { labelTh: "SET 50",           labelEn: "SET 50",      symbol: "^SET50.BK",   color: "var(--c7)" },
+  set:    { labelTh: "SET Index",        labelEn: "SET Index",   symbol: "^SET.BK",     color: "var(--c3)" },
+  nasdaq: { labelTh: "Nasdaq 100",       labelEn: "Nasdaq 100",  symbol: "^NDX",        color: "var(--c2)" },
 }
 
 /* ─── Growth tab ─────────────────────────────────────────────────────────────── */
@@ -2280,6 +2300,14 @@ function AnalyticsMetrics({ t, lang, ccy, rows = [], totalValue = 0, totalPL = 0
       setBackfilling(false)
     }
   }, [portfolio?.id, fxRate, th])
+
+  // Auto-trigger backfill once when the Metrics tab first opens with no snapshot data
+  const autoFilled = useRef(false)
+  useEffect(() => {
+    if (!isLive || autoFilled.current || backfilling || snaps.length > 0) return
+    autoFilled.current = true
+    handleBackfill()
+  }, [isLive, snaps.length, backfilling, handleBackfill])
 
   // History-based metrics from the flow-neutral money-multiple (value / cost):
   // a pure cash buy raises value and cost equally, so the ratio isolates
