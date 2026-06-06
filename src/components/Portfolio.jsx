@@ -1178,7 +1178,7 @@ function AddHoldingModal({ lang, portfolioId, onClose, onSaved }) {
 function EditHoldingModal({ lang, holding, onClose, onSaved }) {
   const th = lang === "th"
   const [form, setForm] = useState({
-    ticker:      holding.ticker,
+    ticker:      (holding.asset_class === 'GoldTH' && !holding.ticker) ? 'XAU' : holding.ticker,
     name:        holding.name,
     asset_class: holding.asset_class || 'Equity',
     region:      holding.region || 'TH',
