@@ -13,15 +13,37 @@ export function Brand() {
 //   custom logoUrl → TradingView resolver (US + Thai) → parqet (non-Thai) → initials.
 // Each failed source advances to the next; when exhausted we draw coloured initials.
 export function TickerLogo({ ticker = "", logoUrl, region, cls, size = 34 }) {
-  // GoldTH — always render a gold coin SVG (no remote image needed)
+  // GoldTH — gold bar / ingot icon
   if (cls === 'GoldTH') {
-    const r = size / 2
     return (
       <svg width={size} height={size} viewBox="0 0 40 40" style={{ flexShrink: 0, display: 'block' }}>
-        <circle cx="20" cy="20" r="19" fill="oklch(0.76 0.13 79)" />
-        <circle cx="20" cy="20" r="15" fill="oklch(0.86 0.17 84)" />
-        <text x="20" y="24.5" textAnchor="middle" fontSize="11.5" fontWeight="900"
-              fill="oklch(0.38 0.10 74)" fontFamily="Georgia,serif" letterSpacing="-0.3">Au</text>
+        <defs>
+          <linearGradient id="bar-face" x1="0%" y1="0%" x2="0%" y2="100%">
+            <stop offset="0%"   stopColor="oklch(0.92 0.18 90)" />
+            <stop offset="45%"  stopColor="oklch(0.82 0.18 84)" />
+            <stop offset="100%" stopColor="oklch(0.68 0.14 78)" />
+          </linearGradient>
+          <linearGradient id="bar-top" x1="0%" y1="0%" x2="0%" y2="100%">
+            <stop offset="0%"   stopColor="oklch(0.96 0.16 92)" />
+            <stop offset="100%" stopColor="oklch(0.88 0.17 88)" />
+          </linearGradient>
+          <linearGradient id="bar-side" x1="0%" y1="0%" x2="100%" y2="0%">
+            <stop offset="0%"   stopColor="oklch(0.60 0.12 76)" />
+            <stop offset="100%" stopColor="oklch(0.52 0.10 74)" />
+          </linearGradient>
+        </defs>
+        {/* front face */}
+        <rect x="4" y="16" width="28" height="17" rx="2" fill="url(#bar-face)" />
+        {/* top face (trapezoid perspective) */}
+        <polygon points="4,16 32,16 36,10 8,10" fill="url(#bar-top)" />
+        {/* right side face */}
+        <polygon points="32,16 36,10 36,27 32,33" fill="url(#bar-side)" />
+        {/* engraved inner rect on front */}
+        <rect x="7" y="19" width="22" height="11" rx="1.5"
+              fill="none" stroke="oklch(0.62 0.13 77)" strokeWidth="0.9" opacity="0.7" />
+        {/* "Au" label */}
+        <text x="18" y="27.5" textAnchor="middle" fontSize="7.5" fontWeight="800"
+              fill="oklch(0.50 0.11 75)" fontFamily="Georgia,serif" letterSpacing="0.3">Au</text>
       </svg>
     )
   }
