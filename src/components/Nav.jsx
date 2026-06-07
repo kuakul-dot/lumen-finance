@@ -18,32 +18,20 @@ export function TickerLogo({ ticker = "", logoUrl, region, cls, size = 34 }) {
     return (
       <svg width={size} height={size} viewBox="0 0 40 40" style={{ flexShrink: 0, display: 'block' }}>
         <defs>
-          <linearGradient id="bar-face" x1="0%" y1="0%" x2="0%" y2="100%">
-            <stop offset="0%"   stopColor="oklch(0.92 0.18 90)" />
-            <stop offset="45%"  stopColor="oklch(0.82 0.18 84)" />
-            <stop offset="100%" stopColor="oklch(0.68 0.14 78)" />
-          </linearGradient>
-          <linearGradient id="bar-top" x1="0%" y1="0%" x2="0%" y2="100%">
-            <stop offset="0%"   stopColor="oklch(0.96 0.16 92)" />
-            <stop offset="100%" stopColor="oklch(0.88 0.17 88)" />
-          </linearGradient>
-          <linearGradient id="bar-side" x1="0%" y1="0%" x2="100%" y2="0%">
-            <stop offset="0%"   stopColor="oklch(0.60 0.12 76)" />
-            <stop offset="100%" stopColor="oklch(0.52 0.10 74)" />
-          </linearGradient>
+          <radialGradient id="gold-face" cx="38%" cy="32%" r="65%">
+            <stop offset="0%"   stopColor="oklch(0.98 0.10 96)" />
+            <stop offset="35%"  stopColor="oklch(0.88 0.20 88)" />
+            <stop offset="75%"  stopColor="oklch(0.76 0.18 83)" />
+            <stop offset="100%" stopColor="oklch(0.60 0.13 75)" />
+          </radialGradient>
         </defs>
-        {/* front face */}
-        <rect x="4" y="16" width="28" height="17" rx="2" fill="url(#bar-face)" />
-        {/* top face (trapezoid perspective) */}
-        <polygon points="4,16 32,16 36,10 8,10" fill="url(#bar-top)" />
-        {/* right side face */}
-        <polygon points="32,16 36,10 36,27 32,33" fill="url(#bar-side)" />
-        {/* engraved inner rect on front */}
-        <rect x="7" y="19" width="22" height="11" rx="1.5"
-              fill="none" stroke="oklch(0.62 0.13 77)" strokeWidth="0.9" opacity="0.7" />
-        {/* "Au" label */}
-        <text x="18" y="27.5" textAnchor="middle" fontSize="7.5" fontWeight="800"
-              fill="oklch(0.50 0.11 75)" fontFamily="Georgia,serif" letterSpacing="0.3">Au</text>
+        {/* rim */}
+        <circle cx="20" cy="20" r="19.5" fill="oklch(0.55 0.11 74)" />
+        {/* face */}
+        <circle cx="20" cy="20" r="17.5" fill="url(#gold-face)" />
+        {/* 金 character */}
+        <text x="20" y="26" textAnchor="middle" fontSize="16" fontWeight="700"
+              fill="oklch(0.44 0.12 72)" fontFamily="serif">金</text>
       </svg>
     )
   }
