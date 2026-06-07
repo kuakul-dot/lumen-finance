@@ -133,9 +133,10 @@ export function ToolsPage({ t, lang, ccy, dataState, liveHoldings = [], prices =
   const th = lang === "th"
 
   const [mode,       setMode]       = useState("deposit")
-  const [amount,     setAmount]     = useState("50000")
+  const [amount,     setAmount]     = useState(() => ccy === 'USD' ? "1400" : "50000")
   const [allowSales, setAllowSales] = useState(false)
   const [showResult, setShowResult] = useState(false)
+  const [rulesOpen,  setRulesOpen]  = useState(false)
   // Cash account selector for deposit — set of account IDs the user wants to draw from
   const [selectedAccountIds, setSelectedAccountIds] = useState(new Set())
   const [editTargets, setEditTargets] = useState(false)
@@ -654,42 +655,52 @@ export function ToolsPage({ t, lang, ccy, dataState, liveHoldings = [], prices =
         }
       />
 
-      {/* Rebalancing Rules Guide */}
-      <div className="card" style={{ marginBottom: 24, background: "oklch(0.98 0.02 200)", border: "1px solid oklch(0.85 0.05 200)" }}>
-        <h4 style={{ fontSize: 14, fontWeight: 600, marginBottom: 14, display: "flex", alignItems: "center", gap: 8 }}>
-          <span style={{ fontSize: 16 }}>📋</span>
-          {th ? "กฎการปรับสมดุล (เมื่อควรปรับ?)" : "Rebalancing Rules (When to rebalance?)"}
-        </h4>
-        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 12, fontSize: 12 }}>
-          <div style={{ padding: "10px 12px", borderRadius: 10, background: "white", border: "1px solid oklch(0.88 0.04 200)" }}>
-            <div style={{ fontWeight: 600, marginBottom: 6, color: "oklch(0.35 0.10 200)", fontSize: 13 }}>
-              📅 {th ? "กฎปฏิทิน" : "Calendar"}
+      {/* Rebalancing Rules Guide — collapsible */}
+      <div className="card" style={{ marginBottom: 24 }}>
+        <button
+          onClick={() => setRulesOpen(v => !v)}
+          style={{ width: "100%", background: "none", border: "none", cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8, padding: 0, color: "var(--fg)" }}
+        >
+          <h4 style={{ fontSize: 14, fontWeight: 600, margin: 0, display: "flex", alignItems: "center", gap: 8 }}>
+            <span style={{ fontSize: 16 }}>📋</span>
+            {th ? "กฎการปรับสมดุล (เมื่อควรปรับ?)" : "Rebalancing Rules (When to rebalance?)"}
+          </h4>
+          <span style={{ fontSize: 12, color: "var(--muted)", transition: "transform 0.2s", display: "inline-block", transform: rulesOpen ? "rotate(180deg)" : "rotate(0deg)" }}>▾</span>
+        </button>
+        {rulesOpen && (
+          <div style={{ marginTop: 14 }}>
+            <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(200px, 1fr))", gap: 12, fontSize: 12 }}>
+              <div style={{ padding: "10px 12px", borderRadius: 10, background: "var(--bg-2)", border: "1px solid var(--line)" }}>
+                <div style={{ fontWeight: 600, marginBottom: 6, fontSize: 13 }}>
+                  📅 {th ? "กฎปฏิทิน" : "Calendar"}
+                </div>
+                <div className="muted" style={{ lineHeight: 1.6 }}>
+                  {th ? "ปรับอย่างน้อย 1 ครั้ง/ปี แม้ว่าสัดส่วนยังใกล้เป้า เพื่อ reset ฐาน" : "Rebalance at least once per year even if drift is small, to reset your baseline"}
+                </div>
+              </div>
+              <div style={{ padding: "10px 12px", borderRadius: 10, background: "var(--bg-2)", border: "1px solid var(--line)" }}>
+                <div style={{ fontWeight: 600, marginBottom: 6, fontSize: 13 }}>
+                  📊 {th ? "กฎเบี่ยง ±5%" : "Drift ±5%"}
+                </div>
+                <div className="muted" style={{ lineHeight: 1.6 }}>
+                  {th ? "ปรับทันทีเมื่อกลุ่มสินทรัพย์ใดเบี่ยงไป >5% จากเป้าหมาย (วัดที่ระดับ Class ไม่ใช่รายหุ้น)" : "Act immediately if any asset class drifts >5% from target — measured at class level, not per holding"}
+                </div>
+              </div>
+              <div style={{ padding: "10px 12px", borderRadius: 10, background: "var(--bg-2)", border: "1px solid var(--line)" }}>
+                <div style={{ fontWeight: 600, marginBottom: 6, fontSize: 13 }}>
+                  💰 {th ? "เติมเงิน (Cash-flow)" : "Cash-flow"}
+                </div>
+                <div className="muted" style={{ lineHeight: 1.6 }}>
+                  {th ? "ใช้เงินฝากใหม่ซื้อกลุ่มที่ขาด แทนการขาย ช่วยลดภาษีและค่าธรรมเนียม" : "Use new deposits to buy underweight classes instead of selling — reduces tax and fees"}
+                </div>
+              </div>
             </div>
-            <div className="muted" style={{ lineHeight: 1.6 }}>
-              {th ? "ปรับอย่างน้อย 1 ครั้ง/ปี แม้ว่าสัดส่วนยังใกล้เป้า เพื่อ reset ฐาน" : "Rebalance at least once per year even if drift is small, to reset your baseline"}
+            <div style={{ marginTop: 12, paddingTop: 10, borderTop: "1px solid var(--line)", fontSize: 11.5, color: "var(--muted)", display: "flex", gap: 16, flexWrap: "wrap" }}>
+              <span>⚠️ {th ? "Tolerance band คือ threshold ที่ระดับ Class (TH Equity, US Equity, Bonds...)" : "Tolerance band filters at Class level, not individual holdings"}</span>
+              <span>🚫 {th ? "ถ้ากลุ่มสมดุล → ไม่แนะนำแม้รายหุ้นเบี่ยง" : "If class is balanced, no trades suggested even if individual holdings drift"}</span>
             </div>
           </div>
-          <div style={{ padding: "10px 12px", borderRadius: 10, background: "white", border: "1px solid oklch(0.88 0.04 50)" }}>
-            <div style={{ fontWeight: 600, marginBottom: 6, color: "oklch(0.40 0.14 50)", fontSize: 13 }}>
-              📊 {th ? "กฎเบี่ยง ±5%" : "Drift ±5%"}
-            </div>
-            <div className="muted" style={{ lineHeight: 1.6 }}>
-              {th ? "ปรับทันทีเมื่อกลุ่มสินทรัพย์ใดเบี่ยงไป >5% จากเป้าหมาย (วัดที่ระดับ Class ไม่ใช่รายหุ้น)" : "Act immediately if any asset class drifts >5% from target — measured at class level, not per holding"}
-            </div>
-          </div>
-          <div style={{ padding: "10px 12px", borderRadius: 10, background: "white", border: "1px solid oklch(0.88 0.04 150)" }}>
-            <div style={{ fontWeight: 600, marginBottom: 6, color: "oklch(0.40 0.10 150)", fontSize: 13 }}>
-              💰 {th ? "เติมเงิน (Cash-flow)" : "Cash-flow"}
-            </div>
-            <div className="muted" style={{ lineHeight: 1.6 }}>
-              {th ? "ใช้เงินฝากใหม่ซื้อกลุ่มที่ขาด แทนการขาย ช่วยลดภาษีและค่าธรรมเนียม" : "Use new deposits to buy underweight classes instead of selling — reduces tax and fees"}
-            </div>
-          </div>
-        </div>
-        <div style={{ marginTop: 12, paddingTop: 10, borderTop: "1px solid oklch(0.88 0.03 200)", fontSize: 11.5, color: "oklch(0.45 0.08 200)", display: "flex", gap: 16, flexWrap: "wrap" }}>
-          <span>⚠️ {th ? "Tolerance band คือ threshold ที่ระดับ Class (TH Equity, US Equity, Bonds...)" : "Tolerance band filters at Class level, not individual holdings"}</span>
-          <span>🚫 {th ? "ถ้ากลุ่มสมดุล → ไม่แนะนำแม้รายหุ้นเบี่ยง" : "If class is balanced, no trades suggested even if individual holdings drift"}</span>
-        </div>
+        )}
       </div>
 
       {/* Tool cards */}
@@ -699,7 +710,7 @@ export function ToolsPage({ t, lang, ccy, dataState, liveHoldings = [], prices =
         <ToolCard locked title="Tax-loss harvesting" sub={th ? "หาคู่ wash-sale-safe จากตำแหน่งที่ขาดทุน" : "Find wash-sale-safe pairs in your losers"} icon="info" />
       </div>
 
-      <div className="grid grid-12">
+      <div className="grid grid-12" style={{ alignItems: "start" }}>
         {/* Input panel */}
         <div className="card col-span-5" style={{ height: "fit-content" }}>
           <h3 className="section-title" style={{ marginBottom: 4 }}>{t.tools.rebalance}</h3>
@@ -708,7 +719,7 @@ export function ToolsPage({ t, lang, ccy, dataState, liveHoldings = [], prices =
           </p>
 
           {/* Portfolio summary */}
-          <div style={{ display: "flex", gap: 24, marginBottom: 20, padding: "14px 16px", borderRadius: 10, background: "var(--bg-2)" }}>
+          <div style={{ display: "flex", gap: 24, marginBottom: 20, padding: "14px 16px", borderRadius: 10, background: "var(--bg-2)", flexWrap: "wrap" }}>
             <div>
               <div className="label-up" style={{ marginBottom: 3 }}>{th ? "พอร์ตลงทุน" : "Investable portfolio"}</div>
               <div style={{ fontSize: 18, fontWeight: 600, fontFamily: "var(--font-display)" }}>{FMT.money(investableTotal, ccy, { compact: true })}</div>
@@ -719,6 +730,14 @@ export function ToolsPage({ t, lang, ccy, dataState, liveHoldings = [], prices =
                 <div style={{ fontSize: 18, fontWeight: 600, fontFamily: "var(--font-display)" }}>{rows.length}</div>
               </div>
             )}
+            <div>
+              <div className="label-up" style={{ marginBottom: 3 }}>{th ? "ปรับล่าสุด" : "Last rebalanced"}</div>
+              <div style={{ fontSize: 14, fontWeight: 500, fontFamily: "var(--font-display)", color: isOverdue ? "var(--loss)" : "var(--fg)" }}>
+                {lastRebalance
+                  ? `${daysSinceRebalance}${th ? " วันที่แล้ว" : "d ago"}${isOverdue ? " ⚠" : ""}`
+                  : <span className="muted">{th ? "ยังไม่เคย" : "Never"}</span>}
+              </div>
+            </div>
           </div>
 
           <div className="segmented" style={{ width: "100%", padding: 4 }}>
@@ -827,11 +846,14 @@ export function ToolsPage({ t, lang, ccy, dataState, liveHoldings = [], prices =
               <div style={{ position: "absolute", right: 16, top: "50%", transform: "translateY(-50%)", color: "var(--ink-3)", fontSize: 13 }}>{ccy}</div>
             </div>
             <div style={{ display: "flex", gap: 6, marginTop: 10, flexWrap: "wrap" }}>
-              {[10000, 25000, 50000, 100000].map(q => (
-                <button key={q} className="chip" style={{ cursor: "pointer" }} onClick={() => { setAmount(String(q)); setShowResult(false) }}>
-                  {FMT.money(q, ccy, { compact: true })}
-                </button>
-              ))}
+              {[10000, 25000, 50000, 100000].map(qTHB => {
+                const q = ccy === 'USD' ? Math.round(qTHB / fxRate) : qTHB
+                return (
+                  <button key={qTHB} className="chip" style={{ cursor: "pointer" }} onClick={() => { setAmount(String(q)); setShowResult(false) }}>
+                    {FMT.money(q, ccy, { compact: true })}
+                  </button>
+                )
+              })}
             </div>
           </label>
 
@@ -1072,7 +1094,7 @@ export function ToolsPage({ t, lang, ccy, dataState, liveHoldings = [], prices =
 
           {/* Drift table */}
           <div className="card">
-            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 4, gap: 8 }}>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 4, gap: 8, flexWrap: "wrap" }}>
               <h3 className="section-title" style={{ margin: 0 }}>{th ? "เป้าหมาย vs. หลังปรับ" : "Target vs. after rebalance"}</h3>
               {targetMode === "hybrid" && (
                 <span style={{ fontSize: 10.5, color: "var(--gain)", fontWeight: 500 }}>💚 Hybrid mode</span>
@@ -1092,7 +1114,7 @@ export function ToolsPage({ t, lang, ccy, dataState, liveHoldings = [], prices =
               <div className="label-up" style={{ textAlign: "right", fontSize: 9 }}>{th ? "หลังปรับ" : "After"}</div>
               <div className="label-up" style={{ textAlign: "right", fontSize: 9 }}>{th ? "ส่วนต่าง" : "Diff"}</div>
             </div>
-            <div>
+            <div style={{ overflowX: "auto" }}>
               {suggestions.map(s => {
                 const tradeDelta = tradeDeltas[s.name] || 0
                 const after = newTotal > 0 ? (s.current + tradeDelta) / newTotal * 100 : 0
@@ -1291,6 +1313,7 @@ export function ToolsPage({ t, lang, ccy, dataState, liveHoldings = [], prices =
                 </p>
               </div>
             ) : (
+              <div style={{ overflowX: "auto" }}>
               <table className="table">
                 <thead>
                   <tr>
@@ -1299,6 +1322,7 @@ export function ToolsPage({ t, lang, ccy, dataState, liveHoldings = [], prices =
                     <th className="num">{t.portfolio.shares}</th>
                     <th className="num">{th ? "ราคา" : "Price"}</th>
                     <th className="num">{th ? "จำนวนเงิน" : "Amount"}</th>
+                    <th className="num" title={th ? "กำไร/ขาดทุนที่ยังไม่รับรู้" : "Unrealized P/L"}>P/L%</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -1322,14 +1346,20 @@ export function ToolsPage({ t, lang, ccy, dataState, liveHoldings = [], prices =
                       <td className="num">{Number(tr.shares).toLocaleString(undefined, { maximumFractionDigits: 4 })}</td>
                       <td className="num">{FMT.moneyNative(tr.priceNative, tr.nativeCcy)}</td>
                       <td className="num" style={{ fontWeight: 500 }}>{FMT.money(tr.amount, ccy, { compact: true })}</td>
+                      <td className="num" style={{ fontSize: 11, color: tr.plPct == null ? "var(--muted)" : tr.plPct >= 0 ? "var(--gain)" : "var(--loss)", fontWeight: tr.plPct != null ? 500 : 400 }}>
+                        {tr.plPct != null
+                          ? <>{tr.plPct >= 0 ? "+" : ""}{tr.plPct}%{tr.action === "Sell" && tr.plPct < 0 ? <span title={th ? "ขายขาดทุน = ลด tax" : "Selling at a loss = tax benefit"} style={{ marginLeft: 3 }}>💸</span> : null}</>
+                          : "—"}
+                      </td>
                     </tr>
                   ))}
                   <tr style={{ background: "var(--bg)", fontWeight: 500 }}>
-                    <td colSpan="4"><span className="label-up">{th ? "เงินสดคงเหลือ" : "Cash remaining"}</span></td>
+                    <td colSpan="5"><span className="label-up">{th ? "เงินสดคงเหลือ" : "Cash remaining"}</span></td>
                     <td className="num">{FMT.money(cashRemaining, ccy, { compact: true })}</td>
                   </tr>
                 </tbody>
               </table>
+              </div>
             )}
             <div style={{ display: "flex", gap: 8, marginTop: 16, justifyContent: "space-between", flexWrap: "wrap" }}>
               <button className="btn btn-outline btn-sm" onClick={() => { saveLastRebalance(); setLastRebalance(new Date()); setShowResult(false) }} disabled={!showResult || trades.length === 0}>

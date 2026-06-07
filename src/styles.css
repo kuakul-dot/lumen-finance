@@ -605,6 +605,8 @@ hr.rule { border: 0; border-top: 1px solid var(--line); margin: 24px 0; }
   /* Compress larger grids on iPad */
   .grid-4 { grid-template-columns: repeat(2, 1fr); }
   .grid-3 { grid-template-columns: repeat(2, 1fr); }
+  .grid-12 { grid-template-columns: 1fr; }
+  [class*="col-span-"] { grid-column: 1 / -1 !important; }
 
   /* Page header smaller on tablet */
   .page-head h1 { font-size: 32px; }
