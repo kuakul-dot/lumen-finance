@@ -1,4 +1,4 @@
-import { useState, useMemo, useEffect } from 'react'
+import { useState, useMemo, useEffect, useRef } from 'react'
 import { PageHead, Icon, TickerLogo } from './Nav'
 import { AiAnalysisModal } from './AiModal'
 import { CalcInput } from './CalcInput'
@@ -133,7 +133,7 @@ export function ToolsPage({ t, lang, ccy, dataState, liveHoldings = [], prices =
   const th = lang === "th"
 
   const [mode,       setMode]       = useState("deposit")
-  const [amount,     setAmount]     = useState(() => ccy === 'USD' ? "1400" : "50000")
+  const [amount,     setAmount]     = useState("50000")
   const [allowSales, setAllowSales] = useState(false)
   const [showResult, setShowResult] = useState(false)
   const [rulesOpen,  setRulesOpen]  = useState(false)
@@ -163,6 +163,20 @@ export function ToolsPage({ t, lang, ccy, dataState, liveHoldings = [], prices =
     next.has(name) ? next.delete(name) : next.add(name)
     return next
   })
+
+  // Reset amount when display currency switches (avoid showing ฿50,000 as "$50,000")
+  const prevCcy = useRef(ccy)
+  useEffect(() => {
+    if (prevCcy.current === ccy) return
+    const oldCcy = prevCcy.current
+    prevCcy.current = ccy
+    const cur = parseFloat(amount) || 0
+    // Convert existing amount from old ccy to new ccy
+    const inTHB  = oldCcy === 'USD' ? cur * fxRate : cur
+    const newAmt = ccy  === 'USD' ? Math.round(inTHB / fxRate) : Math.round(inTHB)
+    setAmount(String(newAmt || (ccy === 'USD' ? Math.round(50000 / fxRate) : 50000)))
+    setShowResult(false)
+  }, [ccy])
 
   // Persist to localStorage
   useEffect(() => { saveTargets(targets) }, [targets])
@@ -847,10 +861,11 @@ export function ToolsPage({ t, lang, ccy, dataState, liveHoldings = [], prices =
             </div>
             <div style={{ display: "flex", gap: 6, marginTop: 10, flexWrap: "wrap" }}>
               {[10000, 25000, 50000, 100000].map(qTHB => {
-                const q = ccy === 'USD' ? Math.round(qTHB / fxRate) : qTHB
+                // Amount field is in display ccy; convert THB preset to ccy for setAmount
+                const qAmt = ccy === 'USD' ? Math.round(qTHB / fxRate) : qTHB
                 return (
-                  <button key={qTHB} className="chip" style={{ cursor: "pointer" }} onClick={() => { setAmount(String(q)); setShowResult(false) }}>
-                    {FMT.money(q, ccy, { compact: true })}
+                  <button key={qTHB} className="chip" style={{ cursor: "pointer" }} onClick={() => { setAmount(String(qAmt)); setShowResult(false) }}>
+                    {FMT.money(qTHB, ccy, { compact: true })}
                   </button>
                 )
               })}
