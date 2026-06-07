@@ -773,6 +773,12 @@ function LiveDashboardPage({ t, lang, ccy, setRoute, liveHoldings, prices = {}, 
           return { x: idx, y: val, label: mkLabel(new Date(ts * 1000)) }
         }).filter(p => p.y > 50)   // drop near-zero points before first purchase
 
+        // Anchor last point to live INVESTED value so chart tip = INVESTED display
+        // (history API returns yesterday's close; live quote may differ intraday)
+        if (seriesData.length > 0 && totalValue > 0) {
+          seriesData[seriesData.length - 1].y = totalValue
+        }
+
         if (seriesData.length >= 2) {
           return [{ name: th ? "มูลค่าพอร์ต" : "Portfolio value", color: "var(--ink)", fill: true, data: seriesData }]
         }
