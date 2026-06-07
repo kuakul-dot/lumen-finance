@@ -449,6 +449,9 @@ function LivePortfolioPage({ t, lang, ccy, portfolio, liveHoldings, prices = {},
         <button className={tab === "transactions" ? "on" : ""} onClick={() => setTab("transactions")}>
           {th ? "ธุรกรรม" : "Transactions"}
         </button>
+        <button className={tab === "rebalance" ? "on" : ""} onClick={() => setTab("rebalance")}>
+          {th ? "ปรับสมดุล" : "Rebalance"}
+        </button>
       </div>
 
       {tab === "transactions" ? (
@@ -457,6 +460,8 @@ function LivePortfolioPage({ t, lang, ccy, portfolio, liveHoldings, prices = {},
         <CashTab lang={lang} ccy={ccy} portfolioId={portfolio?.id} cashAccounts={cashAccounts} refreshCashAccounts={refreshCashAccounts} fxRate={fxRate} />
       ) : tab === "categories" ? (
         <CategoriesTab rows={rows} lang={lang} ccy={ccy} fxRate={fxRate} />
+      ) : tab === "rebalance" ? (
+        <RebalanceTab rows={rows} lang={lang} ccy={ccy} fxRate={fxRate} />
       ) : rows.length === 0 ? (
         <div className="card empty">
           <h2 className="display" style={{ fontSize: 28, margin: 0 }}>
@@ -952,6 +957,300 @@ const SECTORS = [
   { value: "Crypto",            th: "คริปโตเคอร์เรนซี",      en: "Crypto" },
   { value: "Other",             th: "อื่นๆ",                 en: "Other" },
 ]
+
+// ─── Rebalancing Tool ────────────────────────────────────────────────────────
+function RebalanceTab({ rows, lang, ccy, fxRate }) {
+  const th = lang === 'th'
+  const allGrouped = useMemo(() => groupByTicker(rows), [rows])
+
+  // Targets: { [ticker]: string } — string to allow partial input while typing
+  const [targets, setTargets] = useState(() => {
+    try { return JSON.parse(localStorage.getItem('lumen_targets_v1') || '{}') } catch { return {} }
+  })
+  const [extraCashInput, setExtraCashInput] = useState('')
+  const [buyOnly, setBuyOnly] = useState(false)
+
+  // Persist targets
+  useEffect(() => {
+    localStorage.setItem('lumen_targets_v1', JSON.stringify(targets))
+  }, [targets])
+
+  const ccySym = ccy === 'USD' ? '$' : '฿'
+
+  // Extra cash converted to THB for internal calculations
+  const extraCashTHB = useMemo(() => {
+    const v = parseFloat(extraCashInput) || 0
+    return ccy === 'USD' ? v * fxRate : v
+  }, [extraCashInput, ccy, fxRate])
+
+  const totalPortValue = useMemo(() => allGrouped.reduce((s, r) => s + r.value, 0), [allGrouped])
+  const totalWithCash  = totalPortValue + extraCashTHB
+
+  const targetSum = useMemo(() =>
+    allGrouped.reduce((s, r) => s + (parseFloat(targets[r.ticker]) || 0), 0)
+  , [allGrouped, targets])
+
+  const hasTargets = allGrouped.some(r => targets[r.ticker] !== undefined && targets[r.ticker] !== '')
+
+  // Build rebalance rows
+  const rebalRows = useMemo(() => {
+    return allGrouped.map(r => {
+      const currentPct  = totalPortValue > 0 ? (r.value / totalPortValue) * 100 : 0
+      const rawTarget   = targets[r.ticker]
+      const targetPct   = rawTarget !== undefined && rawTarget !== '' ? parseFloat(rawTarget) || 0 : currentPct
+      const targetValue = totalWithCash * targetPct / 100
+      let   diffValue   = targetValue - r.value          // THB
+      if (buyOnly) diffValue = Math.max(0, diffValue)
+
+      // Price per share in THB (used for share estimate)
+      const priceTHB =
+        (r.nativeCcy === 'USD' || r.region === 'US')
+          ? (r.priceNative || 0) * fxRate
+          : r.priceNative > 0
+            ? r.priceNative
+            : r.shares > 0 ? r.value / r.shares : 0  // implied from value/shares as fallback
+
+      const shareDecimals = r.cls === 'Crypto' ? 4 : r.region === 'US' ? 1 : 0
+      const diffShares    = priceTHB > 0 ? diffValue / priceTHB : 0
+
+      const THRESH = Math.max(100, totalPortValue * 0.0005)  // ฿100 or 0.05% of portfolio
+      const action  = Math.abs(diffValue) < THRESH ? 'hold' : diffValue > 0 ? 'buy' : 'sell'
+
+      // Values in display currency
+      const toDisplay = (v) => ccy === 'USD' ? v / fxRate : v
+
+      return {
+        ...r,
+        currentPct,
+        targetPct,
+        diffValue,
+        diffShares,
+        action,
+        shareDecimals,
+        valueDisplay:       toDisplay(r.value),
+        targetValueDisplay: toDisplay(targetValue),
+        diffDisplay:        toDisplay(diffValue),
+      }
+    }).sort((a, b) => b.valueDisplay - a.valueDisplay)
+  }, [allGrouped, targets, totalPortValue, totalWithCash, buyOnly, fxRate, ccy])
+
+  const buyRows  = rebalRows.filter(r => r.action === 'buy')
+  const sellRows = rebalRows.filter(r => r.action === 'sell')
+  const totalBuyDisplay  = buyRows.reduce((s, r) => s + r.diffDisplay, 0)
+  const totalSellDisplay = sellRows.reduce((s, r) => s + Math.abs(r.diffDisplay), 0)
+
+  const setTarget = (ticker, val) => setTargets(prev => ({ ...prev, [ticker]: val }))
+
+  const fillFromCurrent = () => {
+    const t = {}
+    allGrouped.forEach(r => {
+      const pct = totalPortValue > 0 ? (r.value / totalPortValue) * 100 : 0
+      t[r.ticker] = pct.toFixed(1)
+    })
+    setTargets(t)
+  }
+
+  const resetTargets = () => {
+    setTargets({})
+    localStorage.removeItem('lumen_targets_v1')
+  }
+
+  const fmtAmt = (v) => Math.abs(v).toLocaleString('en-US', { maximumFractionDigits: 0 })
+
+  return (
+    <div>
+      {/* ── Controls ── */}
+      <div style={{ display: 'flex', gap: 10, alignItems: 'center', marginBottom: 14, flexWrap: 'wrap' }}>
+        {/* Extra cash */}
+        <div style={{ display: 'flex', alignItems: 'center', gap: 6, background: 'var(--card)', border: '1px solid var(--border)', borderRadius: 8, padding: '5px 10px' }}>
+          <span style={{ fontSize: 12, color: 'var(--muted)', whiteSpace: 'nowrap' }}>{th ? 'เงินเพิ่มเติม' : 'Extra cash'}</span>
+          <span style={{ fontFamily: 'var(--font-mono)', fontSize: 12 }}>{ccySym}</span>
+          <input
+            type="number"
+            min="0"
+            value={extraCashInput}
+            onChange={e => setExtraCashInput(e.target.value)}
+            placeholder="0"
+            style={{ width: 90, border: 'none', background: 'transparent', fontFamily: 'var(--font-mono)', fontSize: 12, outline: 'none', color: 'var(--fg)' }}
+          />
+        </div>
+
+        {/* Buy-only toggle */}
+        <label style={{ display: 'flex', alignItems: 'center', gap: 6, cursor: 'pointer', fontSize: 12, userSelect: 'none' }}>
+          <input type="checkbox" checked={buyOnly} onChange={e => setBuyOnly(e.target.checked)} style={{ cursor: 'pointer' }} />
+          {th ? 'ซื้ออย่างเดียว' : 'Buy only'}
+        </label>
+
+        {/* Helper buttons */}
+        <button
+          style={{ fontSize: 12, padding: '4px 10px', border: '1px solid var(--border)', borderRadius: 6, background: 'transparent', color: 'var(--fg)', cursor: 'pointer' }}
+          onClick={fillFromCurrent}
+        >
+          {th ? 'ใช้สัดส่วนปัจจุบัน' : 'Use current weights'}
+        </button>
+        {hasTargets && (
+          <button
+            style={{ fontSize: 12, padding: '4px 10px', border: '1px solid var(--border)', borderRadius: 6, background: 'transparent', color: 'var(--loss)', cursor: 'pointer' }}
+            onClick={resetTargets}
+          >
+            {th ? 'รีเซ็ต' : 'Reset'}
+          </button>
+        )}
+      </div>
+
+      {/* ── Target-sum warning ── */}
+      {hasTargets && Math.abs(targetSum - 100) > 0.5 && (
+        <div style={{ background: 'var(--bg-2, var(--card))', border: '1px solid rgba(245,158,11,0.55)', borderRadius: 8, padding: '7px 12px', marginBottom: 12, fontSize: 12, color: 'var(--fg)' }}>
+          ⚠{' '}
+          {th
+            ? `เป้าหมายรวม ${targetSum.toFixed(1)}% (ต้องเท่ากับ 100%)`
+            : `Target sum is ${targetSum.toFixed(1)}% — must equal 100%`}
+          {targetSum < 100 && (
+            <span style={{ marginLeft: 8, opacity: 0.8 }}>
+              ({th ? 'เหลือ' : 'remaining'} {(100 - targetSum).toFixed(1)}%)
+            </span>
+          )}
+        </div>
+      )}
+
+      {/* ── Table ── */}
+      <div style={{ overflowX: 'auto' }}>
+        <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13 }}>
+          <thead>
+            <tr style={{ borderBottom: '2px solid var(--border)', color: 'var(--muted)', fontSize: 11, textTransform: 'uppercase', letterSpacing: '0.04em' }}>
+              <th style={{ textAlign: 'left',   padding: '6px 6px 8px' }}>{th ? 'หลักทรัพย์' : 'Holding'}</th>
+              <th style={{ textAlign: 'right',  padding: '6px 6px 8px' }}>{th ? 'มูลค่า' : 'Value'}</th>
+              <th style={{ textAlign: 'right',  padding: '6px 6px 8px' }}>{th ? 'ปัจจุบัน' : 'Now %'}</th>
+              <th style={{ textAlign: 'right',  padding: '6px 6px 8px' }}>{th ? 'เป้าหมาย %' : 'Target %'}</th>
+              <th style={{ textAlign: 'center', padding: '6px 6px 8px' }}>{th ? 'คำแนะนำ' : 'Action'}</th>
+              <th style={{ textAlign: 'right',  padding: '6px 6px 8px' }}>{th ? 'จำนวนเงิน' : 'Amount'}</th>
+              <th style={{ textAlign: 'right',  padding: '6px 6px 8px' }}>{th ? '~หุ้น/หน่วย' : '~Shares'}</th>
+            </tr>
+          </thead>
+          <tbody>
+            {rebalRows.map(r => (
+              <tr key={r.ticker} style={{ borderBottom: '1px solid var(--border)', transition: 'background 0.1s' }}
+                onMouseEnter={e => e.currentTarget.style.background = 'var(--hover, rgba(128,128,128,0.06))'}
+                onMouseLeave={e => e.currentTarget.style.background = ''}
+              >
+                {/* Ticker + name */}
+                <td style={{ padding: '10px 6px' }}>
+                  <div style={{ fontWeight: 600, fontSize: 13 }}>{r.ticker}</div>
+                  <div style={{ fontSize: 11, color: 'var(--muted)', marginTop: 1, maxWidth: 140, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{r.name}</div>
+                </td>
+
+                {/* Current value */}
+                <td style={{ textAlign: 'right', padding: '10px 6px', fontFamily: 'var(--font-mono)', fontSize: 12 }}>
+                  {ccySym}{fmtAmt(r.valueDisplay)}
+                </td>
+
+                {/* Current % */}
+                <td style={{ textAlign: 'right', padding: '10px 6px', fontFamily: 'var(--font-mono)', fontSize: 12, color: 'var(--muted)' }}>
+                  {r.currentPct.toFixed(1)}%
+                </td>
+
+                {/* Target % input */}
+                <td style={{ textAlign: 'right', padding: '10px 6px' }}>
+                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'flex-end', gap: 3 }}>
+                    <input
+                      type="number"
+                      min="0" max="100" step="0.1"
+                      value={targets[r.ticker] ?? ''}
+                      placeholder={r.currentPct.toFixed(1)}
+                      onChange={e => setTarget(r.ticker, e.target.value)}
+                      style={{
+                        width: 58,
+                        textAlign: 'right',
+                        border: `1px solid ${targets[r.ticker] !== undefined && targets[r.ticker] !== '' ? 'var(--accent, #6366f1)' : 'var(--border)'}`,
+                        borderRadius: 5,
+                        padding: '3px 5px',
+                        fontFamily: 'var(--font-mono)',
+                        fontSize: 12,
+                        background: 'var(--bg)',
+                        color: 'var(--fg)',
+                        outline: 'none',
+                      }}
+                    />
+                    <span style={{ fontSize: 11, color: 'var(--muted)' }}>%</span>
+                  </div>
+                </td>
+
+                {/* Action badge */}
+                <td style={{ textAlign: 'center', padding: '10px 6px' }}>
+                  {r.action === 'buy'  && <span style={{ background: 'var(--gain)', color: '#fff', fontSize: 10, fontWeight: 700, padding: '3px 8px', borderRadius: 4, letterSpacing: '0.05em' }}>BUY</span>}
+                  {r.action === 'sell' && <span style={{ background: 'var(--loss)', color: '#fff', fontSize: 10, fontWeight: 700, padding: '3px 8px', borderRadius: 4, letterSpacing: '0.05em' }}>SELL</span>}
+                  {r.action === 'hold' && <span style={{ color: 'var(--muted)', fontSize: 12 }}>—</span>}
+                </td>
+
+                {/* Amount */}
+                <td style={{
+                  textAlign: 'right', padding: '10px 6px',
+                  fontFamily: 'var(--font-mono)', fontSize: 12, fontWeight: r.action !== 'hold' ? 600 : 400,
+                  color: r.action === 'buy' ? 'var(--gain)' : r.action === 'sell' ? 'var(--loss)' : 'var(--muted)'
+                }}>
+                  {r.action === 'hold' ? '—'
+                    : `${r.action === 'buy' ? '+' : '-'}${ccySym}${fmtAmt(r.diffDisplay)}`}
+                </td>
+
+                {/* Shares to trade */}
+                <td style={{ textAlign: 'right', padding: '10px 6px', fontFamily: 'var(--font-mono)', fontSize: 11, color: r.action !== 'hold' ? 'var(--fg)' : 'var(--muted)' }}>
+                  {r.action === 'hold' ? '—'
+                    : `${r.diffShares > 0 ? '+' : ''}${r.diffShares.toLocaleString('en-US', { maximumFractionDigits: r.shareDecimals, minimumFractionDigits: 0 })}`}
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+
+      {/* ── Summary footer ── */}
+      {(buyRows.length > 0 || sellRows.length > 0) && (
+        <div style={{ marginTop: 16, display: 'flex', gap: 20, flexWrap: 'wrap', padding: '12px 16px', background: 'var(--card)', borderRadius: 10, border: '1px solid var(--border)' }}>
+          {buyRows.length > 0 && (
+            <div>
+              <div style={{ fontSize: 11, color: 'var(--muted)', marginBottom: 3 }}>{th ? 'ซื้อทั้งหมด' : 'Total to buy'}</div>
+              <div style={{ fontFamily: 'var(--font-mono)', fontWeight: 700, fontSize: 15, color: 'var(--gain)' }}>
+                +{ccySym}{fmtAmt(totalBuyDisplay)}
+              </div>
+            </div>
+          )}
+          {sellRows.length > 0 && !buyOnly && (
+            <div>
+              <div style={{ fontSize: 11, color: 'var(--muted)', marginBottom: 3 }}>{th ? 'ขายทั้งหมด' : 'Total to sell'}</div>
+              <div style={{ fontFamily: 'var(--font-mono)', fontWeight: 700, fontSize: 15, color: 'var(--loss)' }}>
+                -{ccySym}{fmtAmt(totalSellDisplay)}
+              </div>
+            </div>
+          )}
+          {extraCashTHB > 0 && (
+            <div>
+              <div style={{ fontSize: 11, color: 'var(--muted)', marginBottom: 3 }}>{th ? 'เงินเพิ่มเติม' : 'Extra cash'}</div>
+              <div style={{ fontFamily: 'var(--font-mono)', fontWeight: 600, fontSize: 15 }}>
+                {ccySym}{fmtAmt(ccy === 'USD' ? extraCashTHB / fxRate : extraCashTHB)}
+              </div>
+            </div>
+          )}
+          {!buyOnly && buyRows.length > 0 && sellRows.length > 0 && (
+            <div style={{ borderLeft: '1px solid var(--border)', paddingLeft: 20 }}>
+              <div style={{ fontSize: 11, color: 'var(--muted)', marginBottom: 3 }}>{th ? 'สุทธิ' : 'Net cash'}</div>
+              <div style={{ fontFamily: 'var(--font-mono)', fontWeight: 700, fontSize: 15, color: (totalSellDisplay - totalBuyDisplay) >= 0 ? 'var(--gain)' : 'var(--loss)' }}>
+                {(totalSellDisplay - totalBuyDisplay) >= 0 ? '+' : ''}{ccySym}{Math.abs(totalSellDisplay - totalBuyDisplay).toLocaleString('en-US', { maximumFractionDigits: 0 })}
+              </div>
+            </div>
+          )}
+        </div>
+      )}
+
+      {!hasTargets && allGrouped.length > 0 && (
+        <p style={{ marginTop: 16, fontSize: 12, color: 'var(--muted)', textAlign: 'center' }}>
+          {th
+            ? '👆 กรอก % เป้าหมายในช่องด้านบน หรือกด "ใช้สัดส่วนปัจจุบัน" แล้วปรับแต่งตามต้องการ'
+            : '👆 Enter target % for each holding above, or click "Use current weights" to start from your current allocation'}
+        </p>
+      )}
+    </div>
+  )
+}
 
 // ─── Group holdings by ticker for aggregated display ────────────────────────
 function groupByTicker(rows) {
