@@ -1,9 +1,17 @@
-// Price Alert engine — localStorage-backed, browser Notification API
-// No backend needed. Alerts persist across sessions via localStorage.
+// Price Alert engine — localStorage cache + optional Supabase sync
+// When a user is logged in, alerts are persisted to Supabase so they
+// survive across devices. localStorage acts as a fast local cache.
+
+import { supabase } from './supabase'
 
 const KEY = 'lumen_alerts_v1'
 
-// ── CRUD ──────────────────────────────────────────────────────────────────────
+// Current logged-in user ID (set by App.jsx on session change)
+let _userId = null
+export function setAlertsUserId(id) { _userId = id }
+export function clearAlertsUserId() { _userId = null }
+
+// ── Local cache (localStorage) ────────────────────────────────────────────────
 export function loadAlerts() {
   try { return JSON.parse(localStorage.getItem(KEY) || '[]') } catch { return [] }
 }
@@ -13,6 +21,7 @@ function save(list) {
   window.dispatchEvent(new CustomEvent('lumen-alerts-changed'))
 }
 
+// ── CRUD ──────────────────────────────────────────────────────────────────────
 export function addAlert(data) {
   const id = Date.now().toString(36) + Math.random().toString(36).slice(2, 5)
   const alert = {
@@ -22,19 +31,75 @@ export function addAlert(data) {
     triggeredAt: null,
   }
   save([alert, ...loadAlerts()])
+  // Fire-and-forget sync to Supabase
+  if (_userId) _syncAdd(_userId, alert)
   return alert
 }
 
 export function removeAlert(id) {
   save(loadAlerts().filter(a => a.id !== id))
+  if (_userId) _syncRemove(_userId, id)
 }
 
 export function clearTriggered() {
+  const toRemove = loadAlerts().filter(a => a.triggered).map(a => a.id)
   save(loadAlerts().filter(a => !a.triggered))
+  if (_userId) toRemove.forEach(id => _syncRemove(_userId, id))
 }
 
 export function getActiveCount() {
   return loadAlerts().filter(a => a.active && !a.triggered).length
+}
+
+// ── Supabase bootstrap ─────────────────────────────────────────────────────────
+// Call once on login. Loads all alerts from Supabase → merges into localStorage.
+// Any local-only alerts (not yet synced) are pushed up to Supabase as well.
+export async function initAlertsFromSupabase(userId) {
+  if (!userId) return
+  try {
+    const { data, error } = await supabase
+      .from('price_alerts')
+      .select('*')
+      .eq('user_id', userId)
+      .order('created_at', { ascending: false })
+    if (error) { console.warn('[Alerts] init fetch:', error.message); return }
+
+    // Supabase rows → local alert shape
+    const remote = (data || []).map(r => ({
+      id:          r.local_id || r.id,
+      ticker:      r.ticker,
+      yahooSym:    r.yahoo_sym,
+      region:      r.region,
+      cls:         r.cls,
+      name:        r.name,
+      targetPrice: Number(r.target_price),
+      direction:   r.direction,
+      label:       r.label || '',
+      currency:    r.currency || 'THB',
+      livePrice:   r.live_price ? Number(r.live_price) : null,
+      active:      r.active,
+      triggered:   r.triggered,
+      createdAt:   r.created_at,
+      triggeredAt: r.triggered_at,
+    }))
+
+    const remoteIds = new Set(remote.map(a => a.id))
+
+    // Local alerts not yet in Supabase → push up
+    const localOnly = loadAlerts().filter(a => !remoteIds.has(a.id))
+    for (const a of localOnly) await _syncAdd(userId, a)
+
+    // Merge: Supabase wins for overlapping IDs (source of truth across devices)
+    const localOnlyMap = new Map(localOnly.map(a => [a.id, a]))
+    const merged = [
+      ...remote,
+      ...localOnly.filter(a => !remote.some(r => r.id === a.id)),
+    ]
+    save(merged)
+    setAlertsUserId(userId)
+  } catch (err) {
+    console.warn('[Alerts] initFromSupabase:', err.message)
+  }
 }
 
 // ── Notification permission ───────────────────────────────────────────────────
@@ -81,11 +146,57 @@ export function checkAndFireAlerts(prices) {
     if (hit) {
       count++
       fireNotif(a, px)
-      return { ...a, triggered: true, active: false, triggeredAt: new Date().toISOString() }
+      const triggered = { ...a, triggered: true, active: false, triggeredAt: new Date().toISOString() }
+      // Sync triggered state to Supabase
+      if (_userId) _syncTrigger(_userId, triggered)
+      return triggered
     }
     return a
   })
 
   if (count > 0) save(updated)
   return count
+}
+
+// ── Supabase sync helpers (fire-and-forget) ───────────────────────────────────
+async function _syncAdd(userId, alert) {
+  try {
+    await supabase.from('price_alerts').upsert({
+      user_id:      userId,
+      local_id:     alert.id,
+      ticker:       alert.ticker      || '',
+      yahoo_sym:    alert.yahooSym    || alert.ticker,
+      region:       alert.region      || null,
+      cls:          alert.cls         || null,
+      name:         alert.name        || null,
+      target_price: alert.targetPrice,
+      direction:    alert.direction,
+      label:        alert.label       || '',
+      currency:     alert.currency    || 'THB',
+      live_price:   alert.livePrice   || null,
+      active:       alert.active,
+      triggered:    alert.triggered,
+      triggered_at: alert.triggeredAt || null,
+    }, { onConflict: 'user_id,local_id' })
+  } catch (err) {
+    console.warn('[Alerts] syncAdd:', err.message)
+  }
+}
+
+async function _syncRemove(userId, localId) {
+  try {
+    await supabase.from('price_alerts')
+      .delete()
+      .eq('user_id', userId)
+      .eq('local_id', localId)
+  } catch {}
+}
+
+async function _syncTrigger(userId, alert) {
+  try {
+    await supabase.from('price_alerts')
+      .update({ active: false, triggered: true, triggered_at: alert.triggeredAt })
+      .eq('user_id', userId)
+      .eq('local_id', alert.id)
+  } catch {}
 }

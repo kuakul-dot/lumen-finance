@@ -3,6 +3,7 @@ import { PageHead, Icon, TickerLogo } from './Nav'
 import { TradingViewChart } from './TradingViewChart'
 import { LWChart } from './LWChart'
 import { fetchHistory, fetchPrices, toYahooSymbol } from '../lib/prices'
+import { getWatchlist, addWatchlistItem, updateWatchlistNote, removeWatchlistItem, migrateLocalWatchlist } from '../lib/watchlistDb'
 
 const WATCHLIST_KEY = 'lumen_watchlist_v1'
 
@@ -1294,10 +1295,12 @@ function EmptyState({ th, onAdd }) {
 }
 
 // ── Main page ─────────────────────────────────────────────────────────────────
-export function WatchlistPage({ lang, ccy, fxRate = 36 }) {
-  const th = lang === 'th'
+export function WatchlistPage({ lang, ccy, fxRate = 36, session }) {
+  const th     = lang === 'th'
+  const userId = session?.user?.id || null
 
-  const [items,          setItems]          = useState(loadList)
+  const [items,          setItems]          = useState([])
+  const [loadingList,    setLoadingList]    = useState(true)   // initial list fetch
   const [prices,         setPrices]         = useState({})
   const [histories,      setHistories]      = useState({})   // yahooSymbol → bars [{t,o,h,l,c,v}]
   const [expandedKey,    setExpandedKey]    = useState(null) // `${symbol}:${region}` of open chart
@@ -1306,8 +1309,39 @@ export function WatchlistPage({ lang, ccy, fxRate = 36 }) {
   // Fullscreen state — stored at page level so modal renders outside the grid
   const [fullscreenItem, setFullscreenItem] = useState(null) // null | { item, priceData, sr }
 
-  // Persist list to localStorage whenever it changes
-  useEffect(() => { saveList(items) }, [items])
+  // ── Load items: Supabase when logged in, localStorage otherwise ─────────────
+  useEffect(() => {
+    let cancelled = false
+    setLoadingList(true)
+    if (userId) {
+      getWatchlist(userId)
+        .then(async (list) => {
+          if (cancelled) return
+          // One-time migration: if Supabase is empty but localStorage has items
+          const local = loadList()
+          if (list.length === 0 && local.length > 0) {
+            await migrateLocalWatchlist(userId, local)
+            const migrated = await getWatchlist(userId)
+            if (!cancelled) setItems(migrated)
+          } else {
+            setItems(list)
+          }
+        })
+        .catch(() => {
+          if (!cancelled) setItems(loadList())  // fallback to localStorage on error
+        })
+        .finally(() => { if (!cancelled) setLoadingList(false) })
+    } else {
+      setItems(loadList())
+      setLoadingList(false)
+    }
+    return () => { cancelled = true }
+  }, [userId])
+
+  // Persist to localStorage when not logged in (localStorage is sole store)
+  useEffect(() => {
+    if (!userId) saveList(items)
+  }, [items, userId])
 
   // ── Fetch live prices for all watchlist items ───────────────────────────────
   const refreshPrices = useCallback(async () => {
@@ -1345,14 +1379,15 @@ export function WatchlistPage({ lang, ccy, fxRate = 36 }) {
     }
   }, [items])
 
-  // Refresh prices + histories whenever the list changes
+  // Refresh prices + histories whenever the list changes (skip while still loading)
   useEffect(() => {
+    if (loadingList) return
     refreshPrices()
     refreshHistories()
-  }, [refreshPrices, refreshHistories])
+  }, [refreshPrices, refreshHistories, loadingList])
 
   // ── Item management ─────────────────────────────────────────────────────────
-  const addItem = useCallback((newItem) => {
+  const addItem = useCallback(async (newItem) => {
     const dup = items.some(
       i => i.symbol.toUpperCase() === newItem.symbol.toUpperCase() && i.region === newItem.region
     )
@@ -1362,21 +1397,41 @@ export function WatchlistPage({ lang, ccy, fxRate = 36 }) {
         : `${newItem.symbol} (${newItem.region}) is already in your watchlist`)
       return
     }
-    setItems(prev => [...prev, newItem])
-  }, [items, th])
+    if (userId) {
+      try {
+        const saved = await addWatchlistItem(userId, newItem)
+        setItems(prev => [...prev, saved])
+      } catch (err) {
+        console.warn('[Watchlist] add failed, using local:', err.message)
+        setItems(prev => [...prev, newItem])
+      }
+    } else {
+      setItems(prev => [...prev, newItem])
+    }
+  }, [items, th, userId])
 
-  const removeItem = useCallback((idx) => {
+  const removeItem = useCallback(async (idx) => {
     const item = items[idx]
+    // Optimistic UI update first
     setItems(prev => prev.filter((_, i) => i !== idx))
     if (item) {
       const key = `${item.symbol}:${item.region}`
       setExpandedKey(prev => prev === key ? null : prev)
     }
-  }, [items])
+    // Then sync to Supabase
+    if (userId && item?.id) {
+      removeWatchlistItem(item.id).catch(() => {})
+    }
+  }, [items, userId])
 
   const updateNote = useCallback((idx, note) => {
-    setItems(prev => prev.map((item, i) => i === idx ? { ...item, note } : item))
-  }, [])
+    const item = items[idx]
+    setItems(prev => prev.map((it, i) => i === idx ? { ...it, note } : it))
+    // Fire-and-forget Supabase sync
+    if (userId && item?.id) {
+      updateWatchlistNote(item.id, note).catch(() => {})
+    }
+  }, [items, userId])
 
   return (
     <div className="shell fade-in" data-screen-label="Watchlist">
@@ -1388,9 +1443,18 @@ export function WatchlistPage({ lang, ccy, fxRate = 36 }) {
           : 'Track stocks with auto-computed support & resistance levels'}
         right={
           <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-            {loadingPrices && (
+            {/* Sync status indicator */}
+            {userId && (
+              <span style={{ fontSize: 11, color: 'var(--gain)', display: 'flex', alignItems: 'center', gap: 4 }}>
+                <svg width="8" height="8" viewBox="0 0 8 8"><circle cx="4" cy="4" r="3.5" fill="var(--gain)" /></svg>
+                {th ? 'ซิงค์แล้ว' : 'Synced'}
+              </span>
+            )}
+            {(loadingList || loadingPrices) && (
               <span style={{ fontSize: 12, color: 'var(--ink-3)' }}>
-                {th ? 'กำลังดึงราคา…' : 'Fetching prices…'}
+                {loadingList
+                  ? (th ? 'กำลังโหลด…' : 'Loading…')
+                  : (th ? 'กำลังดึงราคา…' : 'Fetching prices…')}
               </span>
             )}
             <button className="btn" onClick={() => setShowAdd(true)}
@@ -1402,7 +1466,11 @@ export function WatchlistPage({ lang, ccy, fxRate = 36 }) {
         }
       />
 
-      {items.length === 0 ? (
+      {loadingList ? (
+        <div style={{ textAlign: 'center', padding: '72px 24px', color: 'var(--ink-3)', fontSize: 14 }}>
+          {th ? '⏳ กำลังโหลดรายการ…' : '⏳ Loading watchlist…'}
+        </div>
+      ) : items.length === 0 ? (
         <EmptyState th={th} onAdd={() => setShowAdd(true)} />
       ) : (
         <>
@@ -1422,7 +1490,7 @@ export function WatchlistPage({ lang, ccy, fxRate = 36 }) {
           </div>
 
           {/* Card grid — max 3 columns, min 320px each */}
-          <div style={{
+          <div className="watchlist-grid" style={{
             display: 'grid',
             gridTemplateColumns: 'repeat(auto-fill, minmax(320px, 1fr))',
             gap: 'var(--gap)',
@@ -1457,6 +1525,11 @@ export function WatchlistPage({ lang, ccy, fxRate = 36 }) {
             {th
               ? 'แนวรับ-แนวต้านคำนวณจาก pivot point ของ 6 เดือนย้อนหลัง · ราคาจาก Yahoo Finance'
               : 'S/R levels computed from 6-month OHLC pivot points · Prices via Yahoo Finance'}
+            {userId && (
+              <span style={{ marginLeft: 8, color: 'var(--ink-3)' }}>
+                · {th ? 'ซิงค์กับ Cloud — เปิดได้ทุกอุปกรณ์' : 'Cloud sync — available on all your devices'}
+              </span>
+            )}
           </p>
         </>
       )}

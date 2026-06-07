@@ -597,10 +597,24 @@ hr.rule { border: 0; border-top: 1px solid var(--line); margin: 24px 0; }
 /* ─── Bottom nav (mobile) ─── */
 .bottom-nav { display: none; }
 
+/* ─── Tablet / iPad (769px – 1024px) ────────────────────────────────────────── */
+@media (min-width: 769px) and (max-width: 1024px) {
+  .shell, .shell-narrow { padding: 24px 28px 80px; }
+  .topnav-inner { padding: 0 24px; gap: 12px; }
+
+  /* Compress larger grids on iPad */
+  .grid-4 { grid-template-columns: repeat(2, 1fr); }
+  .grid-3 { grid-template-columns: repeat(2, 1fr); }
+
+  /* Page header smaller on tablet */
+  .page-head h1 { font-size: 32px; }
+  .section-title { font-size: 20px; }
+}
+
 /* ─── Mobile responsive ─────────────────────────────────────────────────── */
 @media (max-width: 768px) {
   .shell, .shell-narrow { padding: 16px 16px 88px; }
-  .topnav-inner { padding: 0 16px; gap: 8px; height: 56px; }
+  .topnav-inner { padding: 0 14px; gap: 6px; height: 56px; }
   .nav-links { display: none; }
   .icon-btn { display: none; }
 
@@ -629,6 +643,9 @@ hr.rule { border: 0; border-top: 1px solid var(--line); margin: 24px 0; }
   .card { border-radius: 10px; }
   .card .display { word-break: break-word; }
 
+  /* Watchlist card grid — single column */
+  .watchlist-grid { grid-template-columns: 1fr !important; }
+
   /* Bottom navigation bar */
   .bottom-nav {
     display: flex;
@@ -647,7 +664,7 @@ hr.rule { border: 0; border-top: 1px solid var(--line); margin: 24px 0; }
     flex-direction: column;
     align-items: center;
     gap: 2px;
-    padding: 5px 4px;
+    padding: 6px 4px;
     color: var(--ink-4);
     font-size: 10px;
     font-weight: 500;
@@ -655,6 +672,7 @@ hr.rule { border: 0; border-top: 1px solid var(--line); margin: 24px 0; }
     border: none;
     cursor: pointer;
     transition: color 0.15s;
+    min-height: 44px;
   }
   .bottom-nav-item.active { color: var(--ink); }
   .bottom-nav-item.active svg { stroke: var(--ink); }
@@ -662,6 +680,15 @@ hr.rule { border: 0; border-top: 1px solid var(--line); margin: 24px 0; }
   /* Hero responsive */
   .hero-grid { grid-template-columns: 1fr !important; }
   .hero-num  { font-size: 44px !important; }
+}
+
+/* ─── Tiny phones (≤390px) ───────────────────────────────────────────────────── */
+@media (max-width: 390px) {
+  /* Hide currency + language pill-toggles from topnav on very small screens
+     (they remain accessible in the profile dropdown) */
+  .topnav-inner .pill-toggle { display: none; }
+  .shell, .shell-narrow { padding: 12px 12px 88px; }
+  .page-head h1 { font-size: 22px; }
 }
 
 /* Tooltip */

@@ -13,7 +13,7 @@ import { LUMEN_I18N, setLiveFxRate } from './data'
 import { supabase } from './lib/supabase'
 import { getOrCreatePortfolio, getPortfolios, addPortfolio, updatePortfolio, deletePortfolioCascade, getHoldingsSafe, getCashAccounts, deriveHoldings, recordSnapshot, exportData, addTransaction, rebuildAllHoldings, upsertCashAccount, upsertGoal } from './lib/db'
 import { fetchPrices, fetchFxRate, clearPriceCache } from './lib/prices'
-import { checkAndFireAlerts, getActiveCount } from './lib/alerts'
+import { checkAndFireAlerts, getActiveCount, setAlertsUserId, clearAlertsUserId, initAlertsFromSupabase } from './lib/alerts'
 import { AlertsModal } from './components/AlertsModal'
 
 const TWEAK_DEFAULTS = {
@@ -269,6 +269,14 @@ export default function App() {
   useEffect(() => {
     if (session?.user) {
       loadPortfolioData(session.user.id)
+      // Boot alerts from Supabase so they sync across devices
+      setAlertsUserId(session.user.id)
+      initAlertsFromSupabase(session.user.id).then(() => {
+        // Refresh badge count after Supabase load
+        setAlertCount(getActiveCount())
+      })
+    } else {
+      clearAlertsUserId()
     }
   }, [session?.user?.id])
 
@@ -470,7 +478,7 @@ export default function App() {
       />
     )
   } else if (route === "watchlist") {
-    page = <WatchlistPage lang={lang} ccy={ccy} fxRate={fxRate} />
+    page = <WatchlistPage lang={lang} ccy={ccy} fxRate={fxRate} session={session} />
   } else if (route === "dca") {
     page = <DCAPage lang={lang} ccy={ccy} fxRate={fxRate} />
   }
