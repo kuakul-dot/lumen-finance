@@ -1129,91 +1129,169 @@ export function ToolsPage({ t, lang, ccy, dataState, liveHoldings = [], prices =
               <div className="label-up" style={{ textAlign: "right", fontSize: 9 }}>{th ? "ส่วนต่าง" : "Diff"}</div>
             </div>
             <div style={{ overflowX: "auto" }}>
-              {suggestions.map(s => {
-                const tradeDelta = tradeDeltas[s.name] || 0
-                const after = newTotal > 0 ? (s.current + tradeDelta) / newTotal * 100 : 0
-                const before = s.curPct
-                const drift = before - s.tgtPct
-                const allHoldingRows = holdingDriftByClass[s.name] || []
-                const isExpanded = expandedClasses.has(s.name)
-                const holdingRows = isExpanded ? allHoldingRows : []
-                const hasHoldings = allHoldingRows.length > 0
-                return (
-                  <div key={s.name}>
-                    {/* Class row — click left side to open ฿ detail popup, click chevron to expand holdings */}
-                    <div style={{ display: "grid", gridTemplateColumns: "minmax(96px,150px) 42px 1fr 56px 60px 50px", alignItems: "center", gap: 10, padding: "5px 0", borderTop: "1px solid var(--line)" }}>
-                      <div
-                        onClick={() => hasHoldings ? toggleClassExpand(s.name) : setOpenRow(s)}
-                        style={{ fontSize: 12.5, fontWeight: 600, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", display: "flex", alignItems: "center", gap: 4, cursor: "pointer" }}>
-                        <ClassBadge name={s.name} />
-                        {hasHoldings && (
+              {targetMode === "hybrid" ? (
+                // ── HYBRID MODE: group by class → expandable per-ticker ──────────────
+                Object.entries(tickersByClass).filter(([cls]) => (targets[cls] || 0) > 0).map(([cls, tickers]) => {
+                  const clsSuggs    = tickers.map(tr => suggestions.find(s => s.name === tr.ticker)).filter(Boolean)
+                  const clsCurPct   = clsSuggs.reduce((a, s) => a + s.curPct, 0)
+                  const clsTgtPct   = (targets[cls] || 0) * 100
+                  const clsAfterPct = clsSuggs.reduce((a, s) => {
+                    const td = tradeDeltas[s.name] || 0
+                    return a + (newTotal > 0 ? (s.current + td) / newTotal * 100 : 0)
+                  }, 0)
+                  const clsDrift   = clsCurPct - clsTgtPct
+                  const isExpanded = expandedClasses.has(cls)
+                  return (
+                    <div key={cls}>
+                      {/* ── Class header row ─────────────────────────────────── */}
+                      <div onClick={() => toggleClassExpand(cls)}
+                        style={{ display: "grid", gridTemplateColumns: "minmax(96px,150px) 42px 1fr 56px 60px 50px", alignItems: "center", gap: 10, padding: "5px 0", borderTop: "1px solid var(--line)", cursor: "pointer" }}>
+                        <div style={{ fontSize: 12.5, fontWeight: 600, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", display: "flex", alignItems: "center", gap: 4 }}>
+                          <ClassBadge name={cls} />
                           <span style={{ fontSize: 10, color: "var(--ink-3)", marginLeft: 2, flexShrink: 0, transition: "transform 0.15s", display: "inline-block", transform: isExpanded ? "rotate(180deg)" : "rotate(0deg)" }}>▾</span>
-                        )}
+                        </div>
+                        <div className="mono muted" style={{ fontSize: 10.5 }}>→{clsTgtPct.toFixed(0)}%</div>
+                        <div style={{ position: "relative", height: 10 }}>
+                          <div style={{ position: "absolute", inset: 0, background: "var(--bg-2)", borderRadius: 999 }} />
+                          <div style={{ position: "absolute", height: "100%", background: "var(--ink-4)", width: Math.min(100, clsCurPct) + "%", opacity: 0.5, borderRadius: 999 }} />
+                          <div style={{ position: "absolute", height: "100%", background: "var(--accent)", width: Math.min(100, clsAfterPct) + "%", borderRadius: 999 }} />
+                          <div style={{ position: "absolute", top: -2, height: 14, width: 2, background: "var(--ink-2)", left: "calc(" + Math.min(100, clsTgtPct) + "% - 1px)" }} />
+                        </div>
+                        <div className="mono muted" style={{ fontSize: 10.5, textAlign: "right" }}>{clsCurPct.toFixed(1)}%</div>
+                        <div className="mono" style={{ fontSize: 10.5, textAlign: "right", fontWeight: 500 }}>{clsAfterPct.toFixed(1)}%</div>
+                        <div style={{ textAlign: "right" }}>
+                          {Math.abs(clsDrift) >= effectiveBand(clsTgtPct) ? (
+                            <span className={"chip " + (clsDrift > 0 ? "chip-loss" : "chip-gain")} style={{ fontSize: 9.5 }}>{clsDrift > 0 ? "+" : ""}{clsDrift.toFixed(1)}%</span>
+                          ) : Math.abs(clsDrift) > 0.5 ? (
+                            <span className="muted" style={{ fontSize: 9.5 }}>{clsDrift > 0 ? "+" : ""}{clsDrift.toFixed(1)}%</span>
+                          ) : null}
+                        </div>
                       </div>
-                      {/* remaining cells click → open ฿ popup */}
-                      <div className="mono muted" style={{ fontSize: 10.5, cursor: "pointer" }} onClick={() => setOpenRow(s)}>→{s.tgtPct.toFixed(0)}%</div>
-                      <div style={{ position: "relative", height: 10, cursor: "pointer" }} onClick={() => setOpenRow(s)}>
-                        <div style={{ position: "absolute", inset: 0, background: "var(--bg-2)", borderRadius: 999 }} />
-                        <div style={{ position: "absolute", height: "100%", background: "var(--ink-4)", width: Math.min(100, before) + "%", opacity: 0.5, borderRadius: 999 }} />
-                        <div style={{ position: "absolute", height: "100%", background: "var(--accent)", width: Math.min(100, after) + "%", borderRadius: 999 }} />
-                        <div style={{ position: "absolute", top: -2, height: 14, width: 2, background: "var(--ink-2)", left: "calc(" + Math.min(100, s.tgtPct) + "% - 1px)" }} />
-                      </div>
-                      <div className="mono muted" style={{ fontSize: 10.5, textAlign: "right", cursor: "pointer" }} onClick={() => setOpenRow(s)}>{before.toFixed(1)}%</div>
-                      <div className="mono" style={{ fontSize: 10.5, textAlign: "right", fontWeight: 500, cursor: "pointer" }} onClick={() => setOpenRow(s)}>{after.toFixed(1)}%</div>
-                      <div style={{ textAlign: "right", cursor: "pointer" }} onClick={() => setOpenRow(s)}>
-                        {Math.abs(drift) >= effectiveBand(s.tgtPct) ? (
-                          <span className={"chip " + (drift > 0 ? "chip-loss" : "chip-gain")} style={{ fontSize: 9.5 }}>
-                            {drift > 0 ? "+" : ""}{drift.toFixed(1)}%
-                          </span>
-                        ) : Math.abs(drift) > 0.5 ? (
-                          <span className="muted" style={{ fontSize: 9.5 }}>{drift > 0 ? "+" : ""}{drift.toFixed(1)}%</span>
-                        ) : null}
-                      </div>
-                    </div>
-                    {/* Holding sub-rows (accordion — visible when class is expanded) */}
-                    {holdingRows.map((h, hi) => {
-                      const hDrift = h.drift  // within-class drift
-                      const exceedsBand = Math.abs(hDrift) >= effectiveBand(h.tgtWithin)
-                      return (
-                        <div key={h.ticker}
-                          style={{ display: "grid", gridTemplateColumns: "minmax(96px,150px) 42px 1fr 56px 60px 50px", alignItems: "center", gap: 10, padding: "4px 0 4px 12px", background: "var(--bg-2)", borderTop: hi === 0 ? "none" : "1px solid var(--line)" }}>
-                          {/* Ticker name + logo + value */}
-                          <div style={{ display: "flex", alignItems: "center", gap: 7, minWidth: 0 }}>
-                            <div style={{ width: 3, height: 28, background: "var(--line)", borderRadius: 2, flexShrink: 0 }} />
-                            <TickerLogo ticker={h.ticker} logoUrl={h.logo_url} region={h.region} cls={h.cls} size={20} />
-                            <div style={{ minWidth: 0 }}>
-                              <div style={{ fontSize: 11.5, fontWeight: 500, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{h.ticker}</div>
-                              <div className="mono muted" style={{ fontSize: 9.5 }}>{FMT.money(h.value, ccy, { compact: true })}</div>
+                      {/* ── Per-ticker sub-rows (expand) ──────────────────────── */}
+                      {isExpanded && clsSuggs.map((s, si) => {
+                        const td   = tradeDeltas[s.name] || 0
+                        const aft  = newTotal > 0 ? (s.current + td) / newTotal * 100 : 0
+                        const drft = s.curPct - s.tgtPct
+                        const tr   = tickers.find(t => t.ticker === s.name)
+                        return (
+                          <div key={s.name} onClick={() => setOpenRow(s)} style={{ display: "grid", gridTemplateColumns: "minmax(96px,150px) 42px 1fr 56px 60px 50px", alignItems: "center", gap: 10, padding: "4px 0 4px 12px", background: "var(--bg-2)", borderTop: si === 0 ? "none" : "1px solid var(--line)", cursor: "pointer" }}>
+                            <div style={{ display: "flex", alignItems: "center", gap: 7, minWidth: 0 }}>
+                              <div style={{ width: 3, height: 28, background: "var(--line)", borderRadius: 2, flexShrink: 0 }} />
+                              <TickerLogo ticker={s.name} logoUrl={tr?.logo_url} region={tr?.region} cls={tr?.cls} size={20} />
+                              <div style={{ minWidth: 0 }}>
+                                <div style={{ fontSize: 11.5, fontWeight: 500, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{s.name}</div>
+                                <div className="mono muted" style={{ fontSize: 9.5 }}>{FMT.money(s.current, ccy, { compact: true })}</div>
+                              </div>
+                            </div>
+                            <div className="mono muted" style={{ fontSize: 10 }}>→{s.tgtPct.toFixed(1)}%</div>
+                            <div style={{ position: "relative", height: 7 }}>
+                              <div style={{ position: "absolute", inset: 0, background: "var(--bg)", borderRadius: 999 }} />
+                              <div style={{ position: "absolute", height: "100%", background: drft > 0 ? "var(--loss)" : "var(--gain)", opacity: 0.6, width: Math.min(100, clsTgtPct > 0 ? s.curPct / clsTgtPct * 100 : 0) + "%", borderRadius: 999 }} />
+                              <div style={{ position: "absolute", top: -1, height: 9, width: 2, background: "var(--ink-3)", left: "calc(" + Math.min(100, clsTgtPct > 0 ? s.tgtPct / clsTgtPct * 100 : 0) + "% - 1px)" }} />
+                            </div>
+                            <div className="mono muted" style={{ fontSize: 10, textAlign: "right" }}>{s.curPct.toFixed(1)}%</div>
+                            <div className="mono muted" style={{ fontSize: 10, textAlign: "right" }}>{aft.toFixed(1)}%</div>
+                            <div style={{ textAlign: "right" }}>
+                              {Math.abs(drft) >= effectiveBand(s.tgtPct) ? (
+                                <span className={"chip " + (drft > 0 ? "chip-loss" : "chip-gain")} style={{ fontSize: 9 }}>{drft > 0 ? "+" : ""}{drft.toFixed(1)}%</span>
+                              ) : (
+                                <span style={{ fontSize: 9, color: "var(--ink-4)" }}>✓</span>
+                              )}
                             </div>
                           </div>
-                          {/* Within-class target — use 1 decimal to avoid rounding small holdings to 0% */}
-                          <div className="mono muted" style={{ fontSize: 10 }}>→{h.tgtWithin.toFixed(1)}%*</div>
-                          {/* Mini bar — within-class % */}
-                          <div style={{ position: "relative", height: 7 }}>
-                            <div style={{ position: "absolute", inset: 0, background: "var(--bg)", borderRadius: 999 }} />
-                            <div style={{ position: "absolute", height: "100%", background: hDrift > 0 ? "var(--loss)" : "var(--gain)", opacity: 0.6, width: Math.min(100, h.curWithin) + "%", borderRadius: 999 }} />
-                            <div style={{ position: "absolute", top: -1, height: 9, width: 2, background: "var(--ink-3)", left: "calc(" + Math.min(100, h.tgtWithin) + "% - 1px)" }} />
-                          </div>
-                          {/* Current within-class % */}
-                          <div className="mono muted" style={{ fontSize: 10, textAlign: "right" }}>{h.curWithin.toFixed(1)}%</div>
-                          {/* Portfolio % */}
-                          <div className="mono muted" style={{ fontSize: 10, textAlign: "right" }}>{h.curPct.toFixed(1)}%</div>
-                          {/* Drift badge — only if exceeds tolerance band */}
-                          <div style={{ textAlign: "right" }}>
-                            {exceedsBand ? (
-                              <span className={"chip " + (hDrift > 0 ? "chip-loss" : "chip-gain")} style={{ fontSize: 9 }}>
-                                {hDrift > 0 ? "+" : ""}{hDrift.toFixed(1)}%
-                              </span>
-                            ) : (
-                              <span style={{ fontSize: 9, color: "var(--ink-4)" }}>✓</span>
-                            )}
-                          </div>
+                        )
+                      })}
+                    </div>
+                  )
+                })
+              ) : (
+                // ── CLASS MODE: existing rendering ───────────────────────────────────
+                suggestions.map(s => {
+                  const tradeDelta = tradeDeltas[s.name] || 0
+                  const after = newTotal > 0 ? (s.current + tradeDelta) / newTotal * 100 : 0
+                  const before = s.curPct
+                  const drift = before - s.tgtPct
+                  const allHoldingRows = holdingDriftByClass[s.name] || []
+                  const isExpanded = expandedClasses.has(s.name)
+                  const holdingRows = isExpanded ? allHoldingRows : []
+                  const hasHoldings = allHoldingRows.length > 0
+                  return (
+                    <div key={s.name}>
+                      {/* Class row — click left side to open ฿ detail popup, click chevron to expand holdings */}
+                      <div style={{ display: "grid", gridTemplateColumns: "minmax(96px,150px) 42px 1fr 56px 60px 50px", alignItems: "center", gap: 10, padding: "5px 0", borderTop: "1px solid var(--line)" }}>
+                        <div
+                          onClick={() => hasHoldings ? toggleClassExpand(s.name) : setOpenRow(s)}
+                          style={{ fontSize: 12.5, fontWeight: 600, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", display: "flex", alignItems: "center", gap: 4, cursor: "pointer" }}>
+                          <ClassBadge name={s.name} />
+                          {hasHoldings && (
+                            <span style={{ fontSize: 10, color: "var(--ink-3)", marginLeft: 2, flexShrink: 0, transition: "transform 0.15s", display: "inline-block", transform: isExpanded ? "rotate(180deg)" : "rotate(0deg)" }}>▾</span>
+                          )}
                         </div>
-                      )
-                    })}
-                  </div>
-                )
-              })}
+                        {/* remaining cells click → open ฿ popup */}
+                        <div className="mono muted" style={{ fontSize: 10.5, cursor: "pointer" }} onClick={() => setOpenRow(s)}>→{s.tgtPct.toFixed(0)}%</div>
+                        <div style={{ position: "relative", height: 10, cursor: "pointer" }} onClick={() => setOpenRow(s)}>
+                          <div style={{ position: "absolute", inset: 0, background: "var(--bg-2)", borderRadius: 999 }} />
+                          <div style={{ position: "absolute", height: "100%", background: "var(--ink-4)", width: Math.min(100, before) + "%", opacity: 0.5, borderRadius: 999 }} />
+                          <div style={{ position: "absolute", height: "100%", background: "var(--accent)", width: Math.min(100, after) + "%", borderRadius: 999 }} />
+                          <div style={{ position: "absolute", top: -2, height: 14, width: 2, background: "var(--ink-2)", left: "calc(" + Math.min(100, s.tgtPct) + "% - 1px)" }} />
+                        </div>
+                        <div className="mono muted" style={{ fontSize: 10.5, textAlign: "right", cursor: "pointer" }} onClick={() => setOpenRow(s)}>{before.toFixed(1)}%</div>
+                        <div className="mono" style={{ fontSize: 10.5, textAlign: "right", fontWeight: 500, cursor: "pointer" }} onClick={() => setOpenRow(s)}>{after.toFixed(1)}%</div>
+                        <div style={{ textAlign: "right", cursor: "pointer" }} onClick={() => setOpenRow(s)}>
+                          {Math.abs(drift) >= effectiveBand(s.tgtPct) ? (
+                            <span className={"chip " + (drift > 0 ? "chip-loss" : "chip-gain")} style={{ fontSize: 9.5 }}>
+                              {drift > 0 ? "+" : ""}{drift.toFixed(1)}%
+                            </span>
+                          ) : Math.abs(drift) > 0.5 ? (
+                            <span className="muted" style={{ fontSize: 9.5 }}>{drift > 0 ? "+" : ""}{drift.toFixed(1)}%</span>
+                          ) : null}
+                        </div>
+                      </div>
+                      {/* Holding sub-rows (accordion — visible when class is expanded) */}
+                      {holdingRows.map((h, hi) => {
+                        const hDrift = h.drift  // within-class drift
+                        const exceedsBand = Math.abs(hDrift) >= effectiveBand(h.tgtWithin)
+                        return (
+                          <div key={h.ticker}
+                            style={{ display: "grid", gridTemplateColumns: "minmax(96px,150px) 42px 1fr 56px 60px 50px", alignItems: "center", gap: 10, padding: "4px 0 4px 12px", background: "var(--bg-2)", borderTop: hi === 0 ? "none" : "1px solid var(--line)" }}>
+                            {/* Ticker name + logo + value */}
+                            <div style={{ display: "flex", alignItems: "center", gap: 7, minWidth: 0 }}>
+                              <div style={{ width: 3, height: 28, background: "var(--line)", borderRadius: 2, flexShrink: 0 }} />
+                              <TickerLogo ticker={h.ticker} logoUrl={h.logo_url} region={h.region} cls={h.cls} size={20} />
+                              <div style={{ minWidth: 0 }}>
+                                <div style={{ fontSize: 11.5, fontWeight: 500, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{h.ticker}</div>
+                                <div className="mono muted" style={{ fontSize: 9.5 }}>{FMT.money(h.value, ccy, { compact: true })}</div>
+                              </div>
+                            </div>
+                            {/* Within-class target — use 1 decimal to avoid rounding small holdings to 0% */}
+                            <div className="mono muted" style={{ fontSize: 10 }}>→{h.tgtWithin.toFixed(1)}%*</div>
+                            {/* Mini bar — within-class % */}
+                            <div style={{ position: "relative", height: 7 }}>
+                              <div style={{ position: "absolute", inset: 0, background: "var(--bg)", borderRadius: 999 }} />
+                              <div style={{ position: "absolute", height: "100%", background: hDrift > 0 ? "var(--loss)" : "var(--gain)", opacity: 0.6, width: Math.min(100, h.curWithin) + "%", borderRadius: 999 }} />
+                              <div style={{ position: "absolute", top: -1, height: 9, width: 2, background: "var(--ink-3)", left: "calc(" + Math.min(100, h.tgtWithin) + "% - 1px)" }} />
+                            </div>
+                            {/* Current within-class % */}
+                            <div className="mono muted" style={{ fontSize: 10, textAlign: "right" }}>{h.curWithin.toFixed(1)}%</div>
+                            {/* Portfolio % */}
+                            <div className="mono muted" style={{ fontSize: 10, textAlign: "right" }}>{h.curPct.toFixed(1)}%</div>
+                            {/* Drift badge — only if exceeds tolerance band */}
+                            <div style={{ textAlign: "right" }}>
+                              {exceedsBand ? (
+                                <span className={"chip " + (hDrift > 0 ? "chip-loss" : "chip-gain")} style={{ fontSize: 9 }}>
+                                  {hDrift > 0 ? "+" : ""}{hDrift.toFixed(1)}%
+                                </span>
+                              ) : (
+                                <span style={{ fontSize: 9, color: "var(--ink-4)" }}>✓</span>
+                              )}
+                            </div>
+                          </div>
+                        )
+                      })}
+                    </div>
+                  )
+                })
+              )}
               {/* Totals row — sums of target/now/after across all classes */}
               {(() => {
                 const sumTgt = suggestions.reduce((s, x) => s + x.tgtPct, 0)
