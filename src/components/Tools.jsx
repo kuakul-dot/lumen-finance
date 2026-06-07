@@ -770,9 +770,7 @@ export function ToolsPage({ t, lang, ccy, dataState, liveHoldings = [], prices =
               <div style={{ display: "grid", gap: 6 }}>
                 {accountOptions.map(a => {
                   const checked = selectedAccountIds.has(a.id)
-                  const displayBal = ccy === 'USD' ? a.available / fxRate : a.available
-                  const displayTarget = ccy === 'USD' ? a.targetTHB / fxRate : a.targetTHB
-                  const displayBalFull = ccy === 'USD' ? a.balTHB / fxRate : a.balTHB
+                  // Always pass THB amounts to FMT.money — it handles ccy conversion internally
                   return (
                     <div
                       key={a.id}
@@ -805,9 +803,9 @@ export function ToolsPage({ t, lang, ccy, dataState, liveHoldings = [], prices =
                         <div style={{ fontSize: 10.5, color: "var(--ink-3)", marginTop: 1 }}>
                           {a.isEmergency
                             ? a.locked
-                              ? (th ? `ยอดฉุกเฉิน ฿${FMT.money(displayBalFull, ccy, { compact: true })} · ยังไม่เกินเป้า` : `Emergency ฿${FMT.money(displayBalFull, ccy, { compact: true })} · at/below target`)
-                              : (th ? `ส่วนเกินเป้า ${FMT.money(displayTarget, ccy, { compact: true })} = ฿${FMT.money(displayBal, ccy, { compact: true })}` : `Excess above target ${FMT.money(displayTarget, ccy, { compact: true })}`)
-                            : (th ? `ยอด ${FMT.money(displayBalFull, ccy, { compact: true })} · ลงทุนได้ทั้งหมด` : `Balance ${FMT.money(displayBalFull, ccy, { compact: true })} · fully investable`)
+                              ? (th ? `ยอดฉุกเฉิน ${FMT.money(a.balTHB, ccy, { compact: true })} · ยังไม่เกินเป้า` : `Emergency ${FMT.money(a.balTHB, ccy, { compact: true })} · at/below target`)
+                              : (th ? `ส่วนเกินเป้า ${FMT.money(a.targetTHB, ccy, { compact: true })} = ${FMT.money(a.available, ccy, { compact: true })}` : `Excess above target ${FMT.money(a.targetTHB, ccy, { compact: true })}`)
+                            : (th ? `ยอด ${FMT.money(a.balTHB, ccy, { compact: true })} · ลงทุนได้ทั้งหมด` : `Balance ${FMT.money(a.balTHB, ccy, { compact: true })} · fully investable`)
                           }
                         </div>
                       </div>
@@ -816,7 +814,7 @@ export function ToolsPage({ t, lang, ccy, dataState, liveHoldings = [], prices =
                         {a.locked
                           ? <span style={{ fontSize: 11, color: "var(--ink-4)", fontFamily: "var(--font-mono)" }}>—</span>
                           : <span style={{ fontSize: 13, fontWeight: 600, fontFamily: "var(--font-display)", color: checked ? "var(--accent-ink)" : "var(--ink)" }}>
-                              {FMT.money(displayBal, ccy, { compact: true })}
+                              {FMT.money(a.available, ccy, { compact: true })}
                             </span>
                         }
                       </div>
@@ -830,7 +828,7 @@ export function ToolsPage({ t, lang, ccy, dataState, liveHoldings = [], prices =
                   <div>
                     <div style={{ fontSize: 11, color: "oklch(0.45 0.10 200)" }}>{th ? "รวมที่เลือก" : "Total selected"}</div>
                     <div style={{ fontSize: 16, fontWeight: 700, fontFamily: "var(--font-display)", color: "oklch(0.35 0.12 200)" }}>
-                      {FMT.money(ccy === 'USD' ? selectedAvailableTHB / fxRate : selectedAvailableTHB, ccy, { compact: true })}
+                      {FMT.money(selectedAvailableTHB, ccy, { compact: true })}
                     </div>
                   </div>
                   <button className="btn btn-sm" style={{ background: "oklch(0.35 0.12 200)", color: "white", border: "none" }}
