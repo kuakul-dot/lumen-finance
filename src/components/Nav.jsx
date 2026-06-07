@@ -16,22 +16,9 @@ export function TickerLogo({ ticker = "", logoUrl, region, cls, size = 34 }) {
   // GoldTH — gold bar / ingot icon
   if (cls === 'GoldTH') {
     return (
-      <svg width={size} height={size} viewBox="0 0 40 40" style={{ flexShrink: 0, display: 'block' }}>
-        <defs>
-          <radialGradient id="gold-face" cx="38%" cy="32%" r="65%">
-            <stop offset="0%"   stopColor="oklch(0.98 0.10 96)" />
-            <stop offset="35%"  stopColor="oklch(0.88 0.20 88)" />
-            <stop offset="75%"  stopColor="oklch(0.76 0.18 83)" />
-            <stop offset="100%" stopColor="oklch(0.60 0.13 75)" />
-          </radialGradient>
-        </defs>
-        {/* rim */}
-        <circle cx="20" cy="20" r="19.5" fill="oklch(0.55 0.11 74)" />
-        {/* face */}
-        <circle cx="20" cy="20" r="17.5" fill="url(#gold-face)" />
-        {/* 金 character */}
-        <text x="20" y="26" textAnchor="middle" fontSize="16" fontWeight="700"
-              fill="oklch(0.44 0.12 72)" fontFamily="serif">金</text>
+      <svg width={size} height={size} viewBox="0 0 56 56" style={{ flexShrink: 0, display: 'block', borderRadius: 8 }}>
+        <path d="M0 0h56v56H0V0z" fill="#D69A00"/>
+        <path d="M21.248 21.555h13.784l-2.01-5.393a1.17 1.17 0 00-.41-.553l-11.364 5.946zm-.038-6.401C21.698 13.842 22.772 13 23.956 13h8.151c1.184 0 2.258.842 2.747 2.154l2.009 5.393c.603 1.618-.371 3.453-1.831 3.453h-14c-1.46 0-2.433-1.835-1.831-3.453l2.01-5.393h-.001zM10.235 35.555h13.757l-2.01-5.393a1.171 1.171 0 00-.41-.553l-11.337 5.946zm-.039-6.401C10.685 27.842 11.76 27 12.943 27h8.124c1.184 0 2.259.842 2.747 2.154l2.009 5.393c.603 1.618-.37 3.453-1.831 3.453H10.017c-1.46 0-2.433-1.835-1.83-3.453l2.01-5.393zm35.89 6.401h-13.85l11.43-5.945c.179.126.323.316.413.553l2.008 5.392zM34.945 27c-1.184 0-2.259.842-2.747 2.154l-2.009 5.393c-.603 1.618.37 3.453 1.831 3.453h14.067c1.46 0 2.433-1.835 1.83-3.453l-2.01-5.393C45.422 27.842 44.348 27 43.164 27h-8.22z" fill="#fff"/>
       </svg>
     )
   }
