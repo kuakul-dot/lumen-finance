@@ -661,9 +661,13 @@ export function deriveHoldings(holdings, currency = 'THB', prices = {}, fxRate =
 
     // Native (untransformed) price & cost — for per-share display columns
     const isGoldTH   = h.asset_class === 'GoldTH'
+    // nativeCcy: currency the LIVE PRICE is quoted in (USD for US stocks/crypto, THB for SET)
     const nativeCcy   = isGoldTH ? 'THB' : (priceData?.currency || (h.region === 'TH' ? 'THB' : 'USD'))
     const priceNative = isGoldTH ? currentPriceInTHB : (priceData?.price ?? h.cost_price)
-    const costNative  = isGoldTH ? costPriceInTHB : h.cost_price
+    // costNative: h.cost_price is stored in h.currency — use holdingCcy for display, not nativeCcy
+    // (e.g. user may have recorded BTC cost in THB even though BTC live price is in USD)
+    const costNative    = isGoldTH ? costPriceInTHB : h.cost_price
+    const costNativeCcy = isGoldTH ? 'THB' : holdingCcy  // correct currency for costNative display
 
     return {
       id: h.id,
@@ -675,9 +679,10 @@ export function deriveHoldings(holdings, currency = 'THB', prices = {}, fxRate =
       shares: h.shares,
       cost: costPriceInTHB,     // per-share cost in THB (used for groupByTicker avg)
       price: currentPriceInTHB, // per-share price in THB
-      priceNative,   // per-share price in native currency (USD for VOO, THB for .BK)
-      costNative,    // per-share cost  in native currency
-      nativeCcy,     // currency for priceNative / costNative display
+      priceNative,      // per-share price in native currency (USD for VOO, THB for .BK)
+      costNative,       // per-share cost in holdingCcy (NOT necessarily nativeCcy!)
+      costNativeCcy,    // currency symbol for costNative display
+      nativeCcy,        // currency for priceNative display
       value: currentValue,  // total current value in THB
       pl, plPct,            // P&L in THB
       weight: 0, // filled below

@@ -182,6 +182,17 @@ function LivePortfolioPage({ t, lang, ccy, portfolio, liveHoldings, prices = {},
   const annualDiv      = viewRows.reduce((s, r) => s + r.value * (r.divYield || 0) / 100, 0)
   const largestPos     = viewRows.length > 0 ? [...viewRows].sort((a, b) => b.value - a.value)[0] : null
 
+  // Portfolio-level 30D return: value-weighted average of individual stock 30D returns
+  const portfolio30dRet = useMemo(() => {
+    if (!viewRows.length || !Object.keys(spark30).length) return null
+    let num = 0, denom = 0
+    for (const r of viewRows) {
+      const sp = spark30[r.ticker?.toUpperCase()]
+      if (sp && Number.isFinite(sp.ret) && r.value > 0) { num += sp.ret * r.value; denom += r.value }
+    }
+    return denom > 0 ? num / denom : null
+  }, [viewRows, spark30])
+
   // Realized P/L for the current view (all sales when unfiltered). Sum from the
   // sales list — not from current holdings — so fully-sold positions still count.
   const realizedShown = useMemo(() => {
@@ -293,6 +304,7 @@ function LivePortfolioPage({ t, lang, ccy, portfolio, liveHoldings, prices = {},
       cls: r.cls,
       shares: r.shares,
       costNative: r.costNative,
+      costNativeCcy: r.costNativeCcy || r.currency || (r.region === 'US' ? 'USD' : 'THB'),
       priceNative: r.priceNative,
       nativeCcy: r.nativeCcy,
       valueTHB: Math.round(r.value),
@@ -579,14 +591,17 @@ function LivePortfolioPage({ t, lang, ccy, portfolio, liveHoldings, prices = {},
                             <div style={{ fontWeight: 500, fontFamily: "var(--font-mono)", fontSize: 13 }}>
                               {r.nativeCcy === 'USD' ? '$' : '฿'}{r.priceNative.toLocaleString(undefined, { maximumFractionDigits: 2 })}
                             </div>
-                            <div style={{ fontSize: 11, color: r.priceNative >= r.costNative ? "var(--gain)" : "var(--loss)", fontFamily: "var(--font-mono)" }}>
-                              {r.nativeCcy === 'USD' ? '$' : '฿'}{r.costNative.toLocaleString(undefined, { maximumFractionDigits: 2 })} {th ? "ทุน" : "cost"}
+                            {/* Use costNativeCcy (holdingCcy) — NOT nativeCcy (live price ccy).
+                                The stored cost may be in THB even for USD holdings (e.g. BTC bought in THB).
+                                Compare P/L in THB (r.pl) rather than priceNative vs costNative which may be in different currencies. */}
+                            <div style={{ fontSize: 11, color: (r.pl ?? 0) >= 0 ? "var(--gain)" : "var(--loss)", fontFamily: "var(--font-mono)" }}>
+                              {(r.costNativeCcy || r.nativeCcy) === 'USD' ? '$' : '฿'}{r.costNative.toLocaleString(undefined, { maximumFractionDigits: 2 })} {th ? "ทุน" : "cost"}
                             </div>
                           </>
                         ) : (
                           <>
                             <div style={{ fontFamily: "var(--font-mono)", fontSize: 13, color: "var(--ink-2)" }}>
-                              {r.nativeCcy === 'USD' ? '$' : '฿'}{r.costNative.toLocaleString(undefined, { maximumFractionDigits: 2 })}
+                              {(r.costNativeCcy || r.nativeCcy) === 'USD' ? '$' : '฿'}{r.costNative.toLocaleString(undefined, { maximumFractionDigits: 2 })}
                             </div>
                             <div className="muted" style={{ fontSize: 10 }}>{th ? "ราคาซื้อ" : "avg cost"}</div>
                           </>
@@ -685,10 +700,20 @@ function LivePortfolioPage({ t, lang, ccy, portfolio, liveHoldings, prices = {},
                 })}
                 <tr style={{ background: "var(--bg)", fontWeight: 500 }}>
                   <td style={{ paddingTop: 18, paddingBottom: 18 }}><span className="label-up">{t.portfolio.total}</span></td>
-                  <td></td>
+                  <td></td>{/* shares */}
+                  <td className="num hide-mob"></td>{/* price/cost — blank in total row */}
                   <td className="num">{LUMEN_FMT.money(totalCostBasis, ccy, { compact: true })}</td>
                   <td className="num" style={{ fontWeight: 600 }}>{LUMEN_FMT.money(totalValue, ccy, { compact: true })}</td>
-                  <td></td>
+                  {/* 30D — show portfolio-level weighted 30D return when data is available */}
+                  <td className="num">
+                    {portfolio30dRet != null ? (
+                      <span style={{ fontSize: 11, fontWeight: 600, color: portfolio30dRet >= 0 ? "var(--gain)" : "var(--loss)" }}>
+                        {portfolio30dRet >= 0 ? "+" : ""}{portfolio30dRet.toFixed(1)}%
+                      </span>
+                    ) : (
+                      <span className="muted" style={{ fontSize: 12 }}>—</span>
+                    )}
+                  </td>
                   <td className="num">
                     <span style={{ color: totalPL >= 0 ? "var(--gain)" : "var(--loss)" }}>
                       {totalPL >= 0 ? "+" : ""}{LUMEN_FMT.money(totalPL, ccy, { compact: true })}
