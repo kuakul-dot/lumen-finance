@@ -9,6 +9,7 @@ import { AiAnalysisModal } from './AiModal'
 import { useAiAnalysis } from '../lib/useAiAnalysis'
 import { TradingViewChart } from './TradingViewChart'
 import { SRPanel } from './SRPanel'
+import { AlertsModal } from './AlertsModal'
 import { CalcInput } from './CalcInput'
 
 export function PortfolioPage({ t, lang, ccy, setRoute, dataState, portfolio, liveHoldings = [], prices = {}, refreshHoldings, loadingData, dataError, retryLoad, fxRate = 36, cashAccounts = [], refreshCashAccounts, session }) {
@@ -102,6 +103,8 @@ function LivePortfolioPage({ t, lang, ccy, portfolio, liveHoldings, prices = {},
   const [notesHolding, setNotesHolding] = useState(null)   // raw holding row when notes modal is open
   // ── Chart / S/R modal ────────────────────────────────────────────────────
   const [chartHolding, setChartHolding] = useState(null)
+  // ── Alert modal ──────────────────────────────────────────────────────────
+  const [alertHolding, setAlertHolding] = useState(null)
   const [chartMode,    setChartMode]    = useState('sr')   // 'sr' | 'tv'
   // Reset to S/R tab whenever a new holding is opened
   useEffect(() => { if (chartHolding) setChartMode('sr') }, [chartHolding])
@@ -627,6 +630,16 @@ function LivePortfolioPage({ t, lang, ccy, portfolio, liveHoldings, prices = {},
                             style={{ background: "none", border: "none", cursor: "pointer", color: "var(--ink-3)", padding: "4px 6px", borderRadius: 6, lineHeight: 1, display: "inline-flex", alignItems: "center" }}
                             title={th ? "แนวรับ/ต้าน + กราฟ" : "S/R levels + chart"}
                           ><Icon name="chart" size={14} /></button>
+                          <button
+                            onClick={() => setAlertHolding(r)}
+                            style={{ background: "none", border: "none", cursor: "pointer", color: "var(--ink-3)", padding: "4px 6px", borderRadius: 6, lineHeight: 1, display: "inline-flex", alignItems: "center" }}
+                            title={th ? "ตั้งแจ้งเตือนราคา" : "Set price alert"}
+                          >
+                            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                              <path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9"/>
+                              <path d="M13.73 21a2 2 0 0 1-3.46 0"/>
+                            </svg>
+                          </button>
                           {aiAvailable && (
                             <button
                               onClick={() => analyzeHolding(r)}
@@ -742,6 +755,26 @@ function LivePortfolioPage({ t, lang, ccy, portfolio, liveHoldings, prices = {},
           onSaved={async () => { setNotesHolding(null); await refreshHoldings() }} />
       )}
 
+      {alertHolding && (() => {
+        const yahooSym  = toYahooSymbol(alertHolding.ticker, alertHolding.region, alertHolding.cls)
+        const priceData = prices[yahooSym]
+        return (
+          <AlertsModal
+            lang={lang}
+            onClose={() => setAlertHolding(null)}
+            prefill={{
+              ticker:    alertHolding.ticker,
+              name:      alertHolding.name,
+              region:    alertHolding.region,
+              cls:       alertHolding.cls,
+              yahooSym,
+              livePrice: priceData?.price ?? null,
+              currency:  priceData?.currency ?? (alertHolding.region === 'TH' ? 'THB' : 'USD'),
+            }}
+          />
+        )
+      })()}
+
       {chartHolding && (() => {
         const yahooSym  = toYahooSymbol(chartHolding.ticker, chartHolding.region, chartHolding.cls)
         const priceData = prices[yahooSym]
@@ -790,6 +823,7 @@ function LivePortfolioPage({ t, lang, ccy, portfolio, liveHoldings, prices = {},
               {chartMode === 'sr' ? (
                 <SRPanel
                   ticker={chartHolding.ticker}
+                  name={chartHolding.name}
                   region={chartHolding.region}
                   cls={chartHolding.cls}
                   livePrice={srLivePrice}

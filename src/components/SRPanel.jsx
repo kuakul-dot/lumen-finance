@@ -6,6 +6,7 @@
 import { useState, useEffect, useMemo } from 'react'
 import { LWChart } from './LWChart'
 import { fetchHistory, toYahooSymbol } from '../lib/prices'
+import { addAlert, requestNotifPermission } from '../lib/alerts'
 
 // ── S/R computation ───────────────────────────────────────────────────────────
 function computeSR(bars, current) {
@@ -262,12 +263,12 @@ function StrengthDots({ count, color }) {
 }
 
 // ── S/R Ladder ────────────────────────────────────────────────────────────────
-function SRLadder({ sr, livePrice, currency }) {
+function SRLadder({ sr, livePrice, currency, onSetAlert }) {
   if (!sr) return null
 
   const rowStyle = (isRes) => ({
     display: 'grid',
-    gridTemplateColumns: '32px 60px 1fr auto',
+    gridTemplateColumns: '32px 60px 1fr auto auto',
     alignItems: 'center',
     gap: 8,
     padding: '5px 0',
@@ -288,6 +289,11 @@ function SRLadder({ sr, livePrice, currency }) {
             <StrengthDots count={lvl.strength} color="var(--loss)" />
             <span style={{ fontFamily: 'var(--font-mono)', fontWeight: 500 }}>{fmtPrice(lvl.price, currency)}</span>
             <span style={{ fontSize: 10, opacity: 0.65, fontFamily: 'var(--font-mono)' }}>{distPct(lvl.price, livePrice)}</span>
+            {onSetAlert && (
+              <button onClick={() => onSetAlert(lvl.price, label, 'above')}
+                style={{ background: 'none', border: 'none', cursor: 'pointer', fontSize: 11, padding: '0 2px', opacity: 0.5, lineHeight: 1 }}
+                title={`Set alert at ${label}`}>🔔</button>
+            )}
           </div>
         )
       })}
@@ -311,6 +317,11 @@ function SRLadder({ sr, livePrice, currency }) {
           <StrengthDots count={lvl.strength} color="var(--gain)" />
           <span style={{ fontFamily: 'var(--font-mono)', fontWeight: 500 }}>{fmtPrice(lvl.price, currency)}</span>
           <span style={{ fontSize: 10, opacity: 0.65, fontFamily: 'var(--font-mono)' }}>{distPct(lvl.price, livePrice)}</span>
+          {onSetAlert && (
+            <button onClick={() => onSetAlert(lvl.price, `S${i + 1}`, 'below')}
+              style={{ background: 'none', border: 'none', cursor: 'pointer', fontSize: 11, padding: '0 2px', opacity: 0.5, lineHeight: 1 }}
+              title={`Set alert at S${i + 1}`}>🔔</button>
+          )}
         </div>
       ))}
     </div>
@@ -330,7 +341,7 @@ const RANGE_LABEL  = { '1mo': '1M', '3mo': '3M', '6mo': '6M', '1y': '1Y' }
 //   currency   — "THB" | "USD" (native currency of the Yahoo symbol)
 //   lang       — "th" | "en"
 //   chartHeight — height in px for LWChart (default 280)
-export function SRPanel({ ticker, region, cls, livePrice, currency, lang = 'en', chartHeight = 280 }) {
+export function SRPanel({ ticker, region, cls, livePrice, currency, lang = 'en', chartHeight = 280, name = '' }) {
   const th = lang === 'th'
 
   const [chartRange,   setChartRange]   = useState('6mo')
@@ -340,8 +351,28 @@ export function SRPanel({ ticker, region, cls, livePrice, currency, lang = 'en',
     fib: false, ma: false, vp: false, prevhl: false, round: false, vwap: false, bb: false,
   })
   const toggleOverlay = (key) => setOverlays(prev => ({ ...prev, [key]: !prev[key] }))
+  const [alertToast, setAlertToast] = useState(null)  // brief "Alert set" flash
 
   const yahooSym = toYahooSymbol(ticker || '', region || 'TH', cls || 'Equity')
+
+  // One-click alert from S/R level
+  const handleSetAlert = async (targetPrice, label, direction) => {
+    await requestNotifPermission()
+    addAlert({
+      ticker: ticker || '',
+      name: name || ticker || '',
+      region: region || 'TH',
+      cls: cls || 'Equity',
+      yahooSym,
+      targetPrice,
+      direction,
+      label,
+      currency: currency || 'THB',
+      livePrice: livePrice || null,
+    })
+    setAlertToast(th ? `✅ ตั้งแจ้งเตือน ${label} ที่ ${targetPrice}` : `✅ Alert set at ${label} (${targetPrice})`)
+    setTimeout(() => setAlertToast(null), 2500)
+  }
 
   // Fetch OHLC history whenever symbol or range changes
   useEffect(() => {
@@ -403,10 +434,19 @@ export function SRPanel({ ticker, region, cls, livePrice, currency, lang = 'en',
 
   return (
     <div>
+      {/* Alert toast */}
+      {alertToast && (
+        <div style={{
+          padding: '8px 14px', borderRadius: 8, marginBottom: 8, fontSize: 12, fontWeight: 500,
+          background: 'var(--gain-soft)', color: 'var(--gain)', border: '1px solid var(--gain)',
+          animation: 'fadeIn 0.15s ease',
+        }}>{alertToast}</div>
+      )}
+
       {/* S/R Ladder */}
       {livePrice != null ? (
         sr
-          ? <SRLadder sr={sr} livePrice={livePrice} currency={currency} />
+          ? <SRLadder sr={sr} livePrice={livePrice} currency={currency} onSetAlert={handleSetAlert} />
           : (
             <div style={{ fontSize: 12, color: 'var(--ink-3)', padding: '10px 0', textAlign: 'center', minHeight: 48, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
               {loading

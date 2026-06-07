@@ -13,6 +13,8 @@ import { LUMEN_I18N, setLiveFxRate } from './data'
 import { supabase } from './lib/supabase'
 import { getOrCreatePortfolio, getPortfolios, addPortfolio, updatePortfolio, deletePortfolioCascade, getHoldingsSafe, getCashAccounts, deriveHoldings, recordSnapshot, exportData, addTransaction, rebuildAllHoldings, upsertCashAccount, upsertGoal } from './lib/db'
 import { fetchPrices, fetchFxRate, clearPriceCache } from './lib/prices'
+import { checkAndFireAlerts, getActiveCount } from './lib/alerts'
+import { AlertsModal } from './components/AlertsModal'
 
 const TWEAK_DEFAULTS = {
   accent:  "oklch(0.55 0.06 175)",
@@ -76,6 +78,24 @@ export default function App() {
   const [loadingData, setLoadingData] = useState(false)
   const [dataError, setDataError] = useState(null)
   const [fxRate, setFxRate] = useState(36)    // live USD→THB rate
+
+  // ── Price Alerts ──────────────────────────────────────────────────────────────
+  const [alertCount,   setAlertCount]   = useState(() => getActiveCount())
+  const [alertsOpen,   setAlertsOpen]   = useState(false)
+
+  // Refresh badge when any component modifies alerts
+  useEffect(() => {
+    const h = () => setAlertCount(getActiveCount())
+    window.addEventListener('lumen-alerts-changed', h)
+    return () => window.removeEventListener('lumen-alerts-changed', h)
+  }, [])
+
+  // Check alerts every time prices update
+  useEffect(() => {
+    if (!prices || !Object.keys(prices).length) return
+    checkAndFireAlerts(prices)
+    setAlertCount(getActiveCount())
+  }, [prices])
 
   // Fetch FX rate on mount, then refresh every hour
   useEffect(() => {
@@ -473,6 +493,8 @@ export default function App() {
           onCreatePortfolio={createPortfolio}
           onRenamePortfolio={renamePortfolio}
           onDeletePortfolio={removePortfolio}
+          alertCount={alertCount}
+          onOpenAlerts={() => setAlertsOpen(true)}
         />
       ) : (
         <OnboardingNav
@@ -485,6 +507,10 @@ export default function App() {
 
       {route !== "onboarding" && (
         <BottomNav route={route} setRoute={setRoute} lang={lang} />
+      )}
+
+      {alertsOpen && (
+        <AlertsModal lang={lang} onClose={() => setAlertsOpen(false)} />
       )}
 
       <TweaksPanel title={i18n.tweaks.title}>
