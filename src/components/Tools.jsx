@@ -312,8 +312,8 @@ export function ToolsPage({ t, lang, ccy, dataState, liveHoldings = [], prices =
     const sample = {
       "TH Equity": rows.filter(r => r.region === "TH" && (r.cls === "Equity" || r.cls === "ETF")),
       "US Equity": rows.filter(r => r.region === "US" && (r.cls === "Equity" || r.cls === "ETF")),
-      "Bonds":     rows.filter(r => r.cls === "Bond"),
-      "Gold":      rows.filter(r => r.cls === "Commodity"),
+      "Bonds":     rows.filter(r => r.cls === "Bond" || r.cls === "MutualFund"),
+      "Gold":      rows.filter(r => r.cls === "Commodity" || r.cls === "GoldTH"),
       "Crypto":    rows.filter(r => r.cls === "Crypto"),
       "Cash":      [],
     }
@@ -369,12 +369,13 @@ export function ToolsPage({ t, lang, ccy, dataState, liveHoldings = [], prices =
   const needsRebalance = isOverdue || isDriftHigh
 
   // ── Suggested trades ─────────────────────────────────────────────────────────
-  // Share sizing: US holdings (e.g. Dime) support fractional shares → keep 4
-  // decimals; Thai/other markets trade whole shares → floor to an integer.
-  const sizeShares = (cash, priceTHB, region) => {
+  // Share sizing: US holdings & GoldTH support fractional shares → keep 4
+  // decimals; Thai SET stocks trade whole shares → floor to integer.
+  // GoldTH is fractional because gold shops sell ½ บาท, สลึง (¼ บาท), etc.
+  const sizeShares = (cash, priceTHB, region, cls) => {
     if (priceTHB <= 0) return 0
     const raw = cash / priceTHB
-    return region === "US" ? Math.floor(raw * 1e4) / 1e4 : Math.floor(raw)
+    return (region === "US" || cls === "GoldTH") ? Math.floor(raw * 1e4) / 1e4 : Math.floor(raw)
   }
 
   const trades = useMemo(() => {
@@ -399,7 +400,7 @@ export function ToolsPage({ t, lang, ccy, dataState, liveHoldings = [], prices =
       let remaining = Math.abs(s.delta)
       for (const c of rich) {
         if (remaining <= 0) break
-        const wanted = sizeShares(remaining, c.price, c.region)
+        const wanted = sizeShares(remaining, c.price, c.region, c.cls)
         const held   = Math.max(0, Number(c.shares) || 0)
         const shares = Math.min(wanted, held)
         if (shares <= 0) continue
@@ -444,7 +445,7 @@ export function ToolsPage({ t, lang, ccy, dataState, liveHoldings = [], prices =
         const share = rich.length === 1 ? 1 : Math.max(0.2, (-c.drift + 0.01) / rich.slice(0, Math.min(3, rich.length)).reduce((acc, x) => acc + Math.max(0.01, -x.drift + 0.01), 0))
         const amt = Math.min(remaining, classAlloc * share)
         const effPrice = c.price * (1 + FEE_RATE(c.region))
-        const sharesNeeded = sizeShares(amt, effPrice, c.region)
+        const sharesNeeded = sizeShares(amt, effPrice, c.region, c.cls)
         if (sharesNeeded <= 0) continue
         const actualAmt = sharesNeeded * c.price
         out.push({
@@ -484,8 +485,8 @@ export function ToolsPage({ t, lang, ccy, dataState, liveHoldings = [], prices =
     const has = {
       "TH Equity": rows.some(r => r.region === "TH" && (r.cls === "Equity" || r.cls === "ETF")),
       "US Equity": rows.some(r => r.region === "US" && (r.cls === "Equity" || r.cls === "ETF")),
-      "Bonds":     rows.some(r => r.cls === "Bond"),
-      "Gold":      rows.some(r => r.cls === "Commodity"),
+      "Bonds":     rows.some(r => r.cls === "Bond" || r.cls === "MutualFund"),
+      "Gold":      rows.some(r => r.cls === "Commodity" || r.cls === "GoldTH"),
       "Crypto":    rows.some(r => r.cls === "Crypto"),
     }
     return Object.entries(targets)
