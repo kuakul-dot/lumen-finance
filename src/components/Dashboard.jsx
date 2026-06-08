@@ -124,7 +124,7 @@ function DemoDashboardPage({ t, lang, ccy, setRoute }) {
 
       {/* HERO */}
       <section className="card" style={{ padding: 36, marginBottom: 16, position: "relative", overflow: "hidden" }}>
-        <div style={{ display: "grid", gridTemplateColumns: "1.1fr 1fr", gap: 56, alignItems: "center" }}>
+        <div className="hero-grid" style={{ display: "grid", gridTemplateColumns: "1.1fr 1fr", gap: 56, alignItems: "center" }}>
           <div>
             <div className="label-up" style={{ marginBottom: 12 }}>{t.dashboard.netWorth} · {ccy}</div>
             <div className="display" style={{ fontSize: 72, lineHeight: 1, letterSpacing: "-0.035em" }}>
@@ -1037,7 +1037,7 @@ function LiveDashboardPage({ t, lang, ccy, setRoute, liveHoldings, prices = {}, 
 
       {/* ── HERO ── */}
       <section className="card" style={{ padding: 36, marginBottom: 16, position: "relative", overflow: "hidden" }}>
-        <div style={{ display: "grid", gridTemplateColumns: "1.1fr 1fr", gap: 56, alignItems: "center" }}>
+        <div className="hero-grid" style={{ display: "grid", gridTemplateColumns: "1.1fr 1fr", gap: 56, alignItems: "center" }}>
           <div>
             <div className="label-up" style={{ marginBottom: 12 }}>
               {hasCash ? (th ? "มูลค่าสุทธิ (Net Worth)" : "Net Worth") : (th ? "มูลค่าพอร์ต" : "Portfolio value")} · {ccy}
