@@ -136,9 +136,27 @@ create policy "Users can manage own snapshots"
 grant select, insert, update, delete on table portfolio_snapshots to authenticated;
 grant select, insert, update, delete on table portfolio_snapshots to service_role;
 
+-- ── Watchlist (per-user stock watch list with S/R tracking) ─────────────────
+create table if not exists watchlist (
+  id        uuid primary key default gen_random_uuid(),
+  user_id   uuid not null references auth.users(id) on delete cascade,
+  symbol    text not null,
+  region    text not null default 'US',
+  cls       text not null default 'Equity',
+  name      text not null default '',
+  note      text not null default '',
+  added_at  timestamptz not null default now()
+);
+alter table watchlist enable row level security;
+drop policy if exists "Users can manage own watchlist" on watchlist;
+create policy "Users can manage own watchlist"
+  on watchlist for all using (auth.uid() = user_id);
+grant select, insert, update, delete on table watchlist to authenticated;
+
 -- ── Indexes ──────────────────────────────────────────────────────────────────
 create index if not exists holdings_portfolio_idx on holdings(portfolio_id);
 create index if not exists transactions_portfolio_idx on transactions(portfolio_id);
 create index if not exists transactions_date_idx on transactions(transacted_at desc);
 create index if not exists goals_user_idx on goals(user_id);
 create index if not exists snapshots_portfolio_idx on portfolio_snapshots(portfolio_id, date);
+create index if not exists watchlist_user_idx     on watchlist(user_id, added_at);
