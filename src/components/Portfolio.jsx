@@ -237,7 +237,8 @@ function LivePortfolioPage({ t, lang, ccy, portfolio, liveHoldings, prices = {},
     if (q) list = list.filter(r => (r.ticker + r.name).toLowerCase().includes(q.toLowerCase()))
     const g = groupByTicker(list)
     return [...g].sort((a, b) => {
-      const av = a[sortKey], bv = b[sortKey]
+      const val = r => sortKey === "costBasis" ? (r.value - r.pl) : r[sortKey]
+      const av = val(a), bv = val(b)
       const cmp = typeof av === "string" ? av.localeCompare(bv) : (av - bv)
       return sortDir === "asc" ? cmp : -cmp
     })
@@ -546,8 +547,8 @@ function LivePortfolioPage({ t, lang, ccy, portfolio, liveHoldings, prices = {},
                   <SortHeader id="ticker" label={t.portfolio.holding} sortKey={sortKey} sortDir={sortDir} onSort={setSort} />
                   <SortHeader id="shares" label={t.portfolio.shares} sortKey={sortKey} sortDir={sortDir} onSort={setSort} align="right" />
                   <th className="num hide-mob">{th ? "ราคา / ทุน" : "Price / Cost"}</th>
-                  <SortHeader id="value"  label={th ? "ต้นทุนรวม" : "Cost"} sortKey={sortKey} sortDir={sortDir} onSort={setSort} align="right" />
-                  <SortHeader id="value"  label={t.portfolio.value} sortKey={sortKey} sortDir={sortDir} onSort={setSort} align="right" />
+                  <SortHeader id="costBasis" label={th ? "ต้นทุนรวม" : "Cost"} sortKey={sortKey} sortDir={sortDir} onSort={setSort} align="right" />
+                  <SortHeader id="value"     label={t.portfolio.value} sortKey={sortKey} sortDir={sortDir} onSort={setSort} align="right" />
                   <th className="num">{th ? "30 วัน" : "30d"}</th>
                   <SortHeader id="pl"     label={t.portfolio.pl} sortKey={sortKey} sortDir={sortDir} onSort={setSort} align="right" />
                   <SortHeader id="weight" label={t.portfolio.weight} sortKey={sortKey} sortDir={sortDir} onSort={setSort} align="right" />
