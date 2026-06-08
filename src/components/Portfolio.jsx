@@ -480,7 +480,7 @@ function LivePortfolioPage({ t, lang, ccy, portfolio, liveHoldings, prices = {},
                   {t.portfolio.total}
                   {hasLivePrices && <span style={{ marginLeft: 6, color: "var(--gain)", fontWeight: 700 }}>● LIVE</span>}
                 </div>
-                <div className="display port-total-val" style={{ fontSize: 36, lineHeight: 1, whiteSpace: "nowrap" }}>{LUMEN_FMT.money(totalValue, ccy)}</div>
+                <div className="display port-total-val" style={{ lineHeight: 1, whiteSpace: "nowrap" }}>{LUMEN_FMT.money(totalValue, ccy)}</div>
                 <div className="muted" style={{ fontSize: 12, marginTop: 4 }}>
                   {grouped.length} {th ? "ตำแหน่ง · หลายหมวด" : "positions · asset classes"}
                 </div>

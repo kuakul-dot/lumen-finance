@@ -597,6 +597,11 @@ hr.rule { border: 0; border-top: 1px solid var(--line); margin: 24px 0; }
 /* ─── Bottom nav (mobile) ─── */
 .bottom-nav { display: none; }
 
+/* ─── Portfolio summary ─── */
+/* Desktop: 26px — compact enough to fit in auto-fit 1fr columns without clipping.
+   Tablet / mobile overrides below use !important to beat this rule. */
+.port-total-val  { font-size: 26px; }
+
 /* ─── Tablet / iPad portrait+landscape (769px – 1200px) ─────────────────────── */
 @media (min-width: 769px) and (max-width: 1200px) {
   .shell, .shell-narrow { padding: 24px 28px 80px; }
