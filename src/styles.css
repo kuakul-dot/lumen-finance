@@ -661,8 +661,8 @@ hr.rule { border: 0; border-top: 1px solid var(--line); margin: 24px 0; }
   .card { border-radius: 10px; }
   .card .display { word-break: break-word; }
 
-  /* Watchlist card grid — single column */
-  .watchlist-grid { grid-template-columns: 1fr !important; }
+  /* Watchlist card grid: let auto-fill minmax(320px,1fr) decide columns.
+     On iPhone (<640px content) → 1 col; on iPad (≥688px content) → 2 col. */
 
   /* Bottom navigation bar */
   .bottom-nav {
