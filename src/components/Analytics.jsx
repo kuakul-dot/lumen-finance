@@ -576,7 +576,7 @@ function AnalyticsCommon({ t, lang, ccy, rows, totalValue, totalPL, totalPlPct, 
           <BigKpi className="col-span-3"
             label={th ? "ผลตอบแทนรวม" : "Total return"}
             value={(totalPlPct >= 0 ? "+" : "") + totalPlPct.toFixed(1) + "%"}
-            sub={th ? "เทียบต้นทุน · TWR จริงดูที่แท็บ Metrics" : "vs. cost · see Metrics tab for TWR"}
+            sub={th ? "เทียบต้นทุน · ดูรายละเอียดที่แท็บ Metrics" : "vs. cost · see Metrics tab for details"}
             tone={totalPlPct >= 0 ? "gain" : "loss"} />
         ) : (
           <BigKpi className="col-span-3" label={th ? "ผลตอบแทนรวม" : "Total return"} value="+18.3%" sub={th ? "12 เดือนล่าสุด" : "trailing 12-mo"} tone="gain" />
@@ -2335,9 +2335,9 @@ function AnalyticsMetrics({ t, lang, ccy, rows = [], totalValue = 0, totalPL = 0
     handleBackfill()
   }, [isLive, snaps.length, backfilling, handleBackfill])
 
-  // History-based metrics from the flow-neutral money-multiple (value / cost):
-  // a pure cash buy raises value and cost equally, so the ratio isolates
-  // performance from contributions — a sound basis for TWR / Sharpe / drawdown.
+  // History-based metrics from the value/cost ratio index:
+  // the ratio tracks market price performance; daily chain-linked returns
+  // (idx[i]/idx[i-1]−1) feed Sharpe, Sortino, and drawdown calculations.
   const histMetrics = useMemo(() => {
     const idx = snaps.map(s => Number(s.total_cost) > 0 ? Number(s.total_value) / Number(s.total_cost) : null)
                      .filter(v => v != null && isFinite(v))
@@ -2470,7 +2470,7 @@ function AnalyticsMetrics({ t, lang, ccy, rows = [], totalValue = 0, totalPL = 0
     { key: "drawdown", value: "-9.8%",  scale: 0.19, min: "-50%", max: "0%",    sub: t.analytics.drawdown, inverse: true },
   ]
   const demoBody = {
-    twr:      th ? "วัดผลพอร์ตจริงโดยตัดผลของกระแสเงินสด"          : "Measures portfolio's true performance excluding cash flows",
+    twr:      th ? "ผลตอบแทนสะสมจากการเปลี่ยนแปลงราคา วัดจากดัชนี มูลค่า ÷ ต้นทุน" : "Cumulative return from price changes, measured via value ÷ cost index",
     pe:       th ? "ค่าเฉลี่ยถ่วงน้ำหนักของ P/E ตามน้ำหนักในพอร์ต" : "Weighted average P/E across all individual stocks",
     beta:     th ? "ความผันผวนเทียบกับตลาด (S&P 500)"                : "Volatility relative to the market (S&P 500)",
     sharpe:   th ? "วัดผลตอบแทนต่อความเสี่ยงรวม"                     : "How well profitability compensates for total risk",
@@ -2501,8 +2501,8 @@ function AnalyticsMetrics({ t, lang, ccy, rows = [], totalValue = 0, totalPL = 0
         <span style={{ fontSize: 13, color: "var(--ink-3)" }}>
           {isLive
             ? (th
-              ? "ตัวชี้วัดด้านล่างคำนวณจากพอร์ตจริง · ตัวที่ต้องการประวัติย้อนหลัง (TWR/Beta/Sharpe) ยังไม่พร้อม"
-              : "Metrics below are computed from your live portfolio · history-dependent ones (TWR/Beta/Sharpe) require daily snapshots")
+              ? "ตัวชี้วัดด้านล่างคำนวณจากพอร์ตจริง · ตัวที่ต้องการประวัติย้อนหลัง (ผลตอบแทน/Beta/Sharpe) ยังไม่พร้อม"
+              : "Metrics below are computed from your live portfolio · history-dependent ones (Return/Beta/Sharpe) require daily snapshots")
             : (th
               ? "ตัวชี้วัดเหล่านี้ต้องการข้อมูลราคาย้อนหลังรายวัน — ค่าที่แสดงเป็นตัวอย่าง (Demo)"
               : "These metrics require daily historical price data — values shown are illustrative (Demo).")}
@@ -2615,8 +2615,8 @@ function AnalyticsMetrics({ t, lang, ccy, rows = [], totalValue = 0, totalPL = 0
           ) : (
             <div className="grid" style={{ gridTemplateColumns: "repeat(auto-fit, minmax(150px, 1fr))", gap: 16 }}>
               {[
-                { key: "twr", label: th ? "ผลตอบแทน (TWR)" : "Return (TWR)", val: (histMetrics.twr * 100).toFixed(2) + "%", neg: histMetrics.twr < 0,
-                  desc: th ? "ผลตอบแทนรวมตั้งแต่เริ่มถือ ตัดผลการฝาก/ถอน" : "Total return since inception, excluding deposits/withdrawals",
+                { key: "twr", label: th ? "ผลตอบแทนพอร์ต" : "Portfolio Return", val: (histMetrics.twr * 100).toFixed(2) + "%", neg: histMetrics.twr < 0,
+                  desc: th ? "ผลตอบแทนสะสมตั้งแต่ snapshot แรก วัดจากการเปลี่ยนแปลงของอัตราส่วน มูลค่า ÷ ต้นทุน" : "Cumulative return since first snapshot, measured as change in the value ÷ cost ratio",
                   formula: th ? "ดัชนีล่าสุด ÷ ดัชนีแรก − 1\n(ดัชนี = มูลค่า ÷ ต้นทุน)" : "last index ÷ first index − 1\n(index = value ÷ cost)" },
                 { key: "vol", label: th ? "ความผันผวน (ปีละ)" : "Volatility (ann.)", val: (histMetrics.vol * 100).toFixed(1) + "%",
                   desc: th ? "ความแกว่งของผลตอบแทน — สูง = เสี่ยง/เหวี่ยงแรง" : "Swing of returns — higher = riskier",
