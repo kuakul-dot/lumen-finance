@@ -195,7 +195,9 @@ export function TopNav({ route, setRoute, lang, setLang, ccy, setCcy, t, session
 
           {/* Price Alert bell */}
           {session && onOpenAlerts && (
-            <button onClick={onOpenAlerts}
+            <button
+              onTouchEnd={(e) => { e.preventDefault(); onOpenAlerts(); }}
+              onClick={onOpenAlerts}
               title={lang === "th" ? "การแจ้งเตือนราคา" : "Price Alerts"}
               style={{
                 position: "relative", background: "none", border: "none", cursor: "pointer",

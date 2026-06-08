@@ -108,7 +108,7 @@ export function AlertsModal({ lang, onClose, prefill }) {
       position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.45)', backdropFilter: 'blur(4px)',
       display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1200,
       padding: '72px 16px 16px', /* 72px top clears 64px sticky nav */
-    }} onClick={e => e.target === e.currentTarget && Date.now() - mountedAt.current > 300 && onClose()}>
+    }} onClick={e => e.target === e.currentTarget && Date.now() - mountedAt.current > 600 && onClose()}>
       <div style={{
         background: 'var(--bg)', borderRadius: 20, padding: '28px 24px',
         width: '100%', maxWidth: 480, maxHeight: 'calc(100vh - 88px)', overflowY: 'auto',
