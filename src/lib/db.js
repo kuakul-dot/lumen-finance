@@ -436,8 +436,9 @@ export function computeRealized(transactions, fxRate = 36) {
       pos[tk].shares += s
       pos[tk].cost   += s * pr + fee + tax
     } else if (t.type === 'Sell' && s > 0) {
-      const avg      = pos[tk].shares > 0 ? pos[tk].cost / pos[tk].shares : 0
-      const sold     = Math.min(s, pos[tk].shares || s)
+      if (pos[tk].shares <= 0) continue   // no shares to sell — skip to avoid phantom gain
+      const avg      = pos[tk].cost / pos[tk].shares
+      const sold     = Math.min(s, pos[tk].shares)
       const proceeds = s * pr - fee - tax    // net proceeds (native ccy)
       const costBasis= avg * sold            // native ccy
       const gainTHB  = (proceeds - costBasis) * fx
