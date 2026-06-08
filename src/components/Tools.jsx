@@ -349,13 +349,14 @@ export function ToolsPage({ t, lang, ccy, dataState, liveHoldings = [], prices =
         const tgtWithin = hybridWeightPct(c)  // % within class (0-100)
         const curWithin = classTotal > 0 ? (c.value / classTotal) * 100 : 0
         const drift = curWithin - tgtWithin
-        const curPct = total > 0 ? (c.value / total) * 100 : 0
+        // Use investableTotal (excludes emergency fund) to match class-level curPct denominator
+        const curPct = investableTotal > 0 ? (c.value / investableTotal) * 100 : 0
         const tgtPct = s.tgtPct * (tgtWithin / 100)
         return { ...c, curWithin, tgtWithin, drift, curPct, tgtPct }
       }).sort((a, b) => b.value - a.value)   // sort by value desc
     })
     return out
-  }, [suggestions, hybridWeightPct, total])
+  }, [suggestions, hybridWeightPct, investableTotal])
 
   // ── Rebalance recommendation logic ────────────────────────────────────────────
   const maxDrift = useMemo(() => {
