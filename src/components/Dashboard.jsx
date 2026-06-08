@@ -127,7 +127,7 @@ function DemoDashboardPage({ t, lang, ccy, setRoute }) {
         <div className="hero-grid" style={{ display: "grid", gridTemplateColumns: "1.1fr 1fr", gap: 56, alignItems: "center" }}>
           <div>
             <div className="label-up" style={{ marginBottom: 12 }}>{t.dashboard.netWorth} · {ccy}</div>
-            <div className="display" style={{ fontSize: 72, lineHeight: 1, letterSpacing: "-0.035em" }}>
+            <div className="display hero-num" style={{ fontSize: 72, lineHeight: 1, letterSpacing: "-0.035em" }}>
               {LUMEN_FMT.money(net, ccy)}
             </div>
             <div style={{ marginTop: 18, display: "flex", gap: 24, alignItems: "center", flexWrap: "wrap" }}>
@@ -151,7 +151,7 @@ function DemoDashboardPage({ t, lang, ccy, setRoute }) {
             </div>
           </div>
           <div>
-            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 8 }}>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 8, flexWrap: "wrap", gap: 8 }}>
               <div className="label-up">{lang === "th" ? "พอร์ตการลงทุน" : "Portfolio"} · {chartPeriod}</div>
               <div className="segmented" style={{ gap: 0 }}>
                 {["1Y", "3Y", "5Y"].map(p => (
@@ -1046,7 +1046,7 @@ function LiveDashboardPage({ t, lang, ccy, setRoute, liveHoldings, prices = {}, 
                 1 USD = {fxRate.toFixed(2)} THB
               </span>
             </div>
-            <div className="display" style={{ fontSize: 72, lineHeight: 1, letterSpacing: "-0.035em" }}>
+            <div className="display hero-num" style={{ fontSize: 72, lineHeight: 1, letterSpacing: "-0.035em" }}>
               {LUMEN_FMT.money(hasCash ? netWorth : totalValue, ccy)}
             </div>
             <div style={{ marginTop: 18, display: "flex", gap: 24, alignItems: "center", flexWrap: "wrap" }}>
@@ -1090,7 +1090,7 @@ function LiveDashboardPage({ t, lang, ccy, setRoute, liveHoldings, prices = {}, 
             </div>
           </div>
           <div>
-            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 8 }}>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 8, flexWrap: "wrap", gap: 8 }}>
               <div>
                 <div className="label-up">{th ? "มูลค่าพอร์ต" : "Portfolio value"} · {chartLabel}</div>
                 {earliestHoldingDate && (

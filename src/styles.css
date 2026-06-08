@@ -597,8 +597,8 @@ hr.rule { border: 0; border-top: 1px solid var(--line); margin: 24px 0; }
 /* ─── Bottom nav (mobile) ─── */
 .bottom-nav { display: none; }
 
-/* ─── Tablet / iPad (769px – 1024px) ────────────────────────────────────────── */
-@media (min-width: 769px) and (max-width: 1024px) {
+/* ─── Tablet / iPad portrait+landscape (769px – 1200px) ─────────────────────── */
+@media (min-width: 769px) and (max-width: 1200px) {
   .shell, .shell-narrow { padding: 24px 28px 80px; }
   .topnav-inner { padding: 0 24px; gap: 12px; }
 
@@ -614,6 +614,7 @@ hr.rule { border: 0; border-top: 1px solid var(--line); margin: 24px 0; }
 
   /* Hero section: collapse 2-col to 1-col so period buttons stay visible */
   .hero-grid { grid-template-columns: 1fr !important; gap: 24px !important; }
+  .hero-num  { font-size: 52px !important; }
 }
 
 /* ─── Mobile responsive ─────────────────────────────────────────────────── */
