@@ -82,6 +82,7 @@ export default function App() {
   // ── Price Alerts ──────────────────────────────────────────────────────────────
   const [alertCount,   setAlertCount]   = useState(() => getActiveCount())
   const [alertsOpen,   setAlertsOpen]   = useState(false)
+  const alertsOpenedAt = useRef(0)  // timestamp when modal last opened
 
   // Refresh badge when any component modifies alerts
   useEffect(() => {
@@ -502,7 +503,7 @@ export default function App() {
           onRenamePortfolio={renamePortfolio}
           onDeletePortfolio={removePortfolio}
           alertCount={alertCount}
-          onOpenAlerts={() => setAlertsOpen(true)}
+          onOpenAlerts={() => { alertsOpenedAt.current = Date.now(); setAlertsOpen(true) }}
         />
       ) : (
         <OnboardingNav
@@ -518,7 +519,12 @@ export default function App() {
       )}
 
       {alertsOpen && (
-        <AlertsModal lang={lang} onClose={() => setAlertsOpen(false)} />
+        <AlertsModal lang={lang} onClose={() => {
+          // Ignore any close attempt within 800 ms of opening —
+          // catches iOS ghost clicks regardless of how they arrive.
+          if (Date.now() - alertsOpenedAt.current < 800) return
+          setAlertsOpen(false)
+        }} />
       )}
 
       <TweaksPanel title={i18n.tweaks.title}>
