@@ -195,7 +195,7 @@ const isDivRecorded = (divTxs, ticker, xdDateStr) =>
     if (tx.note?.includes(`xd:${xdDateStr}`)) return true
     const noteXd = tx.note?.match(/xd:(\d{4}-\d{2}-\d{2})/)?.[1]
     const refDate = noteXd ?? tx.transacted_at.slice(0, 10)
-    return Math.abs(new Date(refDate) - new Date(xdDateStr)) < 28 * 86400 * 1000
+    return Math.abs(new Date(refDate) - new Date(xdDateStr)) < 14 * 86400 * 1000
   })
 
 /* ─── Helper: merge same-ticker lots into a single row ──────────────────────── */
