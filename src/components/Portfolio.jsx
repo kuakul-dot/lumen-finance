@@ -807,9 +807,10 @@ function LivePortfolioPage({ t, lang, ccy, portfolio, liveHoldings, prices = {},
         const srLivePrice = priceData?.price ?? null
         const srCurrency  = priceData?.currency ?? (chartHolding.region === 'TH' ? 'THB' : 'USD')
         return (
-          <div style={{ position: "fixed", inset: 0, zIndex: 1000, background: "rgba(0,0,0,0.45)", display: "flex", alignItems: "center", justifyContent: "center", padding: 16 }}
+          <div style={{ position: "fixed", inset: 0, zIndex: 1000, background: "rgba(0,0,0,0.45)", display: "flex", alignItems: "center", justifyContent: "center",
+                        padding: "72px 16px 16px" /* 72px top = 64px sticky nav + 8px buffer */ }}
             onClick={e => e.target === e.currentTarget && setChartHolding(null)}>
-            <div style={{ background: "var(--bg)", borderRadius: 18, padding: 20, width: "100%", maxWidth: 860, maxHeight: "92vh", overflowY: "auto", display: "flex", flexDirection: "column", gap: 12, boxShadow: "0 20px 60px rgba(0,0,0,0.2)" }}>
+            <div style={{ background: "var(--bg)", borderRadius: 18, padding: 20, width: "100%", maxWidth: 860, maxHeight: "calc(100vh - 88px)", overflowY: "auto", display: "flex", flexDirection: "column", gap: 12, boxShadow: "0 20px 60px rgba(0,0,0,0.2)" }}>
 
               {/* Header */}
               <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 12 }}>
@@ -871,9 +872,9 @@ function LivePortfolioPage({ t, lang, ccy, portfolio, liveHoldings, prices = {},
       })()}
 
       {splitModal && (
-        <div style={{ position: "fixed", inset: 0, zIndex: 200, background: "rgba(0,0,0,0.45)", display: "flex", alignItems: "center", justifyContent: "center", padding: 16 }}
+        <div style={{ position: "fixed", inset: 0, zIndex: 200, background: "rgba(0,0,0,0.45)", display: "flex", alignItems: "center", justifyContent: "center", padding: "72px 16px 16px" }}
           onClick={e => { if (e.target === e.currentTarget && !splitApplying) setSplitModal(null) }}>
-          <div style={{ background: "var(--bg)", borderRadius: 18, padding: 28, width: "100%", maxWidth: 540, maxHeight: "85vh", display: "flex", flexDirection: "column", gap: 18, boxShadow: "0 20px 60px rgba(0,0,0,0.2)" }}>
+          <div style={{ background: "var(--bg)", borderRadius: 18, padding: 28, width: "100%", maxWidth: 540, maxHeight: "calc(100vh - 88px)", display: "flex", flexDirection: "column", gap: 18, boxShadow: "0 20px 60px rgba(0,0,0,0.2)" }}>
             {splitModal === 'loading' ? (
               <div style={{ padding: "48px 0", textAlign: "center", opacity: 0.5, fontSize: 14 }}>
                 {th ? "กำลังตรวจหาการแตกพาร์จาก Yahoo Finance…" : "Checking Yahoo Finance for splits…"}
@@ -1065,7 +1066,7 @@ function AddHoldingModal({ lang, portfolioId, onClose, onSaved }) {
     <div style={{
       position: "fixed", inset: 0, background: "rgba(0,0,0,0.45)", backdropFilter: "blur(4px)",
       display: "flex", alignItems: "center", justifyContent: "center", zIndex: 1000,
-      overflowY: "auto", padding: "24px 16px",
+      overflowY: "auto", padding: "72px 16px 16px", /* 72px top clears 64px sticky nav */
     }} onClick={e => e.target === e.currentTarget && onClose()}>
       <div style={{
         background: "var(--bg)", borderRadius: 20, padding: "32px 28px 40px",
@@ -1285,7 +1286,7 @@ function EditHoldingModal({ lang, holding, onClose, onSaved }) {
     <div style={{
       position: "fixed", inset: 0, background: "rgba(0,0,0,0.45)", backdropFilter: "blur(4px)",
       display: "flex", alignItems: "center", justifyContent: "center", zIndex: 1000,
-      overflowY: "auto", padding: "24px 16px",
+      overflowY: "auto", padding: "72px 16px 16px", /* 72px top clears 64px sticky nav */
     }} onClick={e => e.target === e.currentTarget && onClose()}>
       <div style={{
         background: "var(--bg)", borderRadius: 20, padding: "32px 28px 40px",
@@ -1489,7 +1490,7 @@ function SellModal({ lang, ccy, holding, portfolioId, onClose, onSaved }) {
     <div style={{
       position: "fixed", inset: 0, background: "rgba(0,0,0,0.45)", backdropFilter: "blur(4px)",
       display: "flex", alignItems: "center", justifyContent: "center", zIndex: 1000,
-      overflowY: "auto", padding: "24px 16px",
+      overflowY: "auto", padding: "72px 16px 16px", /* 72px top clears 64px sticky nav */
     }} onClick={e => e.target === e.currentTarget && onClose()}>
       <div style={{
         background: "var(--bg)", borderRadius: 20, padding: "32px 28px 40px",
@@ -1564,7 +1565,7 @@ function RealizedModal({ lang, ccy, realized, onClose }) {
     <div style={{
       position: "fixed", inset: 0, background: "rgba(0,0,0,0.45)", backdropFilter: "blur(4px)",
       display: "flex", alignItems: "center", justifyContent: "center", zIndex: 1000,
-      overflowY: "auto", padding: "24px 16px",
+      overflowY: "auto", padding: "72px 16px 16px", /* 72px top clears 64px sticky nav */
     }} onClick={e => e.target === e.currentTarget && onClose()}>
       <div style={{
         background: "var(--bg)", borderRadius: 20, padding: "28px 26px 32px",
@@ -1788,9 +1789,9 @@ function NotesModal({ th, holding, onClose, onSaved }) {
     onSaved?.()
   }
   return (
-    <div style={{ position: "fixed", inset: 0, zIndex: 1000, background: "rgba(0,0,0,0.45)", display: "flex", alignItems: "center", justifyContent: "center", padding: 16 }}
+    <div style={{ position: "fixed", inset: 0, zIndex: 1000, background: "rgba(0,0,0,0.45)", display: "flex", alignItems: "center", justifyContent: "center", padding: "72px 16px 16px" }}
       onClick={e => e.target === e.currentTarget && !saving && onClose()}>
-      <div style={{ background: "var(--bg)", borderRadius: 18, padding: 24, width: "100%", maxWidth: 560, maxHeight: "85vh", display: "flex", flexDirection: "column", gap: 14, boxShadow: "0 20px 60px rgba(0,0,0,0.2)" }}>
+      <div style={{ background: "var(--bg)", borderRadius: 18, padding: 24, width: "100%", maxWidth: 560, maxHeight: "calc(100vh - 88px)", display: "flex", flexDirection: "column", gap: 14, boxShadow: "0 20px 60px rgba(0,0,0,0.2)" }}>
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 12 }}>
           <div style={{ display: "flex", alignItems: "center", gap: 10, minWidth: 0 }}>
             <TickerLogo ticker={holding.displayTicker || holding.ticker} logoUrl={holding.logo_url} region={holding.region} cls={holding.cls} size={36} />
@@ -2253,7 +2254,7 @@ function EditTransactionModal({ tx, holding, lang, onClose, onSaved }) {
     <div style={{
       position: "fixed", inset: 0, background: "rgba(0,0,0,0.45)", backdropFilter: "blur(4px)",
       display: "flex", alignItems: "center", justifyContent: "center", zIndex: 1000,
-      overflowY: "auto", padding: "24px 16px",
+      overflowY: "auto", padding: "72px 16px 16px", /* 72px top clears 64px sticky nav */
     }} onClick={e => e.target === e.currentTarget && onClose()}>
       <div style={{
         background: "var(--bg)", borderRadius: 20, padding: "32px 28px 40px",
@@ -2528,7 +2529,7 @@ function ImportPDFModal({ lang, portfolioId, onClose, onImported }) {
     <div style={{
       position: "fixed", inset: 0, background: "rgba(0,0,0,0.45)", backdropFilter: "blur(4px)",
       display: "flex", alignItems: "center", justifyContent: "center", zIndex: 1100,
-      overflowY: "auto", padding: "24px 16px",
+      overflowY: "auto", padding: "72px 16px 16px", /* 72px top clears 64px sticky nav */
     }} onClick={e => e.target === e.currentTarget && onClose()}>
       <div style={{
         background: "var(--bg)", borderRadius: 20, padding: "32px 28px 40px",
@@ -3334,7 +3335,7 @@ function PortfolioCashModal({ lang, ccy, portfolioId, account, onClose, onSaved 
     onSaved()
   }
   return (
-    <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.45)", backdropFilter: "blur(4px)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 1000, padding: 16 }}
+    <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.45)", backdropFilter: "blur(4px)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 1000, padding: "72px 16px 16px" }}
       onClick={e => e.target === e.currentTarget && onClose()}>
       <div style={{ background: "var(--bg)", borderRadius: 18, padding: 28, width: "100%", maxWidth: 440, boxShadow: "0 20px 60px rgba(0,0,0,0.2)" }}>
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 20 }}>

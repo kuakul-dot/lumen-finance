@@ -1094,7 +1094,7 @@ function AddModal({ th, onClose, onAdd }) {
       style={{
         position: 'fixed', inset: 0, zIndex: 500,
         background: 'rgba(0,0,0,0.45)',
-        display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 16,
+        display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '72px 16px 16px', /* 72px top clears 64px sticky nav */
       }}>
       <div style={{
         background: 'var(--bg)', borderRadius: 18, padding: 28,
