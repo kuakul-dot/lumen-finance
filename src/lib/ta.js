@@ -60,14 +60,22 @@ function pctChange(closes, n) {
 
 function rsi(closes, period = 14) {
   if (closes.length < period + 1) return null
-  let gains = 0, losses = 0
-  for (let i = closes.length - period; i < closes.length; i++) {
-    const change = closes[i] - closes[i - 1]
-    if (change > 0) gains += change
-    else losses -= change
+  // Wilder's smoothed RSI — seed with first `period` price changes, then smooth forward.
+  // Simple average (old code) diverges from TradingView/Yahoo because it only looks at
+  // the last `period` bars and has no memory of prior trend direction.
+  let avgGain = 0, avgLoss = 0
+  for (let i = 1; i <= period; i++) {
+    const ch = closes[i] - closes[i - 1]
+    if (ch > 0) avgGain += ch; else avgLoss -= ch
   }
-  const avgGain = gains / period
-  const avgLoss = losses / period
+  avgGain /= period
+  avgLoss /= period
+  // Wilder smoothing: each bar weights prior avg by (period-1)/period
+  for (let i = period + 1; i < closes.length; i++) {
+    const ch = closes[i] - closes[i - 1]
+    avgGain = (avgGain * (period - 1) + (ch > 0 ? ch : 0)) / period
+    avgLoss = (avgLoss * (period - 1) + (ch < 0 ? -ch : 0)) / period
+  }
   if (avgLoss === 0) return 100
   const rs = avgGain / avgLoss
   return 100 - (100 / (1 + rs))
