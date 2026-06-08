@@ -16,6 +16,7 @@ export function PlanningPage({ t, lang, ccy, session, liveHoldings = [], prices 
   const [selectedId, setSelectedId] = useState(null)
   const [showAdd, setShowAdd] = useState(false)
   const [showEdit, setShowEdit] = useState(null)
+  const [returnRate, setReturnRate] = useState(6)  // % p.a. — user-adjustable
 
   // ── Portfolio value from live holdings ───────────────────────────────────────
   const portfolioValue = useMemo(() => {
@@ -71,7 +72,7 @@ export function PlanningPage({ t, lang, ccy, session, liveHoldings = [], prices 
     if (!selected) return []
     const months = 36
     const now = new Date()
-    const r   = 0.06 / 12                     // 6% p.a. → 0.5% per month
+    const r   = returnRate / 100 / 12         // user-adjustable % p.a. → per month
     const pv  = selected.current || 0
     const pmt = selected.monthly_contribution || 0
     // Standard future-value formula: FV = PV(1+r)^n + PMT × ((1+r)^n − 1) / r
@@ -88,12 +89,12 @@ export function PlanningPage({ t, lang, ccy, session, liveHoldings = [], prices 
     return [
       { name: th ? "เป้าหมาย" : "Target",              color: "var(--ink-4)", dashed: true,
         data: points.map(p => ({ x: p.x, y: selected.target || 0, label: p.label })) },
-      { name: th ? "+6%/ปี (ทบต้น)" : "+ 6% p.a. (compound)", color: "var(--accent)", fill: true,
+      { name: (th ? `+${returnRate}%/ปี (ทบต้น)` : `+${returnRate}% p.a. (compound)`), color: "var(--accent)", fill: true,
         data: points.map(p => ({ x: p.x, y: p.opt, label: p.label })) },
       { name: th ? "เงินสดเท่านั้น" : "Cash only",      color: "var(--ink-3)",
         data: points.map(p => ({ x: p.x, y: p.base, label: p.label })) },
     ]
-  }, [selected?.id, selected?.current, selected?.monthly_contribution, selected?.target, th])
+  }, [selected?.id, selected?.current, selected?.monthly_contribution, selected?.target, th, returnRate])
 
   // ── Loading state ────────────────────────────────────────────────────────────
   if (goals === null) {
@@ -301,10 +302,17 @@ export function PlanningPage({ t, lang, ccy, session, liveHoldings = [], prices 
 
             {/* Projection chart */}
             <div className="card">
-              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 16 }}>
-                <h3 className="section-title">{th ? "การคาดการณ์ 24 เดือนข้างหน้า" : "24-month projection"}</h3>
-                <div style={{ display: "flex", gap: 12, fontSize: 12, alignItems: "center" }}>
-                  <span><span className="dot" style={{ background: "var(--accent)" }} /> {th ? "ลงทุน +6%" : "Invested"}</span>
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 12, flexWrap: "wrap", gap: 8 }}>
+                <h3 className="section-title">{th ? "การคาดการณ์ 36 เดือนข้างหน้า" : "36-month projection"}</h3>
+                <div style={{ display: "flex", gap: 16, fontSize: 12, alignItems: "center", flexWrap: "wrap" }}>
+                  {/* Return rate slider */}
+                  <label style={{ display: "flex", alignItems: "center", gap: 6, color: "var(--ink-2)" }}>
+                    <span className="dot" style={{ background: "var(--accent)" }} />
+                    <span style={{ minWidth: 68 }}>{th ? `ผลตอบแทน ${returnRate}%/ปี` : `Return ${returnRate}%/yr`}</span>
+                    <input type="range" min={0} max={20} step={1} value={returnRate}
+                      onChange={e => setReturnRate(Number(e.target.value))}
+                      style={{ width: 80, accentColor: "var(--accent)", cursor: "pointer" }} />
+                  </label>
                   <span><span className="dot" style={{ background: "var(--ink-3)" }} /> {th ? "เงินสด" : "Cash only"}</span>
                   <span><span className="dot" style={{ background: "var(--ink-4)" }} /> {th ? "เป้า" : "Target"}</span>
                 </div>
@@ -375,18 +383,20 @@ function GoalModal({ lang, userId, ccy, goal, onClose, onSaved }) {
   const [error, setError] = useState(null)
   const set = (k, v) => setForm(f => ({ ...f, [k]: v }))
 
-  // Auto-compute target year using compound interest at 6% p.a.
+  // Auto-compute target year — uses same return rate as the projection chart (default 6%)
+  const [modalReturnRate, setModalReturnRate] = useState(6)
   const autoEtaYear = useMemo(() => {
     const pv  = parseFloat(form.current) || 0
     const pmt = parseFloat(form.monthly_contribution) || 0
     const tgt = parseFloat(form.target) || 0
     if (tgt <= 0 || pmt <= 0 || pv >= tgt) return null
-    const r = 0.06 / 12
+    const r = modalReturnRate / 100 / 12
+    if (r === 0) { const months = (tgt - pv) / pmt; return months > 0 ? new Date().getFullYear() + Math.ceil(months / 12) : null }
     let fv = pv, n = 0
     while (fv < tgt && n < 600) { fv = fv * (1 + r) + pmt; n++ }
     if (n >= 600) return null
     return new Date().getFullYear() + Math.ceil(n / 12)
-  }, [form.current, form.monthly_contribution, form.target])
+  }, [form.current, form.monthly_contribution, form.target, modalReturnRate])
 
   const handleSubmit = async (e) => {
     e.preventDefault()
@@ -486,7 +496,12 @@ function GoalModal({ lang, userId, ccy, goal, onClose, onSaved }) {
                              background: "var(--bg-2)", color: "var(--ink-2)", cursor: "pointer" }}>
                     {th ? "ใช้" : "Use"}
                   </button>
-                  <span style={{ color: "var(--ink-4)" }}>{th ? "(สมมติ +6%/ปี)" : "(at 6% p.a.)"}</span>
+                  <label style={{ display: "flex", alignItems: "center", gap: 4, color: "var(--ink-4)" }}>
+                    <span>{th ? `ที่ ${modalReturnRate}%/ปี` : `at ${modalReturnRate}%/yr`}</span>
+                    <input type="range" min={0} max={20} step={1} value={modalReturnRate}
+                      onChange={e => setModalReturnRate(Number(e.target.value))}
+                      style={{ width: 60, accentColor: "var(--accent)", cursor: "pointer" }} />
+                  </label>
                 </div>
               )}
             </GField>
