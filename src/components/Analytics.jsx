@@ -1782,19 +1782,24 @@ function AnalyticsGrowth({ t, lang, ccy, rows = [], fxRate = 36, totalValue, tot
       try {
         const txs = await getAllTransactions(portfolio.id)
         if (txs.length) {
+          // Sort oldest-first so txs[0] is reliably the first purchase
+          const sorted = [...txs].sort((a, b) => new Date(a.transacted_at) - new Date(b.transacted_at))
           const ccyByTicker = {}
-          for (const tx of txs) {
+          // Build asset-class lookup from live holdings so GoldTH/Crypto get correct Yahoo symbols
+          const clsByTicker = {}
+          for (const r of rows) clsByTicker[(r.ticker || "").toUpperCase()] = r.cls || "Equity"
+          for (const tx of sorted) {
             const tk = (tx.ticker || "").toUpperCase()
             if (tk && !ccyByTicker[tk]) ccyByTicker[tk] = tx.currency || "THB"
           }
           const tickers = Object.keys(ccyByTicker)
-          const spanDays = (Date.now() - new Date(txs[0].transacted_at)) / 86400000
+          const spanDays = (Date.now() - new Date(sorted[0].transacted_at)) / 86400000
           const range = spanDays > 365 * 2 ? "5y" : spanDays > 365 ? "2y" : spanDays > 180 ? "1y"
                       : spanDays > 90 ? "6mo" : spanDays > 30 ? "3mo" : "1mo"
           const seriesByTicker = {}
           await Promise.all(tickers.map(async tk => {
             const region = ccyByTicker[tk] === "USD" ? "US" : "TH"
-            const sym = toYahooSymbol(tk, region, "Equity")
+            const sym = toYahooSymbol(tk, region, clsByTicker[tk] || "Equity")
             const h = await fetchHistory(sym, range).catch(() => ({ series: [] }))
             seriesByTicker[tk] = (h?.series || []).map(p => ({ d: new Date(p.t * 1000).toISOString().split("T")[0], c: p.c }))
           }))
