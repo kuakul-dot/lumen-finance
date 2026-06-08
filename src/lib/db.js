@@ -358,8 +358,9 @@ export async function upsertSnapshots(portfolioId, rows) {
 //   transactions:   all txs, ascending by transacted_at
 //   seriesByTicker: { TICKER: [{ d:'YYYY-MM-DD', c:close(native ccy) }] } asc
 //   ccyByTicker:    { TICKER: 'USD' | 'THB' }
-//   fxRate:         USD→THB (constant approximation across the window)
-export function buildSnapshotSeries(transactions, seriesByTicker, ccyByTicker, fxRate = 36) {
+//   fxRate:         USD→THB fallback (used when fxByDate has no entry for a date)
+//   fxByDate:       optional { 'YYYY-MM-DD': rate } for historically-accurate FX conversion
+export function buildSnapshotSeries(transactions, seriesByTicker, ccyByTicker, fxRate = 36, fxByDate = {}) {
   if (!transactions?.length) return []
   const dayOf = (v) => String(v).split('T')[0]
   const firstDate = dayOf(transactions[0].transacted_at)
@@ -399,7 +400,7 @@ export function buildSnapshotSeries(transactions, seriesByTicker, ccyByTicker, f
     let total_value = 0, total_cost = 0
     for (const tk in pos) {
       if (pos[tk].shares <= 0) continue
-      const fx = (ccyByTicker[tk] === 'USD') ? fxRate : 1
+      const fx = (ccyByTicker[tk] === 'USD') ? (fxByDate[date] ?? fxRate) : 1
       const px = priceOnOrBefore(tk, date)
       if (px != null) total_value += pos[tk].shares * px * fx
       total_cost += pos[tk].cost * fx

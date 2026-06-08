@@ -1803,7 +1803,14 @@ function AnalyticsGrowth({ t, lang, ccy, rows = [], fxRate = 36, totalValue, tot
             const h = await fetchHistory(sym, range).catch(() => ({ series: [] }))
             seriesByTicker[tk] = (h?.series || []).map(p => ({ d: new Date(p.t * 1000).toISOString().split("T")[0], c: p.c }))
           }))
-          const series = buildSnapshotSeries(txs, seriesByTicker, ccyByTicker, fxRate)
+          // Fetch historical USDTHB rates so each date uses its own FX rate (not today's)
+          const fxByDate = {}
+          if (Object.values(ccyByTicker).some(c => c === "USD")) {
+            const fxH = await fetchHistory("USDTHB=X", range).catch(() => ({ series: [] }))
+            for (const p of (fxH?.series || []))
+              fxByDate[new Date(p.t * 1000).toISOString().split("T")[0]] = p.c
+          }
+          const series = buildSnapshotSeries(txs, seriesByTicker, ccyByTicker, fxRate, fxByDate)
           if (series.length) {
             await upsertSnapshots(portfolio.id, series)
             d = await getSnapshots(portfolio.id).catch(() => d)
@@ -2294,8 +2301,15 @@ function AnalyticsMetrics({ t, lang, ccy, rows = [], totalValue = 0, totalPL = 0
         const h = await fetchHistory(sym, range).catch(() => ({ series: [] }))
         seriesByTicker[tk] = (h?.series || []).map(p => ({ d: new Date(p.t * 1000).toISOString().split("T")[0], c: p.c }))
       }))
+      // Fetch historical USDTHB rates so each date uses its own FX rate (not today's)
+      const fxByDate = {}
+      if (Object.values(ccyByTicker).some(c => c === "USD")) {
+        const fxH = await fetchHistory("USDTHB=X", range).catch(() => ({ series: [] }))
+        for (const p of (fxH?.series || []))
+          fxByDate[new Date(p.t * 1000).toISOString().split("T")[0]] = p.c
+      }
 
-      const series = buildSnapshotSeries(txs, seriesByTicker, ccyByTicker, fxRate)
+      const series = buildSnapshotSeries(txs, seriesByTicker, ccyByTicker, fxRate, fxByDate)
       if (!series.length) { setBackfillMsg(th ? "ดึงราคาย้อนหลังไม่ได้ ลองใหม่อีกครั้ง" : "Couldn't fetch historical prices — try again"); return }
 
       const { error } = await upsertSnapshots(portfolio.id, series)
