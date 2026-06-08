@@ -1,7 +1,7 @@
 // AlertsModal.jsx — Manage price alerts (view, add, delete)
 // Opens from: Nav bell icon (manage mode) OR Portfolio row bell (pre-filled add)
 
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import { Icon, TickerLogo } from './Nav'
 import { loadAlerts, addAlert, removeAlert, clearTriggered, requestNotifPermission } from '../lib/alerts'
 
@@ -90,6 +90,10 @@ export function AlertsModal({ lang, onClose, prefill }) {
     setTab('list')
   }
 
+  // iOS Safari ghost-click guard: record mount time so the backdrop onClick
+  // cannot fire within 300 ms of opening (prevents immediate auto-dismiss on tap).
+  const mountedAt = useRef(Date.now())
+
   const active    = alerts.filter(a => a.active && !a.triggered)
   const triggered = alerts.filter(a => a.triggered).slice(0, 10)
 
@@ -102,11 +106,12 @@ export function AlertsModal({ lang, onClose, prefill }) {
   return (
     <div style={{
       position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.45)', backdropFilter: 'blur(4px)',
-      display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1200, padding: 16,
-    }} onClick={e => e.target === e.currentTarget && onClose()}>
+      display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1200,
+      padding: '72px 16px 16px', /* 72px top clears 64px sticky nav */
+    }} onClick={e => e.target === e.currentTarget && Date.now() - mountedAt.current > 300 && onClose()}>
       <div style={{
         background: 'var(--bg)', borderRadius: 20, padding: '28px 24px',
-        width: '100%', maxWidth: 480, maxHeight: '88vh', overflowY: 'auto',
+        width: '100%', maxWidth: 480, maxHeight: 'calc(100vh - 88px)', overflowY: 'auto',
         boxShadow: '0 8px 48px rgba(0,0,0,0.18)', display: 'flex', flexDirection: 'column', gap: 16,
       }}>
         {/* Header */}
