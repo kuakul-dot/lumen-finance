@@ -48,7 +48,7 @@ export async function fetchFxRate() {
     if (res.ok) {
       const data = await res.json()
       const rate = data['USDTHB=X']?.price
-      if (rate && rate > 20 && rate < 100) {   // sanity check — realistic THB/USD range
+      if (rate && rate > 15 && rate < 150) {   // sanity check — wide enough for extreme FX moves
         _fxCache = { ts: now, rate }
         return rate
       }
