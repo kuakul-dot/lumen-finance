@@ -1843,7 +1843,7 @@ function DateSelectField({ label, value, onChange, lang }) {
     const dd = clampDay(y, m, d)
     onChange(`${y}-${String(m).padStart(2,'0')}-${String(dd).padStart(2,'0')}`)
   }
-  const years = Array.from({ length: now.getFullYear() - 2009 }, (_, i) => now.getFullYear() - i)
+  const years = Array.from({ length: 41 }, (_, i) => now.getFullYear() - i)  // 40 years back
   return (
     <Field label={label}>
       <div style={{ display: 'grid', gridTemplateColumns: '60px 1fr 90px', gap: 6 }}>
