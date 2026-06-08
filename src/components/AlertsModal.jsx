@@ -107,8 +107,8 @@ export function AlertsModal({ lang, onClose, prefill }) {
     <div style={{
       position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.45)', backdropFilter: 'blur(4px)',
       display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1200,
-      padding: '72px 16px 16px', /* 72px top clears 64px sticky nav */
-    }} onClick={e => e.target === e.currentTarget && Date.now() - mountedAt.current > 600 && onClose()}>
+      padding: '72px 16px 16px',
+    }}>
       <div style={{
         background: 'var(--bg)', borderRadius: 20, padding: '28px 24px',
         width: '100%', maxWidth: 480, maxHeight: 'calc(100vh - 88px)', overflowY: 'auto',
@@ -119,7 +119,10 @@ export function AlertsModal({ lang, onClose, prefill }) {
           <h3 style={{ margin: 0, fontSize: 18, fontFamily: 'var(--font-display)' }}>
             🔔 {th ? 'การแจ้งเตือนราคา' : 'Price Alerts'}
           </h3>
-          <button onClick={onClose} style={{ background: 'none', border: 'none', cursor: 'pointer', fontSize: 20, color: 'var(--ink-3)', lineHeight: 1 }}>×</button>
+          <button onClick={onClose} style={{
+            background: 'none', border: 'none', cursor: 'pointer', color: 'var(--ink-3)',
+            lineHeight: 1, padding: '8px 10px', fontSize: 24, touchAction: 'manipulation',
+          }}>×</button>
         </div>
 
         {/* Notification permission banner */}
