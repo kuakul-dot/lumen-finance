@@ -14,7 +14,7 @@ import { supabase } from './lib/supabase'
 import { getOrCreatePortfolio, getPortfolios, addPortfolio, updatePortfolio, deletePortfolioCascade, getHoldingsSafe, getCashAccounts, deriveHoldings, recordSnapshot, exportData, addTransaction, rebuildAllHoldings, upsertCashAccount, upsertGoal } from './lib/db'
 import { fetchPrices, fetchFxRate, clearPriceCache } from './lib/prices'
 import { checkAndFireAlerts, getActiveCount, setAlertsUserId, clearAlertsUserId, initAlertsFromSupabase } from './lib/alerts'
-import { AlertsModal } from './components/AlertsModal'
+import { AlertsModal, AlertsPage } from './components/AlertsModal'
 
 const TWEAK_DEFAULTS = {
   accent:  "oklch(0.55 0.06 175)",
@@ -81,8 +81,6 @@ export default function App() {
 
   // ── Price Alerts ──────────────────────────────────────────────────────────────
   const [alertCount,   setAlertCount]   = useState(() => getActiveCount())
-  const [alertsOpen,   setAlertsOpen]   = useState(false)
-  const alertsOpenedAt = useRef(0)  // timestamp when modal last opened
 
   // Refresh badge when any component modifies alerts
   useEffect(() => {
@@ -482,6 +480,8 @@ export default function App() {
     page = <WatchlistPage lang={lang} ccy={ccy} fxRate={fxRate} session={session} />
   } else if (route === "dca") {
     page = <DCAPage lang={lang} ccy={ccy} fxRate={fxRate} />
+  } else if (route === "alerts") {
+    page = <AlertsPage lang={lang} onBack={() => setRoute('dashboard')} />
   }
 
   return (
@@ -503,7 +503,7 @@ export default function App() {
           onRenamePortfolio={renamePortfolio}
           onDeletePortfolio={removePortfolio}
           alertCount={alertCount}
-          onOpenAlerts={() => { alertsOpenedAt.current = Date.now(); setAlertsOpen(true) }}
+          onOpenAlerts={() => setRoute('alerts')}
         />
       ) : (
         <OnboardingNav
@@ -518,14 +518,6 @@ export default function App() {
         <BottomNav route={route} setRoute={setRoute} lang={lang} />
       )}
 
-      {alertsOpen && (
-        <AlertsModal lang={lang} onClose={() => {
-          // Ignore any close attempt within 800 ms of opening —
-          // catches iOS ghost clicks regardless of how they arrive.
-          if (Date.now() - alertsOpenedAt.current < 800) return
-          setAlertsOpen(false)
-        }} />
-      )}
 
       <TweaksPanel title={i18n.tweaks.title}>
         <TweakSection label={lang === "th" ? "ธีม" : "Theme"} />

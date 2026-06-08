@@ -84,19 +84,6 @@ export function TopNav({ route, setRoute, lang, setLang, ccy, setCcy, t, session
   const [showManagePf, setShowManagePf] = useState(false)
   const pfMenuRef = useRef(null)
 
-  // Bell button: native non-passive touchend so e.preventDefault() actually suppresses
-  // the iOS 300ms ghost click (React synthetic touch listeners are passive → preventDefault is ignored).
-  const bellRef = useRef(null)
-  const onOpenAlertsRef = useRef(onOpenAlerts)
-  useEffect(() => { onOpenAlertsRef.current = onOpenAlerts }, [onOpenAlerts])
-  useEffect(() => {
-    const el = bellRef.current
-    if (!el) return
-    const handler = (e) => { e.preventDefault(); onOpenAlertsRef.current?.() }
-    el.addEventListener('touchend', handler, { passive: false })
-    return () => el.removeEventListener('touchend', handler)
-  }, [])
-
   useEffect(() => {
     if (!showProfile) return
     const handler = (e) => {
@@ -209,7 +196,6 @@ export function TopNav({ route, setRoute, lang, setLang, ccy, setCcy, t, session
           {/* Price Alert bell */}
           {session && onOpenAlerts && (
             <button
-              ref={bellRef}
               onClick={onOpenAlerts}
               title={lang === "th" ? "การแจ้งเตือนราคา" : "Price Alerts"}
               style={{
