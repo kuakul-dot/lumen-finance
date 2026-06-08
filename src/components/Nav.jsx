@@ -84,6 +84,19 @@ export function TopNav({ route, setRoute, lang, setLang, ccy, setCcy, t, session
   const [showManagePf, setShowManagePf] = useState(false)
   const pfMenuRef = useRef(null)
 
+  // Bell button: native non-passive touchend so e.preventDefault() actually suppresses
+  // the iOS 300ms ghost click (React synthetic touch listeners are passive → preventDefault is ignored).
+  const bellRef = useRef(null)
+  const onOpenAlertsRef = useRef(onOpenAlerts)
+  useEffect(() => { onOpenAlertsRef.current = onOpenAlerts }, [onOpenAlerts])
+  useEffect(() => {
+    const el = bellRef.current
+    if (!el) return
+    const handler = (e) => { e.preventDefault(); onOpenAlertsRef.current?.() }
+    el.addEventListener('touchend', handler, { passive: false })
+    return () => el.removeEventListener('touchend', handler)
+  }, [])
+
   useEffect(() => {
     if (!showProfile) return
     const handler = (e) => {
@@ -196,7 +209,7 @@ export function TopNav({ route, setRoute, lang, setLang, ccy, setCcy, t, session
           {/* Price Alert bell */}
           {session && onOpenAlerts && (
             <button
-              onTouchEnd={(e) => { e.preventDefault(); onOpenAlerts(); }}
+              ref={bellRef}
               onClick={onOpenAlerts}
               title={lang === "th" ? "การแจ้งเตือนราคา" : "Price Alerts"}
               style={{
@@ -204,6 +217,7 @@ export function TopNav({ route, setRoute, lang, setLang, ccy, setCcy, t, session
                 color: alertCount > 0 ? "var(--accent-ink)" : "var(--ink-3)",
                 padding: "6px 8px", borderRadius: 8, lineHeight: 0,
                 display: "inline-flex", alignItems: "center",
+                touchAction: "manipulation",
               }}>
               <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                 <path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9"/>
