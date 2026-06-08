@@ -684,7 +684,7 @@ function LivePortfolioPage({ t, lang, ccy, portfolio, liveHoldings, prices = {},
                             title={th ? "ขาย" : "Sell"}
                           >{th ? "ขาย" : "Sell"}</button>
                           <button
-                            onClick={() => { const orig = liveHoldings.find(h => h.id === r._ids[0]); if (orig) setEditHolding(orig) }}
+                            onClick={() => { const orig = liveHoldings.find(h => h.id === r._ids[0]); if (orig) setEditHolding({ ...orig, _lots: r._lots }) }}
                             style={{ background: "none", border: "none", cursor: "pointer", color: "var(--ink-3)", padding: "4px 7px", borderRadius: 6, fontSize: 15, lineHeight: 1 }}
                             title={th ? "แก้ไข" : "Edit"}
                           >✎</button>
@@ -1365,15 +1365,24 @@ function EditHoldingModal({ lang, holding, onClose, onSaved }) {
             </Field>
           )}
 
-          {/* Shares + Cost + Currency */}
+          {/* Shares + Cost + Currency — warn if managed by transactions */}
+          {holding._lots > 1 && (
+            <div style={{ padding: "10px 14px", borderRadius: 8, background: "oklch(0.97 0.05 70)", color: "oklch(0.45 0.12 60)", fontSize: 12, lineHeight: 1.5 }}>
+              ⚠️ {th
+                ? `Holding นี้มี ${holding._lots} lots จาก transactions — จำนวนหุ้นและราคาทุนจะถูก Reconcile คำนวณใหม่ทับ หากต้องการแก้ไขให้บันทึก Buy/Sell แทน`
+                : `This holding has ${holding._lots} transaction lots. Shares and cost price will be overwritten when you run Reconcile. Use Buy/Sell transactions to make changes instead.`}
+            </div>
+          )}
           <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 80px", gap: 12 }}>
             <Field label={th ? "จำนวนหุ้น" : "Shares"}>
               <CalcInput required value={form.shares}
-                     onChange={e => set('shares', e.target.value)} placeholder="0" style={inputStyle} />
+                     onChange={e => set('shares', e.target.value)} placeholder="0"
+                     style={{ ...inputStyle, opacity: holding._lots > 1 ? 0.6 : 1 }} />
             </Field>
             <Field label={th ? "ราคาทุน/หุ้น" : "Cost price/share"}>
               <CalcInput required value={form.cost_price}
-                     onChange={e => set('cost_price', e.target.value)} placeholder="0.00" style={inputStyle} />
+                     onChange={e => set('cost_price', e.target.value)} placeholder="0.00"
+                     style={{ ...inputStyle, opacity: holding._lots > 1 ? 0.6 : 1 }} />
             </Field>
             <Field label={th ? "สกุล" : "Ccy"}>
               <select value={form.currency} onChange={e => set('currency', e.target.value)} style={inputStyle}>
