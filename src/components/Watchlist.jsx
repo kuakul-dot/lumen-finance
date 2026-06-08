@@ -1489,10 +1489,12 @@ export function WatchlistPage({ lang, ccy, fxRate = 36, session }) {
             </span>
           </div>
 
-          {/* Card grid — max 3 columns, min 320px each */}
+          {/* Card grid — max 3 columns, min 300px each.
+               width:100% is required for iOS Safari to compute auto-fill correctly. */}
           <div className="watchlist-grid" style={{
             display: 'grid',
-            gridTemplateColumns: 'repeat(auto-fill, minmax(320px, 1fr))',
+            width: '100%',
+            gridTemplateColumns: 'repeat(auto-fill, minmax(300px, 1fr))',
             gap: 'var(--gap)',
             maxWidth: 1200,
           }}>
