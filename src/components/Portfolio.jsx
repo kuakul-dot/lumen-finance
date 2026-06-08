@@ -473,13 +473,13 @@ function LivePortfolioPage({ t, lang, ccy, portfolio, liveHoldings, prices = {},
         <>
           {/* ── Summary card — 5-column PortMetric layout matching demo ── */}
           <section className="card" style={{ padding: "24px 28px", marginBottom: 16 }}>
-            <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(140px, 1fr))", gap: 24, alignItems: "center" }}>
-              <div>
+            <div className="port-summary-grid" style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(160px, 1fr))", gap: 24, alignItems: "center" }}>
+              <div style={{ minWidth: 0, overflow: "hidden" }}>
                 <div className="label-up" style={{ marginBottom: 6 }}>
                   {t.portfolio.total}
                   {hasLivePrices && <span style={{ marginLeft: 6, color: "var(--gain)", fontWeight: 700 }}>● LIVE</span>}
                 </div>
-                <div className="display" style={{ fontSize: 36, lineHeight: 1 }}>{LUMEN_FMT.money(totalValue, ccy)}</div>
+                <div className="display port-total-val" style={{ fontSize: 36, lineHeight: 1, whiteSpace: "nowrap" }}>{LUMEN_FMT.money(totalValue, ccy)}</div>
                 <div className="muted" style={{ fontSize: 12, marginTop: 4 }}>
                   {grouped.length} {th ? "ตำแหน่ง · หลายหมวด" : "positions · asset classes"}
                 </div>
@@ -3711,9 +3711,9 @@ function SortHeader({ id, label, sortKey, sortDir, onSort, align = "left" }) {
 
 function PortMetric({ label, value, sub, onClick }) {
   return (
-    <div onClick={onClick} style={onClick ? { cursor: "pointer" } : undefined} title={onClick ? "ดูรายละเอียด" : undefined}>
+    <div onClick={onClick} style={onClick ? { cursor: "pointer", minWidth: 0, overflow: "hidden" } : { minWidth: 0, overflow: "hidden" }} title={onClick ? "ดูรายละเอียด" : undefined}>
       <div className="label-up" style={{ marginBottom: 6 }}>{label}{onClick && <span style={{ marginLeft: 4, color: "var(--ink-4)" }}>›</span>}</div>
-      <div style={{ fontFamily: "var(--font-display)", fontSize: 26, lineHeight: 1, letterSpacing: "-0.02em" }}>{value}</div>
+      <div className="port-metric-val" style={{ fontFamily: "var(--font-display)", fontSize: 26, lineHeight: 1, letterSpacing: "-0.02em", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{value}</div>
       <div style={{ fontSize: 11, color: "var(--ink-3)", marginTop: 4 }}>{sub}</div>
     </div>
   )

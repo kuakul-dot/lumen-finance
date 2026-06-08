@@ -615,6 +615,10 @@ hr.rule { border: 0; border-top: 1px solid var(--line); margin: 24px 0; }
   /* Hero section: collapse 2-col to 1-col so period buttons stay visible */
   .hero-grid { grid-template-columns: 1fr !important; gap: 24px !important; }
   .hero-num  { font-size: 52px !important; }
+
+  /* Portfolio summary: shrink main total value so it doesn't overflow cells */
+  .port-total-val  { font-size: 24px !important; }
+  .port-metric-val { font-size: 20px !important; }
 }
 
 /* ─── Mobile responsive ─────────────────────────────────────────────────── */
@@ -634,6 +638,8 @@ hr.rule { border: 0; border-top: 1px solid var(--line); margin: 24px 0; }
   .grid-12 { grid-template-columns: 1fr; }
   [class*="col-span-"] { grid-column: 1 / -1 !important; }
   .hero-grid { grid-template-columns: 1fr !important; gap: 16px !important; }
+  .port-total-val  { font-size: 22px !important; }
+  .port-metric-val { font-size: 18px !important; }
 
   /* Scrollable tables */
   .table-wrap { overflow-x: auto; -webkit-overflow-scrolling: touch; }
