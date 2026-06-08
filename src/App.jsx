@@ -502,7 +502,7 @@ export default function App() {
           onRenamePortfolio={renamePortfolio}
           onDeletePortfolio={removePortfolio}
           alertCount={alertCount}
-          onOpenAlerts={() => setAlertsOpen(true)}
+          onOpenAlerts={() => setAlertsOpen(v => !v)}
         />
       ) : (
         <OnboardingNav
