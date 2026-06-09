@@ -319,6 +319,17 @@ export function ToolsPage({ t, lang, ccy, dataState, liveHoldings = [], prices =
     setTargets(prev => Object.fromEntries(Object.entries(prev).map(([k, v]) => [k, v / sum])))
   }
 
+  const normalizeTickerWeightsForClass = (cls, list) => {
+    const weights = list.map(tr => ({ ticker: tr.ticker, w: hybridWeightPct(tr) }))
+    const sum = weights.reduce((s, x) => s + x.w, 0)
+    if (!sum) return
+    setTickerWeights(prev => {
+      const next = { ...prev }
+      weights.forEach(({ ticker, w }) => { next[ticker] = (w / sum) * 100 })
+      return next
+    })
+  }
+
   // ── Rebalance units (class buckets, or per-ticker in hybrid mode) ───────────
   const units = useMemo(() => {
     if (targetMode === "hybrid") {
@@ -1060,9 +1071,28 @@ export function ToolsPage({ t, lang, ccy, dataState, liveHoldings = [], prices =
                   </div>
                   {Object.entries(tickersByClass).filter(([cls]) => cls !== "Cash").map(([cls, list]) => (
                     <div key={cls} style={{ display: "grid", gap: 6 }}>
-                      <div className="label-up" style={{ display: "flex", alignItems: "center", gap: 6 }}>
-                        <span style={{ fontSize: 14 }}>{CLASS_META[cls]?.icon}</span>
-                        {cls} · {th ? "สัดส่วนในกลุ่ม" : "within class"} ({((targets[cls] || 0) * 100).toFixed(0)}%)
+                      <div className="label-up" style={{ display: "flex", alignItems: "center", gap: 6, justifyContent: "space-between" }}>
+                        <span style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                          <span style={{ fontSize: 14 }}>{CLASS_META[cls]?.icon}</span>
+                          {cls} · {th ? "สัดส่วนในกลุ่ม" : "within class"} ({((targets[cls] || 0) * 100).toFixed(0)}%)
+                        </span>
+                        {(() => {
+                          const classSum = list.reduce((s, tr) => s + hybridWeightPct(tr), 0)
+                          const classOk  = Math.abs(classSum - 100) <= 1
+                          return (
+                            <span style={{ display: "flex", gap: 6, alignItems: "center" }}>
+                              <span className={"chip " + (classOk ? "chip-gain" : "chip-loss")} style={{ fontSize: 10, padding: "2px 7px" }}>
+                                {th ? "รวม " : "Sum "}{classSum.toFixed(1)}%
+                              </span>
+                              {!classOk && (
+                                <button className="btn btn-outline btn-sm" style={{ fontSize: 11, padding: "2px 8px" }}
+                                  onClick={() => normalizeTickerWeightsForClass(cls, list)}>
+                                  {th ? "ปรับ 100%" : "Normalize"}
+                                </button>
+                              )}
+                            </span>
+                          )
+                        })()}
                       </div>
                       {list.map(tr => {
                         const w = hybridWeightPct(tr)
