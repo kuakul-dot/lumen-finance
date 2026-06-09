@@ -12,6 +12,50 @@ import { SRPanel } from './SRPanel'
 import { AlertsModal } from './AlertsModal'
 import { CalcInput } from './CalcInput'
 
+// ── Rebalance target integration ─────────────────────────────────────────────
+// Uses the same localStorage keys as Tools.jsx so the two pages share one source of truth.
+const REBAL_TARGETS_KEY      = "lumen_rebalance_targets"
+const REBAL_TICKER_W_KEY     = "lumen_rebalance_ticker_weights"
+const REBAL_MODE_KEY         = "lumen_rebalance_mode"
+const REBAL_BAND_KEY         = "lumen_rebalance_band"
+
+function holdingToClass(r) {
+  if (r.cls === "Equity" || r.cls === "ETF")
+    return r.region === "TH" ? "TH Equity" : "US Equity"
+  if (r.cls === "Bond" || r.cls === "MutualFund") return "Bonds"
+  if (r.cls === "Commodity" || r.cls === "GoldTH") return "Gold"
+  if (r.cls === "Crypto") return "Crypto"
+  return "Cash"
+}
+
+// Horizontal progress bar with a target-line marker.
+// cur / tgt are both in % (e.g. 4.2 and 5.0).
+// Colors: green = over target (trim), orange = within band (hold), red = under (buy).
+function WeightTargetBar({ cur, tgt }) {
+  if (!tgt) return null
+  const max    = Math.max(cur, tgt) * 1.5 || 10
+  const curPx  = Math.min(100, (cur / max) * 100)
+  const tgtPx  = Math.min(100, (tgt / max) * 100)
+  const ratio  = tgt > 0 ? cur / tgt : 0
+  // within ±20 % of target → orange; above → green; below → red
+  const color  = ratio > 1.20 ? "var(--gain)"
+               : ratio < 0.80 ? "var(--loss)"
+               : "oklch(0.72 0.15 60)"
+  return (
+    <div title={`${cur.toFixed(2)}% / target ${tgt.toFixed(2)}%`}
+         style={{ position: "relative", width: 52, height: 4, borderRadius: 2,
+                  background: "var(--bg-2)", flexShrink: 0 }}>
+      {/* fill */}
+      <div style={{ position: "absolute", inset: 0, right: "auto",
+                    width: curPx + "%", borderRadius: 2, background: color }} />
+      {/* target marker */}
+      <div style={{ position: "absolute", top: -3, bottom: -3,
+                    left: `calc(${tgtPx}% - 1px)`, width: 2,
+                    background: "var(--ink-2)", borderRadius: 1 }} />
+    </div>
+  )
+}
+
 export function PortfolioPage({ t, lang, ccy, setRoute, dataState, portfolio, liveHoldings = [], prices = {}, refreshHoldings, loadingData, dataError, retryLoad, fxRate = 36, cashAccounts = [], refreshCashAccounts, session }) {
   const [showAdd, setShowAdd] = useState(false)
   const th = lang === "th"
@@ -137,6 +181,45 @@ function LivePortfolioPage({ t, lang, ccy, portfolio, liveHoldings, prices = {},
   }, [tab, loadTransactions])
 
   const rows = useMemo(() => deriveHoldings(liveHoldings, ccy, prices, fxRate), [liveHoldings, ccy, prices, fxRate])
+
+  // ── Rebalance targets (links to Tools.jsx via shared localStorage) ────────
+  const rebalState = useMemo(() => {
+    try {
+      const raw = localStorage.getItem(REBAL_TARGETS_KEY)
+      if (!raw) return null
+      return {
+        targets : JSON.parse(raw),
+        tickerW : JSON.parse(localStorage.getItem(REBAL_TICKER_W_KEY) || "{}"),
+        mode    : localStorage.getItem(REBAL_MODE_KEY) === "hybrid" ? "hybrid" : "class",
+        band    : parseFloat(localStorage.getItem(REBAL_BAND_KEY) || "5") || 5,
+      }
+    } catch { return null }
+  }, [])   // read once on mount; updates when user opens Portfolio after changing targets
+
+  const classTotals = useMemo(() => {
+    const m = {}
+    rows.forEach(r => { const c = holdingToClass(r); m[c] = (m[c] || 0) + r.value })
+    return m
+  }, [rows])
+
+  const getTargetPct = useCallback((r) => {
+    if (!rebalState) return 0
+    const { targets, tickerW, mode } = rebalState
+    const cls      = holdingToClass(r)
+    const classTgt = targets[cls] || 0          // fraction 0–1
+    if (!classTgt) return 0
+    const classVal = classTotals[cls] || r.value
+
+    if (mode === "hybrid" && tickerW[r.ticker] != null) {
+      // Explicit per-ticker weight; normalise across class members
+      const classMembers  = rows.filter(h => holdingToClass(h) === cls)
+      const weightSum     = classMembers.reduce((s, h) =>
+        s + (tickerW[h.ticker] ?? (classVal > 0 ? (h.value / classVal) * 100 : 0)), 0)
+      return weightSum > 0 ? classTgt * (tickerW[r.ticker] / weightSum) * 100 : 0
+    }
+    // Class mode — proportional: holding's share of class × class target
+    return classTgt * (r.value / classVal) * 100
+  }, [rebalState, rows, classTotals])
 
   // Real 30-day sparkline data: last month of daily closes per ticker from Yahoo
   const [spark30, setSpark30] = useState({})  // { TICKER: { data: number[], ret: pct } }
@@ -632,12 +715,32 @@ function LivePortfolioPage({ t, lang, ccy, portfolio, liveHoldings, prices = {},
                         </div>
                       </td>
                       <td className="num">
-                        <div style={{ display: "flex", alignItems: "center", gap: 8, justifyContent: "flex-end" }}>
-                          <div className="bar" style={{ width: 50 }}>
-                            <span style={{ width: Math.min(100, r.weight * 3) + "%", background: classFg(r.cls) }} />
-                          </div>
-                          <span style={{ minWidth: 36 }}>{r.weight.toFixed(1)}%</span>
-                        </div>
+                        {(() => {
+                          const tgt = getTargetPct(r)
+                          const diff = tgt > 0 ? r.weight - tgt : 0
+                          const ratio = tgt > 0 ? r.weight / tgt : 0
+                          const statusColor = ratio > 1.20 ? "var(--gain)"
+                                            : ratio < 0.80 ? "var(--loss)"
+                                            : "oklch(0.72 0.15 60)"
+                          return (
+                            <div style={{ display: "flex", flexDirection: "column", alignItems: "flex-end", gap: 3 }}>
+                              <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                                {tgt > 0
+                                  ? <WeightTargetBar cur={r.weight} tgt={tgt} />
+                                  : <div className="bar" style={{ width: 50 }}>
+                                      <span style={{ width: Math.min(100, r.weight * 3) + "%", background: classFg(r.cls) }} />
+                                    </div>
+                                }
+                                <span style={{ minWidth: 36 }}>{r.weight.toFixed(1)}%</span>
+                              </div>
+                              {tgt > 0 && (
+                                <div style={{ fontSize: 9, fontFamily: "var(--font-mono)", color: statusColor, letterSpacing: "0.01em" }}>
+                                  {diff >= 0 ? "+" : ""}{diff.toFixed(1)}% vs {tgt.toFixed(1)}%
+                                </div>
+                              )}
+                            </div>
+                          )
+                        })()}
                       </td>
                       <td>
                         <div style={{ display: "flex", gap: 2, justifyContent: "flex-end" }}>
@@ -3541,6 +3644,42 @@ function DemoPortfolioPage({ t, lang, ccy, setRoute }) {
   const [filter, setFilter] = useState("all")
   const th = lang === "th"
 
+  // ── Rebalance targets (same logic as LivePortfolioPage) ──────────────────
+  const rebalState = useMemo(() => {
+    try {
+      const raw = localStorage.getItem(REBAL_TARGETS_KEY)
+      if (!raw) return null
+      return {
+        targets : JSON.parse(raw),
+        tickerW : JSON.parse(localStorage.getItem(REBAL_TICKER_W_KEY) || "{}"),
+        mode    : localStorage.getItem(REBAL_MODE_KEY) === "hybrid" ? "hybrid" : "class",
+        band    : parseFloat(localStorage.getItem(REBAL_BAND_KEY) || "5") || 5,
+      }
+    } catch { return null }
+  }, [])
+
+  const classTotals = useMemo(() => {
+    const m = {}
+    rows.forEach(r => { const c = holdingToClass(r); m[c] = (m[c] || 0) + r.value })
+    return m
+  }, [rows])
+
+  const getTargetPct = useCallback((r) => {
+    if (!rebalState) return 0
+    const { targets, tickerW, mode } = rebalState
+    const cls      = holdingToClass(r)
+    const classTgt = targets[cls] || 0
+    if (!classTgt) return 0
+    const classVal = classTotals[cls] || r.value
+    if (mode === "hybrid" && tickerW[r.ticker] != null) {
+      const classMembers = rows.filter(h => holdingToClass(h) === cls)
+      const weightSum    = classMembers.reduce((s, h) =>
+        s + (tickerW[h.ticker] ?? (classVal > 0 ? (h.value / classVal) * 100 : 0)), 0)
+      return weightSum > 0 ? classTgt * (tickerW[r.ticker] / weightSum) * 100 : 0
+    }
+    return classTgt * (r.value / classVal) * 100
+  }, [rebalState, rows, classTotals])
+
   const sorted = useMemo(() => {
     let list = rows
     if (q) list = list.filter(r => (r.ticker + r.name).toLowerCase().includes(q.toLowerCase()))
@@ -3668,12 +3807,32 @@ function DemoPortfolioPage({ t, lang, ccy, setRoute }) {
                     </div>
                   </td>
                   <td className="num">
-                    <div style={{ display: "flex", alignItems: "center", gap: 8, justifyContent: "flex-end" }}>
-                      <div className="bar" style={{ width: 50 }}>
-                        <span style={{ width: Math.min(100, r.weight * 3) + "%", background: classFg(r.cls) }} />
-                      </div>
-                      <span style={{ minWidth: 36 }}>{r.weight.toFixed(1)}%</span>
-                    </div>
+                    {(() => {
+                      const tgt = getTargetPct(r)
+                      const diff = tgt > 0 ? r.weight - tgt : 0
+                      const ratio = tgt > 0 ? r.weight / tgt : 0
+                      const statusColor = ratio > 1.20 ? "var(--gain)"
+                                        : ratio < 0.80 ? "var(--loss)"
+                                        : "oklch(0.72 0.15 60)"
+                      return (
+                        <div style={{ display: "flex", flexDirection: "column", alignItems: "flex-end", gap: 3 }}>
+                          <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                            {tgt > 0
+                              ? <WeightTargetBar cur={r.weight} tgt={tgt} />
+                              : <div className="bar" style={{ width: 50 }}>
+                                  <span style={{ width: Math.min(100, r.weight * 3) + "%", background: classFg(r.cls) }} />
+                                </div>
+                            }
+                            <span style={{ minWidth: 36 }}>{r.weight.toFixed(1)}%</span>
+                          </div>
+                          {tgt > 0 && (
+                            <div style={{ fontSize: 9, fontFamily: "var(--font-mono)", color: statusColor, letterSpacing: "0.01em" }}>
+                              {diff >= 0 ? "+" : ""}{diff.toFixed(1)}% vs {tgt.toFixed(1)}%
+                            </div>
+                          )}
+                        </div>
+                      )
+                    })()}
                   </td>
                   <td style={{ color: "var(--ink-4)", width: 24 }}><Icon name="chevron" size={14} /></td>
                 </tr>
