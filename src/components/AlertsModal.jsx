@@ -5,9 +5,35 @@
 //   AlertsModal    — overlay modal, used by Portfolio page (pre-filled add)
 //   AlertsPage     — full page, used by Nav bell (no backdrop → no ghost-click dismiss)
 
-import { useState, useEffect } from 'react'
+import { useState, useEffect, Component } from 'react'
 import { TickerLogo } from './Nav'
 import { loadAlerts, addAlert, removeAlert, clearTriggered, requestNotifPermission } from '../lib/alerts'
+
+// ── Error boundary — prevents blank screen if AlertsContent crashes ────────────
+class AlertsBoundary extends Component {
+  constructor(props) { super(props); this.state = { err: null } }
+  static getDerivedStateFromError(err) { return { err } }
+  componentDidCatch(err, info) { console.error('[Alerts]', err, info?.componentStack) }
+  render() {
+    if (this.state.err) {
+      const th = this.props.lang === 'th'
+      return (
+        <div style={{ padding: '40px 20px', textAlign: 'center', color: 'var(--ink-3)' }}>
+          <div style={{ fontSize: 32, marginBottom: 12 }}>⚠️</div>
+          <div style={{ fontSize: 14, marginBottom: 16 }}>
+            {th ? 'เกิดข้อผิดพลาด กรุณาลองใหม่' : 'Something went wrong. Please try again.'}
+          </div>
+          <button onClick={() => this.setState({ err: null })}
+            style={{ padding: '8px 20px', borderRadius: 8, border: '1px solid var(--line)',
+                     background: 'var(--accent)', color: '#fff', fontSize: 13, cursor: 'pointer' }}>
+            {th ? 'ลองใหม่' : 'Retry'}
+          </button>
+        </div>
+      )
+    }
+    return this.props.children
+  }
+}
 
 function fmtP(p, ccy) {
   if (p == null || isNaN(p)) return '—'
@@ -368,16 +394,20 @@ export function AlertsModal({ lang, onClose, prefill }) {
 // Full-page alerts view — used by the Nav bell button.
 // Renders as normal page content: no overlay, no backdrop, no ghost-click risk.
 // User closes by tapping ← Back or any nav link.
+// NOTE: intentionally no fade-in class — animation-fill-mode:both starts at
+//       opacity:0 and iOS Safari can leave it stuck there (blank white screen).
 export function AlertsPage({ lang, onBack }) {
   return (
-    <div className="shell fade-in" style={{ maxWidth: 680 }}>
-      <div style={{
-        background: 'var(--bg)', borderRadius: 20, padding: '28px 24px',
-        display: 'flex', flexDirection: 'column', gap: 16,
-        boxShadow: '0 2px 16px rgba(0,0,0,0.06)',
-      }}>
-        <AlertsContent lang={lang} onDone={onBack} isPage />
+    <AlertsBoundary lang={lang}>
+      <div className="shell" style={{ maxWidth: 680 }}>
+        <div style={{
+          background: 'var(--bg)', borderRadius: 20, padding: '28px 24px',
+          display: 'flex', flexDirection: 'column', gap: 16,
+          boxShadow: '0 2px 16px rgba(0,0,0,0.06)',
+        }}>
+          <AlertsContent lang={lang} onDone={onBack} isPage />
+        </div>
       </div>
-    </div>
+    </AlertsBoundary>
   )
 }
