@@ -29,17 +29,16 @@ function holdingToClass(r) {
 }
 
 // Horizontal progress bar with a target-line marker.
-// cur / tgt are both in % (e.g. 4.2 and 5.0).
-// Colors: green = over target (trim), orange = within band (hold), red = under (buy).
-function WeightTargetBar({ cur, tgt }) {
+// cur / tgt are both in % (e.g. 4.2 and 5.0). band is tolerance in pp (default 5).
+// Colors: green = over target by >band pp (trim), orange = within ±band (hold), red = under (buy).
+function WeightTargetBar({ cur, tgt, band = 5 }) {
   if (!tgt) return null
   const max    = Math.max(cur, tgt) * 1.5 || 10
   const curPx  = Math.min(100, (cur / max) * 100)
   const tgtPx  = Math.min(100, (tgt / max) * 100)
-  const ratio  = tgt > 0 ? cur / tgt : 0
-  // within ±20 % of target → orange; above → green; below → red
-  const color  = ratio > 1.20 ? "var(--gain)"
-               : ratio < 0.80 ? "var(--loss)"
+  const diff   = cur - tgt
+  const color  = diff >  band ? "var(--gain)"
+               : diff < -band ? "var(--loss)"
                : "oklch(0.72 0.15 60)"
   return (
     <div title={`${cur.toFixed(2)}% / target ${tgt.toFixed(2)}%`}
@@ -716,17 +715,17 @@ function LivePortfolioPage({ t, lang, ccy, portfolio, liveHoldings, prices = {},
                       </td>
                       <td className="num">
                         {(() => {
-                          const tgt = getTargetPct(r)
+                          const tgt  = getTargetPct(r)
+                          const band = rebalState?.band ?? 5
                           const diff = tgt > 0 ? r.weight - tgt : 0
-                          const ratio = tgt > 0 ? r.weight / tgt : 0
-                          const statusColor = ratio > 1.20 ? "var(--gain)"
-                                            : ratio < 0.80 ? "var(--loss)"
+                          const statusColor = diff >  band ? "var(--gain)"
+                                            : diff < -band ? "var(--loss)"
                                             : "oklch(0.72 0.15 60)"
                           return (
                             <div style={{ display: "flex", flexDirection: "column", alignItems: "flex-end", gap: 3 }}>
                               <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
                                 {tgt > 0
-                                  ? <WeightTargetBar cur={r.weight} tgt={tgt} />
+                                  ? <WeightTargetBar cur={r.weight} tgt={tgt} band={band} />
                                   : <div className="bar" style={{ width: 50 }}>
                                       <span style={{ width: Math.min(100, r.weight * 3) + "%", background: classFg(r.cls) }} />
                                     </div>
@@ -3808,17 +3807,17 @@ function DemoPortfolioPage({ t, lang, ccy, setRoute }) {
                   </td>
                   <td className="num">
                     {(() => {
-                      const tgt = getTargetPct(r)
+                      const tgt  = getTargetPct(r)
+                      const band = rebalState?.band ?? 5
                       const diff = tgt > 0 ? r.weight - tgt : 0
-                      const ratio = tgt > 0 ? r.weight / tgt : 0
-                      const statusColor = ratio > 1.20 ? "var(--gain)"
-                                        : ratio < 0.80 ? "var(--loss)"
+                      const statusColor = diff >  band ? "var(--gain)"
+                                        : diff < -band ? "var(--loss)"
                                         : "oklch(0.72 0.15 60)"
                       return (
                         <div style={{ display: "flex", flexDirection: "column", alignItems: "flex-end", gap: 3 }}>
                           <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
                             {tgt > 0
-                              ? <WeightTargetBar cur={r.weight} tgt={tgt} />
+                              ? <WeightTargetBar cur={r.weight} tgt={tgt} band={band} />
                               : <div className="bar" style={{ width: 50 }}>
                                   <span style={{ width: Math.min(100, r.weight * 3) + "%", background: classFg(r.cls) }} />
                                 </div>
