@@ -370,9 +370,9 @@ export function AlertsModal({ lang, onClose, prefill }) {
 // User closes by tapping ← Back or any nav link.
 export function AlertsPage({ lang, onBack }) {
   return (
-    <div style={{ maxWidth: 600, margin: '0 auto', padding: '0 16px 80px' }}>
+    <div className="shell fade-in" style={{ maxWidth: 680 }}>
       <div style={{
-        background: 'var(--bg)', borderRadius: 20, padding: '28px 24px', marginTop: 24,
+        background: 'var(--bg)', borderRadius: 20, padding: '28px 24px',
         display: 'flex', flexDirection: 'column', gap: 16,
         boxShadow: '0 2px 16px rgba(0,0,0,0.06)',
       }}>

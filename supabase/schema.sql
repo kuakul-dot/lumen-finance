@@ -153,10 +153,42 @@ create policy "Users can manage own watchlist"
   on watchlist for all using (auth.uid() = user_id);
 grant select, insert, update, delete on table watchlist to authenticated;
 
+-- ── Price alerts (synced across devices) ─────────────────────────────────────
+create table if not exists price_alerts (
+  id           uuid primary key default gen_random_uuid(),
+  user_id      uuid not null references auth.users(id) on delete cascade,
+  local_id     text not null,
+  ticker       text not null default '',
+  yahoo_sym    text not null default '',
+  region       text,
+  cls          text,
+  name         text,
+  target_price numeric not null,
+  direction    text not null default 'below',  -- 'above' | 'below'
+  label        text not null default '',
+  currency     text not null default 'THB',
+  live_price   numeric,
+  active       boolean not null default true,
+  triggered    boolean not null default false,
+  triggered_at timestamptz,
+  created_at   timestamptz not null default now(),
+  unique (user_id, local_id)
+);
+alter table price_alerts enable row level security;
+drop policy if exists "Users can manage own alerts" on price_alerts;
+create policy "Users can manage own alerts"
+  on price_alerts for all using (auth.uid() = user_id);
+grant select, insert, update, delete on table price_alerts to authenticated;
+
+-- ── portfolios.rebalance_config (cross-device target sync) ───────────────────
+alter table portfolios add column if not exists rebalance_config jsonb default null;
+
 -- ── Indexes ──────────────────────────────────────────────────────────────────
-create index if not exists holdings_portfolio_idx on holdings(portfolio_id);
+create index if not exists holdings_portfolio_idx    on holdings(portfolio_id);
 create index if not exists transactions_portfolio_idx on transactions(portfolio_id);
-create index if not exists transactions_date_idx on transactions(transacted_at desc);
-create index if not exists goals_user_idx on goals(user_id);
-create index if not exists snapshots_portfolio_idx on portfolio_snapshots(portfolio_id, date);
-create index if not exists watchlist_user_idx     on watchlist(user_id, added_at);
+create index if not exists transactions_date_idx     on transactions(transacted_at desc);
+create index if not exists goals_user_idx            on goals(user_id);
+create index if not exists snapshots_portfolio_idx   on portfolio_snapshots(portfolio_id, date);
+create index if not exists watchlist_user_idx        on watchlist(user_id, added_at);
+create index if not exists price_alerts_user_idx     on price_alerts(user_id, created_at desc);
+
