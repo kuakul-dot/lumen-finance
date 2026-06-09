@@ -130,6 +130,18 @@ export default function App() {
       const savedId = localStorage.getItem(`lumen.activePortfolio.${userId}`)
       const active = list.find(p => p.id === savedId) || list[0]
       setPortfolio(active)
+      // ── Sync rebalance config from Supabase → localStorage ──────────────
+      // Ensures targets are consistent across all devices (iPad / desktop / etc.)
+      if (active.rebalance_config) {
+        const cfg = active.rebalance_config
+        try {
+          if (cfg.targets)  localStorage.setItem('lumen_rebalance_targets',        JSON.stringify(cfg.targets))
+          if (cfg.band != null) localStorage.setItem('lumen_rebalance_band',       String(cfg.band))
+          if (cfg.mode)     localStorage.setItem('lumen_rebalance_mode',           cfg.mode)
+          if (cfg.bandMode) localStorage.setItem('lumen_rebalance_band_mode',      cfg.bandMode)
+          if (cfg.tickerW)  localStorage.setItem('lumen_rebalance_ticker_weights', JSON.stringify(cfg.tickerW))
+        } catch {}
+      }
       await loadActivePortfolioData(active)
     } catch (err) {
       console.error('[Lumen] loadPortfolioData error:', err)

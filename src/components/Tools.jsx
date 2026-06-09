@@ -4,7 +4,7 @@ import { AiAnalysisModal } from './AiModal'
 import { CalcInput } from './CalcInput'
 import { useAiAnalysis } from '../lib/useAiAnalysis'
 import { LUMEN_FMT, LUMEN_DERIVE, LUMEN_TARGETS, LUMEN_FX } from '../data'
-import { deriveHoldings } from '../lib/db'
+import { deriveHoldings, updatePortfolio } from '../lib/db'
 
 // ── Starter instrument recommendations per asset class ────────────────────────
 // Shown when a class has a target allocation but no holdings yet.
@@ -178,12 +178,27 @@ export function ToolsPage({ t, lang, ccy, dataState, liveHoldings = [], prices =
     setShowResult(false)
   }, [ccy])
 
-  // Persist to localStorage
+  // Persist to localStorage (immediate)
   useEffect(() => { saveTargets(targets) }, [targets])
   useEffect(() => { try { localStorage.setItem(BAND_STORAGE_KEY, String(band)) } catch {} }, [band])
   useEffect(() => { try { localStorage.setItem(BAND_MODE_STORAGE_KEY, bandMode) } catch {} }, [bandMode])
   useEffect(() => { try { localStorage.setItem("lumen_rebalance_mode", targetMode) } catch {} }, [targetMode])
   useEffect(() => { try { localStorage.setItem("lumen_rebalance_ticker_weights", JSON.stringify(tickerWeights)) } catch {} }, [tickerWeights])
+
+  // Persist to Supabase (debounced 1.5 s) — syncs targets across all devices
+  const _rebalSaveTimer = useRef(null)
+  useEffect(() => {
+    if (!portfolio?.id) return
+    clearTimeout(_rebalSaveTimer.current)
+    _rebalSaveTimer.current = setTimeout(() => {
+      updatePortfolio(portfolio.id, {
+        rebalance_config: {
+          targets, band, bandMode, mode: targetMode, tickerW: tickerWeights,
+        }
+      }).catch(() => {})   // fire-and-forget; localStorage is the primary store
+    }, 1500)
+    return () => clearTimeout(_rebalSaveTimer.current)
+  }, [targets, band, bandMode, targetMode, tickerWeights, portfolio?.id])
 
   // ── Derive rows ──────────────────────────────────────────────────────────────
   const isLive = dataState === "live"
