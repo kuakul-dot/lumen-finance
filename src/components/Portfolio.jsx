@@ -627,11 +627,11 @@ function LivePortfolioPage({ t, lang, ccy, portfolio, liveHoldings, prices = {},
               <thead>
                 <tr>
                   <SortHeader id="ticker" label={t.portfolio.holding} sortKey={sortKey} sortDir={sortDir} onSort={setSort} />
-                  <SortHeader id="shares" label={t.portfolio.shares} sortKey={sortKey} sortDir={sortDir} onSort={setSort} align="right" />
+                  <SortHeader id="shares" label={t.portfolio.shares} sortKey={sortKey} sortDir={sortDir} onSort={setSort} align="right" className="hide-tab" />
                   <th className="num hide-mob">{th ? "ราคา / ทุน" : "Price / Cost"}</th>
-                  <SortHeader id="costBasis" label={th ? "ต้นทุนรวม" : "Cost"} sortKey={sortKey} sortDir={sortDir} onSort={setSort} align="right" />
+                  <SortHeader id="costBasis" label={th ? "ต้นทุนรวม" : "Cost"} sortKey={sortKey} sortDir={sortDir} onSort={setSort} align="right" className="hide-tab" />
                   <SortHeader id="value"     label={t.portfolio.value} sortKey={sortKey} sortDir={sortDir} onSort={setSort} align="right" />
-                  <th className="num">{th ? "30 วัน" : "30d"}</th>
+                  <th className="num hide-tab">{th ? "30 วัน" : "30d"}</th>
                   <SortHeader id="pl"     label={t.portfolio.pl} sortKey={sortKey} sortDir={sortDir} onSort={setSort} align="right" />
                   <SortHeader id="weight" label={t.portfolio.weight} sortKey={sortKey} sortDir={sortDir} onSort={setSort} align="right" />
                   <th></th>
@@ -663,7 +663,7 @@ function LivePortfolioPage({ t, lang, ccy, portfolio, liveHoldings, prices = {},
                           </div>
                         </div>
                       </td>
-                      <td className="num">
+                      <td className="num hide-tab">
                         {r.shares.toLocaleString(undefined, { maximumFractionDigits: 4 })}
                         {r.cls === 'MutualFund' && <span className="muted" style={{ fontSize: 10, marginLeft: 3 }}>{th ? 'หน่วย' : 'units'}</span>}
                         {r.cls === 'GoldTH' && <span className="muted" style={{ fontSize: 10, marginLeft: 3 }}>{th ? 'บาท' : 'baht'}</span>}
@@ -690,7 +690,7 @@ function LivePortfolioPage({ t, lang, ccy, portfolio, liveHoldings, prices = {},
                           </>
                         )}
                       </td>
-                      <td className="num">{LUMEN_FMT.money(costBasis, ccy, { compact: true })}</td>
+                      <td className="num hide-tab">{LUMEN_FMT.money(costBasis, ccy, { compact: true })}</td>
                       <td className="num">
                         <div style={{ fontWeight: 500 }}>{LUMEN_FMT.money(r.value, ccy, { compact: true })}</div>
                         {r.hasLivePrice && r.changePct !== 0 && (
@@ -702,7 +702,7 @@ function LivePortfolioPage({ t, lang, ccy, portfolio, liveHoldings, prices = {},
                           <div className="muted" style={{ fontSize: 11 }}>{th ? "รอราคา" : "pending"}</div>
                         )}
                       </td>
-                      <td>{sp
+                      <td className="hide-tab">{sp
                         ? <Sparkline data={sp.data} stroke={sparkColor} fill={sparkColor} />
                         : <span className="muted" style={{ fontSize: 12 }}>—</span>}</td>
                       <td className="num">
@@ -742,7 +742,7 @@ function LivePortfolioPage({ t, lang, ccy, portfolio, liveHoldings, prices = {},
                         })()}
                       </td>
                       <td>
-                        <div style={{ display: "flex", gap: 2, justifyContent: "flex-end" }}>
+                        <div className="row-actions" style={{ display: "flex", gap: 2, justifyContent: "flex-end" }}>
                           <button
                             onClick={() => setChartHolding(r)}
                             style={{ background: "none", border: "none", cursor: "pointer", color: "var(--ink-3)", padding: "4px 6px", borderRadius: 6, lineHeight: 1, display: "inline-flex", alignItems: "center" }}
@@ -762,6 +762,7 @@ function LivePortfolioPage({ t, lang, ccy, portfolio, liveHoldings, prices = {},
                             <button
                               onClick={() => analyzeHolding(r)}
                               disabled={ai.loading || preparingAi}
+                              className="act-secondary"
                               style={{ background: "none", border: "none", cursor: "pointer", color: "var(--accent-ink)", padding: "4px 6px", borderRadius: 6, lineHeight: 1, display: "inline-flex", alignItems: "center", opacity: (ai.loading || preparingAi) ? 0.4 : 1 }}
                               title={th ? "วิเคราะห์ด้วย AI" : "Analyse with AI"}
                             ><Icon name="spark" size={14} /></button>
@@ -772,6 +773,7 @@ function LivePortfolioPage({ t, lang, ccy, portfolio, liveHoldings, prices = {},
                             return (
                               <button
                                 onClick={() => orig && setNotesHolding({ ...orig, displayTicker: r.ticker, logo_url: r.logo_url, region: r.region, cls: r.cls })}
+                                className="act-secondary"
                                 style={{ background: "none", border: "none", cursor: "pointer", color: hasNotes ? "var(--accent-ink)" : "var(--ink-4)", padding: "4px 6px", borderRadius: 6, lineHeight: 1, display: "inline-flex", alignItems: "center", position: "relative" }}
                                 title={hasNotes ? (th ? "ดู/แก้ไขโน้ต" : "View/edit notes") : (th ? "เพิ่มโน้ต" : "Add notes")}
                               >
@@ -787,12 +789,14 @@ function LivePortfolioPage({ t, lang, ccy, portfolio, liveHoldings, prices = {},
                           >{th ? "ขาย" : "Sell"}</button>
                           <button
                             onClick={() => { const orig = liveHoldings.find(h => h.id === r._ids[0]); if (orig) setEditHolding({ ...orig, _lots: r._lots }) }}
+                            className="act-secondary"
                             style={{ background: "none", border: "none", cursor: "pointer", color: "var(--ink-3)", padding: "4px 7px", borderRadius: 6, fontSize: 15, lineHeight: 1 }}
                             title={th ? "แก้ไข" : "Edit"}
                           >✎</button>
                           <button
                             onClick={() => handleDelete(r._ids, r.ticker)}
                             disabled={!!(deleting && r._ids.includes(deleting))}
+                            className="act-secondary"
                             style={{ background: "none", border: "none", cursor: "pointer", color: "var(--ink-4)", padding: "4px 6px", borderRadius: 6, fontSize: 17, lineHeight: 1 }}
                             title={th ? "ลบ" : "Delete"}
                           >×</button>
@@ -3863,10 +3867,10 @@ function DemoPortfolioPage({ t, lang, ccy, setRoute }) {
   )
 }
 
-function SortHeader({ id, label, sortKey, sortDir, onSort, align = "left" }) {
+function SortHeader({ id, label, sortKey, sortDir, onSort, align = "left", className = "" }) {
   const active = sortKey === id
   return (
-    <th style={{ textAlign: align, cursor: "pointer" }} onClick={() => onSort(id)}>
+    <th className={className} style={{ textAlign: align, cursor: "pointer" }} onClick={() => onSort(id)}>
       <span style={{ display: "inline-flex", gap: 4, alignItems: "center", color: active ? "var(--ink)" : "var(--ink-3)" }}>
         {label}
         {active ? (sortDir === "asc"

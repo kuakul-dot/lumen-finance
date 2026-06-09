@@ -624,6 +624,17 @@ hr.rule { border: 0; border-top: 1px solid var(--line); margin: 24px 0; }
   /* Portfolio summary: shrink main total value so it doesn't overflow cells */
   .port-total-val  { font-size: 24px !important; }
   .port-metric-val { font-size: 20px !important; }
+
+  /* Hide less-important table columns on tablet to free up width */
+  .hide-tab { display: none !important; }
+
+  /* Tighter table cells on tablet */
+  .table thead th { padding: 10px 10px; font-size: 11px; }
+  .table tbody td { padding: 12px 10px; }
+
+  /* Compact action buttons on tablet — smaller gap, hide edit + delete */
+  .row-actions { gap: 0 !important; }
+  .row-actions .act-secondary { display: none !important; }
 }
 
 /* ─── Mobile responsive ─────────────────────────────────────────────────── */
