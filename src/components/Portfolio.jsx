@@ -644,7 +644,7 @@ function LivePortfolioPage({ t, lang, ccy, portfolio, liveHoldings, prices = {},
                   const sparkColor = (sp ? sp.ret : (r.changePct || r.plPct)) >= 0 ? "var(--gain)" : "var(--loss)"
                   return (
                     <tr key={r.ticker} style={{ opacity: deleting && r._ids.includes(deleting) ? 0.4 : 1 }}>
-                      <td>
+                      <td className="tbl-col-holding">
                         <div className="ticker">
                           <TickerLogo ticker={r.ticker} logoUrl={r.logo_url} cls={r.cls} region={r.region} />
                           <div>
@@ -668,7 +668,7 @@ function LivePortfolioPage({ t, lang, ccy, portfolio, liveHoldings, prices = {},
                         {r.cls === 'MutualFund' && <span className="muted" style={{ fontSize: 10, marginLeft: 3 }}>{th ? 'หน่วย' : 'units'}</span>}
                         {r.cls === 'GoldTH' && <span className="muted" style={{ fontSize: 10, marginLeft: 3 }}>{th ? 'บาท' : 'baht'}</span>}
                       </td>
-                      <td className="num hide-mob price-cost-cell">
+                      <td className="num hide-mob price-cost-cell tbl-col-price">
                         {r.hasLivePrice ? (
                           <>
                             <div style={{ fontWeight: 500, fontFamily: "var(--font-mono)", fontSize: 13 }}>
@@ -691,7 +691,7 @@ function LivePortfolioPage({ t, lang, ccy, portfolio, liveHoldings, prices = {},
                         )}
                       </td>
                       <td className="num hide-tab">{LUMEN_FMT.money(costBasis, ccy, { compact: true })}</td>
-                      <td className="num">
+                      <td className="num tbl-col-value">
                         <div style={{ fontWeight: 500 }}>{LUMEN_FMT.money(r.value, ccy, { compact: true })}</div>
                         {r.hasLivePrice && r.changePct !== 0 && (
                           <div style={{ fontSize: 11, color: r.changePct >= 0 ? "var(--gain)" : "var(--loss)" }}>
@@ -705,7 +705,7 @@ function LivePortfolioPage({ t, lang, ccy, portfolio, liveHoldings, prices = {},
                       <td className="hide-tab">{sp
                         ? <Sparkline data={sp.data} stroke={sparkColor} fill={sparkColor} />
                         : <span className="muted" style={{ fontSize: 12 }}>—</span>}</td>
-                      <td className="num">
+                      <td className="num tbl-col-pl">
                         <div style={{ display: "flex", flexDirection: "column", alignItems: "flex-end", gap: 1 }}>
                           <span style={{ color: r.pl >= 0 ? "var(--gain)" : "var(--loss)", fontWeight: 500 }}>
                             {r.pl >= 0 ? "+" : ""}{LUMEN_FMT.money(r.pl, ccy, { compact: true })}
@@ -713,7 +713,7 @@ function LivePortfolioPage({ t, lang, ccy, portfolio, liveHoldings, prices = {},
                           <Delta value={r.plPct} size={11} />
                         </div>
                       </td>
-                      <td className="num">
+                      <td className="num tbl-col-weight">
                         {(() => {
                           const tgt  = getTargetPct(r)
                           const band = rebalState?.band ?? 5
@@ -741,7 +741,7 @@ function LivePortfolioPage({ t, lang, ccy, portfolio, liveHoldings, prices = {},
                           )
                         })()}
                       </td>
-                      <td>
+                      <td className="tbl-col-actions">
                         <div className="row-actions" style={{ display: "flex", gap: 2, justifyContent: "flex-end" }}>
                           <button
                             onClick={() => setChartHolding(r)}
@@ -805,14 +805,14 @@ function LivePortfolioPage({ t, lang, ccy, portfolio, liveHoldings, prices = {},
                     </tr>
                   )
                 })}
-                <tr style={{ background: "var(--bg)", fontWeight: 500 }}>
-                  <td style={{ paddingTop: 18, paddingBottom: 18 }}><span className="label-up">{t.portfolio.total}</span></td>
-                  <td></td>{/* shares */}
-                  <td className="num hide-mob"></td>{/* price/cost — blank in total row */}
-                  <td className="num">{LUMEN_FMT.money(totalCostBasis, ccy, { compact: true })}</td>
-                  <td className="num" style={{ fontWeight: 600 }}>{LUMEN_FMT.money(totalValue, ccy, { compact: true })}</td>
+                <tr className="tbl-total-row" style={{ background: "var(--bg)", fontWeight: 500 }}>
+                  <td className="tbl-col-holding" style={{ paddingTop: 18, paddingBottom: 18 }}><span className="label-up">{t.portfolio.total}</span></td>
+                  <td className="hide-tab"></td>{/* shares */}
+                  <td className="num hide-mob tbl-col-price"></td>{/* price/cost — blank */}
+                  <td className="num hide-tab">{LUMEN_FMT.money(totalCostBasis, ccy, { compact: true })}</td>
+                  <td className="num tbl-col-value" style={{ fontWeight: 600 }}>{LUMEN_FMT.money(totalValue, ccy, { compact: true })}</td>
                   {/* 30D — show portfolio-level weighted 30D return when data is available */}
-                  <td className="num">
+                  <td className="num hide-tab">
                     {portfolio30dRet != null ? (
                       <span style={{ fontSize: 11, fontWeight: 600, color: portfolio30dRet >= 0 ? "var(--gain)" : "var(--loss)" }}>
                         {portfolio30dRet >= 0 ? "+" : ""}{portfolio30dRet.toFixed(1)}%
@@ -821,13 +821,13 @@ function LivePortfolioPage({ t, lang, ccy, portfolio, liveHoldings, prices = {},
                       <span className="muted" style={{ fontSize: 12 }}>—</span>
                     )}
                   </td>
-                  <td className="num">
+                  <td className="num tbl-col-pl">
                     <span style={{ color: totalPL >= 0 ? "var(--gain)" : "var(--loss)" }}>
                       {totalPL >= 0 ? "+" : ""}{LUMEN_FMT.money(totalPL, ccy, { compact: true })}
                     </span>
                   </td>
-                  <td className="num">100.0%</td>
-                  <td></td>
+                  <td className="num tbl-col-weight">100.0%</td>
+                  <td className="tbl-col-actions"></td>
                 </tr>
               </tbody>
             </table>

@@ -636,25 +636,54 @@ hr.rule { border: 0; border-top: 1px solid var(--line); margin: 24px 0; }
   .row-actions { gap: 0 !important; }
   .row-actions .act-secondary { display: none !important; }
 
-  /* ── Portfolio holdings table: fix column proportions ─────────────────── */
-  /* Constrain HOLDING col so it can't gobble all available space */
-  .tbl-portfolio td:first-child,
-  .tbl-portfolio th:first-child { width: 28%; max-width: 0; }
+  /* ── Portfolio holdings table: flex rows — bypasses table-layout:auto ─── */
+  /* thead hidden; each <tr> becomes a flex row with explicit column widths.  */
+  .tbl-portfolio thead { display: none; }
 
-  /* Truncate long company name with ellipsis */
-  .tbl-portfolio .holding-sub {
+  .tbl-portfolio tbody tr {
+    display: flex;
+    align-items: center;
+    flex-wrap: nowrap;
+    padding: 8px 14px;
+    border-bottom: 1px solid var(--line);
+    gap: 8px;
+    background: inherit;
+  }
+  .tbl-portfolio tbody tr:hover { background: var(--bg-2) !important; }
+
+  .tbl-portfolio tbody td {
+    display: block;
+    border: none;
+    padding: 0;
+  }
+  .tbl-portfolio tbody td.num { text-align: right; }
+  .tbl-portfolio tbody td.hide-tab { display: none !important; }
+
+  /* Column widths — HOLDING gets remaining flex space; others are fixed */
+  .tbl-col-holding { flex: 1 1 0; min-width: 0; overflow: hidden; }
+  .tbl-col-price   { flex: 0 0 96px;  text-align: right; }
+  .tbl-col-value   { flex: 0 0 94px;  text-align: right; }
+  .tbl-col-pl      { flex: 0 0 90px;  text-align: right; }
+  .tbl-col-weight  { flex: 0 0 108px; text-align: right; }
+  .tbl-col-actions { flex: 0 0 auto; }
+
+  /* Truncate long company name */
+  .tbl-col-holding .holding-sub {
     white-space: nowrap;
     overflow: hidden;
     text-overflow: ellipsis;
-    max-width: 200px;
   }
-
-  /* Hide sector tag (· Technology, · Energy …) — saves ~60px per row */
+  /* Hide sector tag (· Technology, · Energy …) */
   .holding-sector { display: none !important; }
 
-  /* Compact PRICE/COST column on tablet */
-  .tbl-portfolio .price-cost-cell { font-size: 12px; }
-  .tbl-portfolio .price-cost-cell .cost-line { font-size: 10px; }
+  /* Total row styling */
+  .tbl-portfolio tbody tr.tbl-total-row {
+    background: var(--bg) !important;
+    font-weight: 500;
+    border-bottom: none;
+    padding-top: 10px;
+    padding-bottom: 10px;
+  }
 }
 
 /* ─── Mobile responsive ─────────────────────────────────────────────────── */
