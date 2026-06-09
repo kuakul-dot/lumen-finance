@@ -632,9 +632,29 @@ hr.rule { border: 0; border-top: 1px solid var(--line); margin: 24px 0; }
   .table thead th { padding: 10px 10px; font-size: 11px; }
   .table tbody td { padding: 12px 10px; }
 
-  /* Compact action buttons on tablet — smaller gap, hide edit + delete */
+  /* Compact action buttons on tablet — smaller gap, hide secondary actions */
   .row-actions { gap: 0 !important; }
   .row-actions .act-secondary { display: none !important; }
+
+  /* ── Portfolio holdings table: fix column proportions ─────────────────── */
+  /* Constrain HOLDING col so it can't gobble all available space */
+  .tbl-portfolio td:first-child,
+  .tbl-portfolio th:first-child { width: 28%; max-width: 0; }
+
+  /* Truncate long company name with ellipsis */
+  .tbl-portfolio .holding-sub {
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    max-width: 200px;
+  }
+
+  /* Hide sector tag (· Technology, · Energy …) — saves ~60px per row */
+  .holding-sector { display: none !important; }
+
+  /* Compact PRICE/COST column on tablet */
+  .tbl-portfolio .price-cost-cell { font-size: 12px; }
+  .tbl-portfolio .price-cost-cell .cost-line { font-size: 10px; }
 }
 
 /* ─── Mobile responsive ─────────────────────────────────────────────────── */

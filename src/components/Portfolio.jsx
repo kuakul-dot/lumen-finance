@@ -623,7 +623,7 @@ function LivePortfolioPage({ t, lang, ccy, portfolio, liveHoldings, prices = {},
 
           {/* ── Table ── */}
           <section className="card tbl-card" style={{ padding: 0, overflow: "hidden" }}>
-            <table className="table">
+            <table className="table tbl-portfolio">
               <thead>
                 <tr>
                   <SortHeader id="ticker" label={t.portfolio.holding} sortKey={sortKey} sortDir={sortDir} onSort={setSort} />
@@ -649,10 +649,10 @@ function LivePortfolioPage({ t, lang, ccy, portfolio, liveHoldings, prices = {},
                           <TickerLogo ticker={r.ticker} logoUrl={r.logo_url} cls={r.cls} region={r.region} />
                           <div>
                             <div style={{ fontWeight: 500 }}>{r.ticker}</div>
-                            <div className="muted" style={{ fontSize: 11 }}>
+                            <div className="muted holding-sub" style={{ fontSize: 11 }}>
                               {r.name}
                               {r.sector && r.sector !== "—" && (
-                                <span style={{ marginLeft: 6, opacity: 0.6 }}>· {r.sector}</span>
+                                <span className="holding-sector" style={{ marginLeft: 6, opacity: 0.6 }}>· {r.sector}</span>
                               )}
                               {r._lots > 1 && (
                                 <span style={{ marginLeft: 6, fontSize: 10, background: "var(--accent-soft)", color: "var(--accent-ink)", borderRadius: 4, padding: "1px 5px", fontWeight: 600 }}>
@@ -668,7 +668,7 @@ function LivePortfolioPage({ t, lang, ccy, portfolio, liveHoldings, prices = {},
                         {r.cls === 'MutualFund' && <span className="muted" style={{ fontSize: 10, marginLeft: 3 }}>{th ? 'หน่วย' : 'units'}</span>}
                         {r.cls === 'GoldTH' && <span className="muted" style={{ fontSize: 10, marginLeft: 3 }}>{th ? 'บาท' : 'baht'}</span>}
                       </td>
-                      <td className="num hide-mob">
+                      <td className="num hide-mob price-cost-cell">
                         {r.hasLivePrice ? (
                           <>
                             <div style={{ fontWeight: 500, fontFamily: "var(--font-mono)", fontSize: 13 }}>
@@ -677,14 +677,14 @@ function LivePortfolioPage({ t, lang, ccy, portfolio, liveHoldings, prices = {},
                             {/* Use costNativeCcy (holdingCcy) — NOT nativeCcy (live price ccy).
                                 The stored cost may be in THB even for USD holdings (e.g. BTC bought in THB).
                                 Compare P/L in THB (r.pl) rather than priceNative vs costNative which may be in different currencies. */}
-                            <div style={{ fontSize: 11, color: (r.pl ?? 0) >= 0 ? "var(--gain)" : "var(--loss)", fontFamily: "var(--font-mono)" }}>
-                              {(r.costNativeCcy || r.nativeCcy) === 'USD' ? '$' : '฿'}{r.costNative.toLocaleString(undefined, { maximumFractionDigits: 2 })} {th ? "ทุน" : "cost"}
+                            <div className="cost-line" style={{ fontSize: 11, color: (r.pl ?? 0) >= 0 ? "var(--gain)" : "var(--loss)", fontFamily: "var(--font-mono)" }}>
+                              {LUMEN_FMT.money(r.costNative, (r.costNativeCcy || r.nativeCcy) === 'USD' ? 'USD' : 'THB', { compact: true })} {th ? "ทุน" : "cost"}
                             </div>
                           </>
                         ) : (
                           <>
                             <div style={{ fontFamily: "var(--font-mono)", fontSize: 13, color: "var(--ink-2)" }}>
-                              {(r.costNativeCcy || r.nativeCcy) === 'USD' ? '$' : '฿'}{r.costNative.toLocaleString(undefined, { maximumFractionDigits: 2 })}
+                              {LUMEN_FMT.money(r.costNative, (r.costNativeCcy || r.nativeCcy) === 'USD' ? 'USD' : 'THB', { compact: true })}
                             </div>
                             <div className="muted" style={{ fontSize: 10 }}>{th ? "ราคาซื้อ" : "avg cost"}</div>
                           </>
