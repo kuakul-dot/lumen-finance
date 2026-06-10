@@ -9,7 +9,8 @@ import {
   LUMEN_ACTIVITY, LUMEN_UPCOMING, LUMEN_INSIGHTS, LUMEN_FX,
 } from '../data'
 import { deriveHoldings, upsertCashAccount, deleteCashAccount, getGoals, getAllTransactions } from '../lib/db'
-import { fetchHistory, toYahooSymbol, clearPriceCache } from '../lib/prices'
+import { fetchHistory, fetchPrices, toYahooSymbol, clearPriceCache } from '../lib/prices'
+import { loadAlerts } from '../lib/alerts'
 
 function makeGreeting(name, lang) {
   const h = new Date().getHours()
@@ -273,6 +274,7 @@ function DemoDashboardPage({ t, lang, ccy, setRoute }) {
         </div>
 
         <div className="col-span-5" style={{ display: "grid", gap: 16 }}>
+          <AlertProximityCard setRoute={setRoute} lang={lang} />
           <div className="card">
             <h3 className="section-title" style={{ marginBottom: 16 }}>{t.dashboard.insights}</h3>
             <div style={{ display: "grid", gap: 14 }}>
@@ -443,6 +445,105 @@ function groupRowsByTicker(rows) {
 }
 
 // ─── Live Dashboard — matches demo layout with real data ─────────────────────
+// ─── Alert proximity card ────────────────────────────────────────────────────
+// Shows active price alerts closest to their target, with live distance.
+// Prices come from the portfolio prices map when available; symbols outside
+// the portfolio (e.g. watchlist-only alerts) are fetched separately.
+function fmtAlertPrice(p, ccy) {
+  if (p == null || isNaN(p)) return '—'
+  const prefix = ccy === 'THB' ? '฿' : '$'
+  const dp = p < 1 ? 4 : p < 100 ? 2 : p < 10000 ? 2 : 0
+  return prefix + p.toLocaleString('en', { minimumFractionDigits: dp, maximumFractionDigits: dp })
+}
+
+function AlertProximityCard({ prices = {}, setRoute, lang }) {
+  const th = lang === 'th'
+  const [alerts, setAlerts] = useState([])
+  useEffect(() => {
+    const reload = () => setAlerts(loadAlerts().filter(a => a.active && !a.triggered))
+    reload()
+    window.addEventListener('lumen-alerts-changed', reload)
+    return () => window.removeEventListener('lumen-alerts-changed', reload)
+  }, [])
+
+  // Fetch live prices for alert symbols not covered by the portfolio map
+  const [extraPrices, setExtraPrices] = useState({})
+  useEffect(() => {
+    const missing = alerts.filter(a => prices[a.yahooSym]?.price == null)
+    if (!missing.length) return
+    let cancelled = false
+    fetchPrices(missing.map(a => ({ ticker: a.ticker, region: a.region || 'US', asset_class: a.cls || 'Equity' })))
+      .then(px => { if (!cancelled && px) setExtraPrices(prev => ({ ...prev, ...px })) })
+      .catch(() => {})
+    return () => { cancelled = true }
+  }, [alerts, prices])
+
+  if (!alerts.length) return null
+
+  const rows = alerts
+    .map(a => {
+      const cur  = prices[a.yahooSym]?.price ?? extraPrices[a.yahooSym]?.price ?? a.livePrice ?? null
+      const dist = cur ? ((a.targetPrice - cur) / cur) * 100 : null
+      return { ...a, cur, dist }
+    })
+    .sort((x, y) => (x.dist == null ? 999 : Math.abs(x.dist)) - (y.dist == null ? 999 : Math.abs(y.dist)))
+    .slice(0, 4)
+
+  return (
+    <div className="card">
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 14 }}>
+        <h3 className="section-title">🔔 {th ? 'ใกล้ถึงเป้าแจ้งเตือน' : 'Near alert targets'}</h3>
+        <button className="btn btn-ghost btn-sm" onClick={() => setRoute('alerts')}>
+          {th ? 'ดูทั้งหมด' : 'See all'} <Icon name="chevron" size={12} />
+        </button>
+      </div>
+      <div style={{ display: 'grid', gap: 12 }}>
+        {rows.map(a => {
+          const above  = a.direction === 'above'
+          const absD   = a.dist == null ? null : Math.abs(a.dist)
+          // Proximity bar fills as price approaches target (full at 0%, empty ≥10% away)
+          const fill   = absD == null ? 0 : Math.max(0, Math.min(1, 1 - absD / 10))
+          const hot    = absD != null && absD <= 1
+          const warm   = absD != null && absD <= 3
+          const distColor = hot ? 'var(--loss)' : warm ? 'oklch(0.62 0.14 65)' : 'var(--ink-3)'
+          return (
+            <div key={a.id} style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+              <TickerLogo ticker={a.ticker} region={a.region} cls={a.cls} size={28} />
+              <div style={{ flex: 1, minWidth: 0 }}>
+                <div style={{ display: 'flex', alignItems: 'baseline', gap: 6 }}>
+                  <span style={{ fontWeight: 600, fontSize: 13 }}>{a.ticker}</span>
+                  <span style={{ fontSize: 11, color: above ? 'var(--loss)' : 'var(--gain)', fontFamily: 'var(--font-mono)' }}>
+                    {above ? '▲' : '▼'} {fmtAlertPrice(a.targetPrice, a.currency)}
+                  </span>
+                </div>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 4 }}>
+                  <div style={{ flex: 1, height: 3, borderRadius: 99, background: 'var(--bg-2)', overflow: 'hidden' }}>
+                    <div style={{ width: `${fill * 100}%`, height: '100%', borderRadius: 99,
+                                  background: hot ? 'var(--loss)' : warm ? 'oklch(0.70 0.14 65)' : 'var(--accent)',
+                                  transition: 'width 0.3s' }} />
+                  </div>
+                </div>
+              </div>
+              <div style={{ textAlign: 'right', flexShrink: 0 }}>
+                <div style={{ fontSize: 12, fontFamily: 'var(--font-mono)', fontWeight: 600 }}>
+                  {fmtAlertPrice(a.cur, a.currency)}
+                </div>
+                <div style={{ fontSize: 10, fontWeight: 700, color: distColor, marginTop: 2 }}>
+                  {absD == null
+                    ? '—'
+                    : hot
+                      ? (th ? `ใกล้มาก ${absD.toFixed(1)}%` : `${absD.toFixed(1)}% away!`)
+                      : (th ? `ห่าง ${absD.toFixed(1)}%` : `${absD.toFixed(1)}% away`)}
+                </div>
+              </div>
+            </div>
+          )
+        })}
+      </div>
+    </div>
+  )
+}
+
 function LiveDashboardPage({ t, lang, ccy, setRoute, liveHoldings, prices = {}, cashAccounts = [], portfolio, refreshHoldings, refreshCashAccounts, displayName = '', fxRate = 36, lastPriceUpdate = null }) {
   const th = lang === "th"
   const [showCashModal, setShowCashModal] = useState(null)
@@ -1450,6 +1551,7 @@ function LiveDashboardPage({ t, lang, ccy, setRoute, liveHoldings, prices = {}, 
         </div>
 
         <div className="col-span-5" style={{ display: "grid", gap: 16 }}>
+          <AlertProximityCard prices={prices} setRoute={setRoute} lang={lang} />
           <div className="card">
             <h3 className="section-title" style={{ marginBottom: 16 }}>{t.dashboard.insights}</h3>
             {insights.length === 0 ? (
