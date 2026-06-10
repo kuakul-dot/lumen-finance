@@ -105,9 +105,9 @@ export async function initAlertsFromSupabase(userId) {
 // ── Notification permission ───────────────────────────────────────────────────
 export async function requestNotifPermission() {
   if (!('Notification' in window)) return false
-  if (Notification.permission === 'granted') return true
-  if (Notification.permission === 'denied') return false
-  return (await Notification.requestPermission()) === 'granted'
+  if (window.Notification.permission === 'granted') return true
+  if (window.Notification.permission === 'denied') return false
+  return (await window.Notification.requestPermission()) === 'granted'
 }
 
 // ── Format price for notifications ───────────────────────────────────────────
@@ -119,9 +119,9 @@ function fmtP(p, ccy) {
 
 // ── Fire browser notification ─────────────────────────────────────────────────
 function fireNotif(alert, currentPrice) {
-  if (!('Notification' in window) || Notification.permission !== 'granted') return
+  if (!('Notification' in window) || window.Notification.permission !== 'granted') return
   const arrow = alert.direction === 'above' ? '▲' : '▼'
-  new Notification(`🔔 ${alert.ticker} — ${alert.label} ${arrow}`, {
+  new window.Notification(`🔔 ${alert.ticker} — ${alert.label} ${arrow}`, {
     body: `ราคา ${fmtP(currentPrice, alert.currency)} แตะเป้า ${fmtP(alert.targetPrice, alert.currency)}`,
     icon: '/favicon.ico',
     tag: `lumen-alert-${alert.id}`,

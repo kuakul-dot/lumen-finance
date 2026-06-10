@@ -79,7 +79,7 @@ function AlertsContent({ lang, onDone, prefill, isPage = false }) {
   const th = lang === 'th'
   const [alerts, setAlerts]     = useState([])
   const [tab, setTab]           = useState(prefill ? 'add' : 'list')
-  const [notifOk, setNotifOk]   = useState(Notification?.permission === 'granted')
+  const [notifOk, setNotifOk]   = useState(window.Notification?.permission === 'granted')
   const [saved, setSaved]       = useState(false)
 
   const [fTicker,    setFTicker]    = useState(prefill?.ticker    || '')
@@ -157,7 +157,7 @@ function AlertsContent({ lang, onDone, prefill, isPage = false }) {
       </div>
 
       {/* Notification permission banner */}
-      {!notifOk && 'Notification' in window && Notification.permission !== 'denied' && (
+      {!notifOk && 'Notification' in window && window.Notification?.permission !== 'denied' && (
         <div style={{
           padding: '10px 14px', borderRadius: 10, fontSize: 12,
           background: 'oklch(0.96 0.06 75)', color: 'oklch(0.40 0.12 75)',
