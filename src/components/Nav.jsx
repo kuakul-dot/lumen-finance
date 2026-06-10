@@ -287,8 +287,8 @@ export function TopNav({ route, setRoute, lang, setLang, ccy, setCcy, t, session
                   </MenuRow>
                 </div>
 
-                {session && (
-                  <div style={{ borderTop: "1px solid var(--line)", padding: "6px 0" }}>
+                <div style={{ borderTop: "1px solid var(--line)", padding: "6px 0" }}>
+                  {session ? (
                     <button
                       onClick={() => { setShowProfile(false); signOut() }}
                       style={{
@@ -303,8 +303,24 @@ export function TopNav({ route, setRoute, lang, setLang, ccy, setCcy, t, session
                       <Icon name="logout" size={15} />
                       {lang === "th" ? "ออกจากระบบ" : "Sign out"}
                     </button>
-                  </div>
-                )}
+                  ) : (
+                    // Demo mode (no session) — way back to the login / onboarding page
+                    <button
+                      onClick={() => { setShowProfile(false); setRoute("onboarding") }}
+                      style={{
+                        width: "100%", textAlign: "left", padding: "11px 18px",
+                        background: "none", border: "none", cursor: "pointer",
+                        fontSize: 14, color: "var(--accent-ink)", fontWeight: 500,
+                        display: "flex", alignItems: "center", gap: 10,
+                      }}
+                      onMouseEnter={e => e.currentTarget.style.background = "var(--accent-soft)"}
+                      onMouseLeave={e => e.currentTarget.style.background = "none"}
+                    >
+                      <Icon name="user" size={15} />
+                      {lang === "th" ? "เข้าสู่ระบบ / สมัครสมาชิก" : "Sign in / Sign up"}
+                    </button>
+                  )}
+                </div>
               </div>
             )}
           </div>
