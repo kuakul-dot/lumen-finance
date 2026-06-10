@@ -5,6 +5,7 @@ import { CalcInput } from './CalcInput'
 import { useAiAnalysis } from '../lib/useAiAnalysis'
 import { LUMEN_FMT, LUMEN_DERIVE, LUMEN_TARGETS, LUMEN_FX } from '../data'
 import { deriveHoldings, updatePortfolio } from '../lib/db'
+import { AvgCostModal } from './AvgCostModal'
 
 // ── Starter instrument recommendations per asset class ────────────────────────
 // Shown when a class has a target allocation but no holdings yet.
@@ -247,6 +248,27 @@ export function ToolsPage({ t, lang, ccy, dataState, liveHoldings = [], prices =
     const demo = LUMEN_DERIVE()
     return { rows: demo.rows, total: demo.value + demo.cash, cash: demo.cash, investableCash: demo.cash }
   }, [isLive, liveHoldings, ccy, prices, fxRate, cashAccounts, dataState])
+
+  // ── Average-cost calculator (live only) ─────────────────────────────────────
+  // Group lots per ticker with a shares-weighted average cost so the calculator
+  // sees one position per symbol, same as the Portfolio table.
+  const [calcHolding, setCalcHolding] = useState(null)
+  const calcChoices = useMemo(() => {
+    if (!isLive) return []
+    const m = new Map()
+    rows.forEach(r => {
+      if (!r.ticker || !(r.shares > 0)) return
+      const g = m.get(r.ticker)
+      if (!g) { m.set(r.ticker, { ...r }) }
+      else {
+        const sh = g.shares + r.shares
+        g.costNative = sh > 0 ? (g.costNative * g.shares + r.costNative * r.shares) / sh : g.costNative
+        g.shares = sh
+        g.value  = (g.value || 0) + (r.value || 0)
+      }
+    })
+    return [...m.values()].sort((a, b) => (b.value || 0) - (a.value || 0))
+  }, [rows, isLive])
 
   const currentByClass = useMemo(() => buildCurrentByClass(rows, investableCash), [rows, investableCash])
 
@@ -773,6 +795,31 @@ export function ToolsPage({ t, lang, ccy, dataState, liveHoldings = [], prices =
         <ToolCard locked title={th ? "เครื่องคำนวณเกษียณ" : "Retirement projector"} sub={th ? "ดูว่าเงินจะถึงเมื่อไหร่ ถ้ายังออมเท่านี้" : "Project when you'll reach your retirement number"} icon="leaf" />
         <ToolCard locked title="Tax-loss harvesting" sub={th ? "หาคู่ wash-sale-safe จากตำแหน่งที่ขาดทุน" : "Find wash-sale-safe pairs in your losers"} icon="info" />
       </div>
+
+      {/* Average-cost calculator — pick a holding, model a buy/sell */}
+      {isLive && calcChoices.length > 0 && (
+        <div className="card" style={{ marginBottom: 24, padding: "16px 20px", display: "flex", alignItems: "center", gap: 14, flexWrap: "wrap" }}>
+          <Icon name="calc" size={20} />
+          <div style={{ flex: 1, minWidth: 220 }}>
+            <div style={{ fontWeight: 600, fontSize: 14 }}>{th ? "เครื่องคำนวณถัวเฉลี่ย ซื้อ/ขาย" : "Average cost calculator"}</div>
+            <div className="muted" style={{ fontSize: 12, marginTop: 2 }}>
+              {th
+                ? "เลือกหุ้นเพื่อลองคำนวณ — ถัวแล้วทุนใหม่เท่าไหร่ ใส่งบเงินกี่บาทได้กี่หุ้น หรือขายแล้วได้กำไรจริงเท่าไหร่"
+                : "Pick a holding to model a buy (new average, budget → shares) or a sell (realized P/L)"}
+            </div>
+          </div>
+          <select value="" onChange={e => { const g = calcChoices.find(x => x.ticker === e.target.value); if (g) setCalcHolding(g) }}
+            style={{ padding: "9px 12px", borderRadius: 8, fontSize: 13, border: "1.5px solid var(--line)",
+                     background: "var(--bg)", color: "var(--ink)", outline: "none", minWidth: 210, cursor: "pointer" }}>
+            <option value="" disabled>{th ? "เลือกหลักทรัพย์…" : "Choose a holding…"}</option>
+            {calcChoices.map(g => (
+              <option key={g.ticker} value={g.ticker}>
+                {g.ticker} · {th ? "ถือ" : "holding"} {Number(g.shares).toLocaleString(undefined, { maximumFractionDigits: 4 })}
+              </option>
+            ))}
+          </select>
+        </div>
+      )}
 
       <div className="grid grid-12" style={{ alignItems: "start" }}>
         {/* Input panel */}
@@ -1583,6 +1630,9 @@ export function ToolsPage({ t, lang, ccy, dataState, liveHoldings = [], prices =
           </div>
         )
       })()}
+      {calcHolding && (
+        <AvgCostModal lang={lang} holding={calcHolding} onClose={() => setCalcHolding(null)} />
+      )}
       {ai.open && (
         <AiAnalysisModal th={th}
           title={th ? "อธิบายแผน Rebalance ด้วย AI" : "AI rebalance explainer"}

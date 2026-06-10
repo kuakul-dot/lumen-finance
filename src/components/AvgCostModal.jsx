@@ -26,14 +26,31 @@ export function AvgCostModal({ lang, holding, onClose, onCommit }) {
   const A0   = Number(holding.costNative) || 0
   const live = Number.isFinite(Number(holding.priceNative)) && holding.priceNative > 0 ? Number(holding.priceNative) : null
 
-  const [mode,  setMode]  = useState('buy')
-  const [qty,   setQty]   = useState('')
-  const [price, setPrice] = useState(live ? String(+live.toFixed(2)) : '')
-  const [fee,   setFee]   = useState(holding.region === 'TH' ? '0.157' : '0')
+  const [mode,   setMode]   = useState('buy')
+  const [qty,    setQty]    = useState('')
+  const [budget, setBudget] = useState('')
+  const [price,  setPrice]  = useState(live ? String(+live.toFixed(2)) : '')
+  const [fee,    setFee]    = useState(holding.region === 'TH' ? '0.157' : '0')
 
   const q = parseFloat(qty)   || 0
   const p = parseFloat(price) || 0
   const f = (parseFloat(fee)  || 0) / 100
+
+  // Two-way qty ⇄ budget. Unit cost includes fee: buy pays it, sell nets it.
+  const unitOf = (pp, ff, m) => pp * (m === 'buy' ? 1 + ff : 1 - ff)
+  const deriveBudget = (qv, pp = p, ff = f, m = mode) => {
+    const u = unitOf(pp, ff, m), n = parseFloat(qv)
+    setBudget(n > 0 && u > 0 ? String(+(n * u).toFixed(2)) : '')
+  }
+  const onQty    = v => { setQty(v); deriveBudget(v) }
+  const onBudget = v => {
+    setBudget(v)
+    const u = unitOf(p, f, mode), n = parseFloat(v)
+    setQty(n > 0 && u > 0 ? String(+(n / u).toFixed(4)) : '')
+  }
+  const onPrice  = v => { setPrice(v); deriveBudget(qty, parseFloat(v) || 0, f, mode) }
+  const onFee    = v => { setFee(v); deriveBudget(qty, p, (parseFloat(v) || 0) / 100, mode) }
+  const onMode   = m => { setMode(m); deriveBudget(qty, p, f, m) }
 
   // Buy: weighted average including fee
   const buyCost  = q * p * (1 + f)
@@ -83,7 +100,7 @@ export function AvgCostModal({ lang, holding, onClose, onCommit }) {
         {/* Mode toggle */}
         <div style={{ display: 'flex', gap: 6 }}>
           {[['buy', th ? 'ซื้อเพิ่ม' : 'Buy more'], ['sell', th ? 'ขาย' : 'Sell']].map(([m, lbl]) => (
-            <button key={m} onClick={() => setMode(m)} style={{
+            <button key={m} onClick={() => onMode(m)} style={{
               flex: 1, padding: '8px 0', borderRadius: 8, fontSize: 13, fontWeight: 600, cursor: 'pointer',
               border: '1.5px solid var(--line)',
               background: mode === m ? (m === 'buy' ? 'var(--accent)' : 'var(--loss)') : 'var(--bg-2)',
@@ -97,20 +114,29 @@ export function AvgCostModal({ lang, holding, onClose, onCommit }) {
           <div>
             <div style={{ fontSize: 11, color: 'var(--ink-3)', marginBottom: 4 }}>{th ? 'จำนวนหุ้น' : 'Shares'}</div>
             <input type="number" inputMode="decimal" min="0" value={qty} autoFocus
-              onChange={e => setQty(e.target.value)} placeholder="0" style={inputStyle} />
+              onChange={e => onQty(e.target.value)} placeholder="0" style={inputStyle} />
           </div>
           <div>
             <div style={{ fontSize: 11, color: 'var(--ink-3)', marginBottom: 4 }}>
               {mode === 'buy' ? (th ? 'ราคาซื้อ' : 'Buy price') : (th ? 'ราคาขาย' : 'Sell price')} ({ccy === 'USD' ? '$' : '฿'})
             </div>
             <input type="number" inputMode="decimal" min="0" value={price}
-              onChange={e => setPrice(e.target.value)} style={inputStyle} />
+              onChange={e => onPrice(e.target.value)} style={inputStyle} />
           </div>
-        </div>
-        <div>
-          <div style={{ fontSize: 11, color: 'var(--ink-3)', marginBottom: 4 }}>{th ? 'ค่าธรรมเนียม % (รวม VAT)' : 'Fee % (incl. VAT)'}</div>
-          <input type="number" inputMode="decimal" min="0" step="0.001" value={fee}
-            onChange={e => setFee(e.target.value)} style={{ ...inputStyle, width: 130 }} />
+          <div>
+            <div style={{ fontSize: 11, color: 'var(--ink-3)', marginBottom: 4 }}>
+              {mode === 'buy'
+                ? (th ? 'หรือใส่งบเงิน → คำนวณหุ้นให้' : 'Or enter a budget → shares')
+                : (th ? 'หรือเงินที่อยากได้ → คำนวณหุ้นให้' : 'Or target proceeds → shares')} ({ccy === 'USD' ? '$' : '฿'})
+            </div>
+            <input type="number" inputMode="decimal" min="0" value={budget}
+              onChange={e => onBudget(e.target.value)} placeholder="0.00" style={inputStyle} />
+          </div>
+          <div>
+            <div style={{ fontSize: 11, color: 'var(--ink-3)', marginBottom: 4 }}>{th ? 'ค่าธรรมเนียม % (รวม VAT)' : 'Fee % (incl. VAT)'}</div>
+            <input type="number" inputMode="decimal" min="0" step="0.001" value={fee}
+              onChange={e => onFee(e.target.value)} style={inputStyle} />
+          </div>
         </div>
 
         {mode === 'sell' && overSell && (
@@ -173,13 +199,15 @@ export function AvgCostModal({ lang, holding, onClose, onCommit }) {
           </>
         )}
 
-        {/* Footer */}
+        {/* Footer — commit only where the page can open the real trade flows */}
         <div style={{ display: 'flex', gap: 10, borderTop: '1px solid var(--line)', paddingTop: 14 }}>
           <button className="btn btn-outline" style={{ flex: 1 }} onClick={onClose}>{th ? 'ปิด' : 'Close'}</button>
-          <button className="btn" style={{ flex: 1.4 }} disabled={!valid}
-            onClick={() => onCommit?.(mode, { qty: mode === 'sell' ? sellQty : q, price: p })}>
-            {th ? 'บันทึกเป็นธุรกรรมจริง' : 'Record as a real trade'}
-          </button>
+          {onCommit && (
+            <button className="btn" style={{ flex: 1.4 }} disabled={!valid}
+              onClick={() => onCommit(mode, { qty: mode === 'sell' ? sellQty : q, price: p })}>
+              {th ? 'บันทึกเป็นธุรกรรมจริง' : 'Record as a real trade'}
+            </button>
+          )}
         </div>
       </div>
     </div>
