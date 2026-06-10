@@ -80,6 +80,87 @@ export function getActiveCount() {
   return loadAlerts().filter(a => a.active && !a.triggered).length
 }
 
+// ── Supabase row → local alert shape ──────────────────────────────────────────
+function mapRow(r) {
+  return {
+    id:          r.local_id || r.id,
+    ticker:      r.ticker,
+    yahooSym:    r.yahoo_sym,
+    region:      r.region,
+    cls:         r.cls,
+    name:        r.name,
+    targetPrice: Number(r.target_price),
+    direction:   r.direction,
+    label:       r.label || '',
+    currency:    r.currency || 'THB',
+    livePrice:   r.live_price ? Number(r.live_price) : null,
+    active:      r.active,
+    triggered:   r.triggered,
+    createdAt:   r.created_at,
+    triggeredAt: r.triggered_at,
+    _synced:     true,
+  }
+}
+
+// ── Realtime sync (no reload needed) ──────────────────────────────────────────
+// Subscribes to Postgres changes on price_alerts for this user. Handlers are
+// idempotent, so echoes of this device's own writes are harmless no-ops.
+// Requires (run once in Supabase SQL editor):
+//   alter table price_alerts replica identity full;
+//   alter publication supabase_realtime add table price_alerts;
+let _channel = null
+
+export function subscribeAlertsRealtime(userId) {
+  if (!userId) return
+  unsubscribeAlertsRealtime()
+  _channel = supabase
+    .channel(`price-alerts-${userId}`)
+    .on('postgres_changes',
+      { event: 'INSERT', schema: 'public', table: 'price_alerts', filter: `user_id=eq.${userId}` },
+      payload => _onRemoteUpsert(payload.new))
+    .on('postgres_changes',
+      { event: 'UPDATE', schema: 'public', table: 'price_alerts', filter: `user_id=eq.${userId}` },
+      payload => _onRemoteUpsert(payload.new))
+    // DELETE events can't be server-filtered — match user_id client-side
+    // (needs replica identity full so the old row carries more than the PK)
+    .on('postgres_changes',
+      { event: 'DELETE', schema: 'public', table: 'price_alerts' },
+      payload => { if (payload.old?.user_id === userId) _onRemoteDelete(payload.old) })
+    .subscribe(status => {
+      if (status === 'CHANNEL_ERROR') console.warn('[Alerts] realtime channel error')
+    })
+}
+
+export function unsubscribeAlertsRealtime() {
+  if (_channel) { supabase.removeChannel(_channel); _channel = null }
+}
+
+function _onRemoteUpsert(row) {
+  if (!row) return
+  const a = mapRow(row)
+  if (loadTombstones().has(a.id)) return          // deleted on this device — ignore echo
+  const list = loadAlerts()
+  const i = list.findIndex(x => x.id === a.id)
+  if (i === -1) { save([a, ...list]); return }    // new from another device
+  const cur = list[i]
+  const same = cur._synced === true
+    && cur.active === a.active && cur.triggered === a.triggered
+    && cur.targetPrice === a.targetPrice && cur.direction === a.direction
+    && cur.label === a.label && cur.livePrice === a.livePrice
+  if (same) return                                 // echo of our own write — skip re-render
+  const next = [...list]
+  next[i] = { ...cur, ...a }
+  save(next)
+}
+
+function _onRemoteDelete(row) {
+  const id = row?.local_id
+  if (!id) return
+  const list = loadAlerts()
+  if (!list.some(a => a.id === id)) return         // echo of our own delete
+  save(list.filter(a => a.id !== id))
+}
+
 // ── Supabase bootstrap ─────────────────────────────────────────────────────────
 // Call once on login. Full bidirectional sync:
 //   - New remote alerts (from other devices) → added to local
@@ -98,24 +179,7 @@ export async function initAlertsFromSupabase(userId) {
     if (error) { console.warn('[Alerts] init fetch:', error.message); return }
 
     // Map Supabase rows → local alert shape
-    const remote = (data || []).map(r => ({
-      id:          r.local_id || r.id,
-      ticker:      r.ticker,
-      yahooSym:    r.yahoo_sym,
-      region:      r.region,
-      cls:         r.cls,
-      name:        r.name,
-      targetPrice: Number(r.target_price),
-      direction:   r.direction,
-      label:       r.label || '',
-      currency:    r.currency || 'THB',
-      livePrice:   r.live_price ? Number(r.live_price) : null,
-      active:      r.active,
-      triggered:   r.triggered,
-      createdAt:   r.created_at,
-      triggeredAt: r.triggered_at,
-      _synced:     true,
-    }))
+    const remote = (data || []).map(mapRow)
 
     // Read localStorage AFTER the async fetch (captures any user actions during the fetch)
     const local      = loadAlerts()

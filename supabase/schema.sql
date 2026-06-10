@@ -180,6 +180,15 @@ create policy "Users can manage own alerts"
   on price_alerts for all using (auth.uid() = user_id);
 grant select, insert, update, delete on table price_alerts to authenticated;
 
+-- Realtime sync for price_alerts:
+--   replica identity full → DELETE events carry the whole old row (we need
+--   user_id + local_id, not just the PK, to match deletes client-side)
+alter table price_alerts replica identity full;
+do $$ begin
+  alter publication supabase_realtime add table price_alerts;
+exception when duplicate_object then null;
+end $$;
+
 -- ── portfolios.rebalance_config (cross-device target sync) ───────────────────
 alter table portfolios add column if not exists rebalance_config jsonb default null;
 

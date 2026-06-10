@@ -13,7 +13,7 @@ import { LUMEN_I18N, setLiveFxRate } from './data'
 import { supabase } from './lib/supabase'
 import { getOrCreatePortfolio, getPortfolios, addPortfolio, updatePortfolio, deletePortfolioCascade, getHoldingsSafe, getCashAccounts, deriveHoldings, recordSnapshot, exportData, addTransaction, rebuildAllHoldings, upsertCashAccount, upsertGoal } from './lib/db'
 import { fetchPrices, fetchFxRate, clearPriceCache } from './lib/prices'
-import { checkAndFireAlerts, getActiveCount, setAlertsUserId, clearAlertsUserId, initAlertsFromSupabase } from './lib/alerts'
+import { checkAndFireAlerts, getActiveCount, setAlertsUserId, clearAlertsUserId, initAlertsFromSupabase, subscribeAlertsRealtime, unsubscribeAlertsRealtime } from './lib/alerts'
 import { AlertsModal, AlertsPage } from './components/AlertsModal'
 
 const TWEAK_DEFAULTS = {
@@ -286,9 +286,13 @@ export default function App() {
         // Refresh badge count after Supabase load
         setAlertCount(getActiveCount())
       })
+      // Live sync: add/edit/delete on another device updates this one instantly
+      subscribeAlertsRealtime(session.user.id)
     } else {
+      unsubscribeAlertsRealtime()
       clearAlertsUserId()
     }
+    return () => unsubscribeAlertsRealtime()
   }, [session?.user?.id])
 
   useEffect(() => {
