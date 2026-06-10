@@ -25,6 +25,7 @@ export function AvgCostModal({ lang, holding, onClose, onCommit }) {
   const S0   = Number(holding.shares) || 0
   const A0   = Number(holding.costNative) || 0
   const live = Number.isFinite(Number(holding.priceNative)) && holding.priceNative > 0 ? Number(holding.priceNative) : null
+  const isNew = !(S0 > 0)   // not held yet — planning a first buy; selling is meaningless
 
   const [mode,   setMode]   = useState('buy')
   const [qty,    setQty]    = useState('')
@@ -90,7 +91,9 @@ export function AvgCostModal({ lang, holding, onClose, onCommit }) {
           <div style={{ flex: 1, minWidth: 0 }}>
             <div style={{ fontWeight: 700, fontSize: 15 }}>🧮 {holding.ticker}</div>
             <div style={{ fontSize: 12, color: 'var(--ink-3)', marginTop: 2 }}>
-              {th ? 'ถือ' : 'Holding'} {S0.toLocaleString(undefined, { maximumFractionDigits: 4 })} · {th ? 'ทุนเฉลี่ย' : 'avg cost'} {fmtP(A0, ccy)}
+              {isNew
+                ? (th ? 'ยังไม่ได้ถือ — วางแผนซื้อครั้งแรก' : 'Not held yet — planning a first buy')
+                : <>{th ? 'ถือ' : 'Holding'} {S0.toLocaleString(undefined, { maximumFractionDigits: 4 })} · {th ? 'ทุนเฉลี่ย' : 'avg cost'} {fmtP(A0, ccy)}</>}
               {live != null && <> · {th ? 'ราคา' : 'last'} {fmtP(live, ccy)}</>}
             </div>
           </div>
@@ -99,14 +102,20 @@ export function AvgCostModal({ lang, holding, onClose, onCommit }) {
 
         {/* Mode toggle */}
         <div style={{ display: 'flex', gap: 6 }}>
-          {[['buy', th ? 'ซื้อเพิ่ม' : 'Buy more'], ['sell', th ? 'ขาย' : 'Sell']].map(([m, lbl]) => (
-            <button key={m} onClick={() => onMode(m)} style={{
-              flex: 1, padding: '8px 0', borderRadius: 8, fontSize: 13, fontWeight: 600, cursor: 'pointer',
-              border: '1.5px solid var(--line)',
-              background: mode === m ? (m === 'buy' ? 'var(--accent)' : 'var(--loss)') : 'var(--bg-2)',
-              color: mode === m ? '#fff' : 'var(--ink-2)',
-            }}>{lbl}</button>
-          ))}
+          {[['buy', isNew ? (th ? 'ซื้อครั้งแรก' : 'First buy') : (th ? 'ซื้อเพิ่ม' : 'Buy more')], ['sell', th ? 'ขาย' : 'Sell']].map(([m, lbl]) => {
+            const disabled = m === 'sell' && isNew
+            return (
+              <button key={m} onClick={() => !disabled && onMode(m)} disabled={disabled}
+                title={disabled ? (th ? 'ยังไม่มีหุ้นให้ขาย' : 'Nothing to sell yet') : undefined}
+                style={{
+                  flex: 1, padding: '8px 0', borderRadius: 8, fontSize: 13, fontWeight: 600,
+                  cursor: disabled ? 'not-allowed' : 'pointer', opacity: disabled ? 0.4 : 1,
+                  border: '1.5px solid var(--line)',
+                  background: mode === m ? (m === 'buy' ? 'var(--accent)' : 'var(--loss)') : 'var(--bg-2)',
+                  color: mode === m ? '#fff' : 'var(--ink-2)',
+                }}>{lbl}</button>
+            )
+          })}
         </div>
 
         {/* Inputs */}
@@ -149,9 +158,13 @@ export function AvgCostModal({ lang, holding, onClose, onCommit }) {
         {mode === 'buy' && (
           <>
             <div style={{ display: 'flex', alignItems: 'baseline', gap: 8, flexWrap: 'wrap' }}>
-              <span style={{ fontSize: 13, color: 'var(--ink-3)' }}>{th ? 'ทุนเฉลี่ย' : 'Avg cost'} {fmtP(A0, ccy)} →</span>
+              <span style={{ fontSize: 13, color: 'var(--ink-3)' }}>
+                {isNew
+                  ? (th ? 'ทุนเฉลี่ยเริ่มต้น' : 'Starting avg cost')
+                  : <>{th ? 'ทุนเฉลี่ย' : 'Avg cost'} {fmtP(A0, ccy)} →</>}
+              </span>
               <span style={{ fontSize: 24, fontWeight: 700, fontFamily: 'var(--font-mono)' }}>{q > 0 ? fmtP(newAvg, ccy) : '—'}</span>
-              {q > 0 && (
+              {q > 0 && !isNew && (
                 <span style={{ fontSize: 13, fontWeight: 600, color: avgDelta >= 0 ? 'var(--loss)' : 'var(--gain)' }}>
                   {avgDelta >= 0 ? '+' : ''}{avgDelta.toFixed(1)}%
                 </span>
@@ -166,9 +179,13 @@ export function AvgCostModal({ lang, holding, onClose, onCommit }) {
             </div>
             {q > 0 && (
               <div style={{ fontSize: 12, color: 'var(--ink-3)', lineHeight: 1.5 }}>
-                {th
-                  ? <>จุดคุ้มทุนขยับจาก {fmtP(A0, ccy)} ไปที่ {fmtP(newAvg, ccy)}{newPL != null && <> — ราคาปัจจุบัน{newPL >= 0 ? 'สูงกว่า' : 'ต่ำกว่า'}ทุนใหม่ {Math.abs(newPL).toFixed(1)}%</>}</>
-                  : <>Break-even moves from {fmtP(A0, ccy)} to {fmtP(newAvg, ccy)}{newPL != null && <> — current price is {Math.abs(newPL).toFixed(1)}% {newPL >= 0 ? 'above' : 'below'} the new cost</>}</>}
+                {isNew
+                  ? (th
+                    ? <>จุดคุ้มทุนอยู่ที่ {fmtP(newAvg, ccy)} (รวมค่าธรรมเนียมแล้ว){newPL != null && <> — ราคาปัจจุบัน{newPL >= 0 ? 'สูงกว่า' : 'ต่ำกว่า'}ทุน {Math.abs(newPL).toFixed(1)}%</>}</>
+                    : <>Break-even is {fmtP(newAvg, ccy)} (fees included){newPL != null && <> — current price is {Math.abs(newPL).toFixed(1)}% {newPL >= 0 ? 'above' : 'below'} it</>}</>)
+                  : (th
+                    ? <>จุดคุ้มทุนขยับจาก {fmtP(A0, ccy)} ไปที่ {fmtP(newAvg, ccy)}{newPL != null && <> — ราคาปัจจุบัน{newPL >= 0 ? 'สูงกว่า' : 'ต่ำกว่า'}ทุนใหม่ {Math.abs(newPL).toFixed(1)}%</>}</>
+                    : <>Break-even moves from {fmtP(A0, ccy)} to {fmtP(newAvg, ccy)}{newPL != null && <> — current price is {Math.abs(newPL).toFixed(1)}% {newPL >= 0 ? 'above' : 'below'} the new cost</>}</>)}
               </div>
             )}
           </>

@@ -5,6 +5,7 @@ import { CalcInput } from './CalcInput'
 import { useAiAnalysis } from '../lib/useAiAnalysis'
 import { LUMEN_FMT, LUMEN_DERIVE, LUMEN_TARGETS, LUMEN_FX } from '../data'
 import { deriveHoldings, updatePortfolio } from '../lib/db'
+import { fetchPrices, toYahooSymbol } from '../lib/prices'
 import { AvgCostModal } from './AvgCostModal'
 
 // ── Starter instrument recommendations per asset class ────────────────────────
@@ -269,6 +270,46 @@ export function ToolsPage({ t, lang, ccy, dataState, liveHoldings = [], prices =
     })
     return [...m.values()].sort((a, b) => (b.value || 0) - (a.value || 0))
   }, [rows, isLive])
+
+  // Search any symbol (incl. ones not held yet) → live price → calculator
+  const [calcQuery,     setCalcQuery]     = useState('')
+  const [calcResults,   setCalcResults]   = useState([])
+  const [calcSearching, setCalcSearching] = useState(false)
+  const [calcLoadingPx, setCalcLoadingPx] = useState(false)
+  useEffect(() => {
+    const q = calcQuery.trim()
+    if (q.length < 1) { setCalcResults([]); return }
+    setCalcSearching(true)
+    const t = setTimeout(async () => {
+      try {
+        const res  = await fetch(`/api/search?q=${encodeURIComponent(q)}`)
+        const data = await res.json()
+        setCalcResults(Array.isArray(data) ? data.slice(0, 8) : [])
+      } catch { setCalcResults([]) }
+      finally { setCalcSearching(false) }
+    }, 350)
+    return () => clearTimeout(t)
+  }, [calcQuery])
+
+  const pickNewSymbol = async (r) => {
+    const sym    = r.symbol.replace(/\.BK$/i, '').toUpperCase()
+    const region = (r.exchange === 'SET' || /\.BK$/i.test(r.symbol)) ? 'TH' : 'US'
+    const type   = (r.type || '').toUpperCase()
+    const cls    = type === 'ETF' ? 'ETF' : type === 'CRYPTOCURRENCY' ? 'Crypto' : 'Equity'
+    setCalcQuery(''); setCalcResults([])
+    // Already held → open with the real position instead of a blank one
+    const held = calcChoices.find(g => g.ticker.toUpperCase() === sym && (g.region || 'US') === region)
+    if (held) { setCalcHolding(held); return }
+    setCalcLoadingPx(true)
+    let live = null, ccyN = region === 'TH' ? 'THB' : 'USD'
+    try {
+      const px   = await fetchPrices([{ ticker: sym, region, asset_class: cls }])
+      const ySym = toYahooSymbol(sym, region, cls)
+      if (px?.[ySym]?.price) { live = px[ySym].price; ccyN = px[ySym].currency || ccyN }
+    } catch {}
+    setCalcLoadingPx(false)
+    setCalcHolding({ ticker: sym, name: r.name || sym, region, cls, shares: 0, costNative: 0, priceNative: live, nativeCcy: ccyN })
+  }
 
   const currentByClass = useMemo(() => buildCurrentByClass(rows, investableCash), [rows, investableCash])
 
@@ -796,28 +837,58 @@ export function ToolsPage({ t, lang, ccy, dataState, liveHoldings = [], prices =
         <ToolCard locked title="Tax-loss harvesting" sub={th ? "หาคู่ wash-sale-safe จากตำแหน่งที่ขาดทุน" : "Find wash-sale-safe pairs in your losers"} icon="info" />
       </div>
 
-      {/* Average-cost calculator — pick a holding, model a buy/sell */}
-      {isLive && calcChoices.length > 0 && (
+      {/* Average-cost calculator — pick a holding or search any future symbol */}
+      {isLive && (
         <div className="card" style={{ marginBottom: 24, padding: "16px 20px", display: "flex", alignItems: "center", gap: 14, flexWrap: "wrap" }}>
           <Icon name="calc" size={20} />
           <div style={{ flex: 1, minWidth: 220 }}>
             <div style={{ fontWeight: 600, fontSize: 14 }}>{th ? "เครื่องคำนวณถัวเฉลี่ย ซื้อ/ขาย" : "Average cost calculator"}</div>
             <div className="muted" style={{ fontSize: 12, marginTop: 2 }}>
               {th
-                ? "เลือกหุ้นเพื่อลองคำนวณ — ถัวแล้วทุนใหม่เท่าไหร่ ใส่งบเงินกี่บาทได้กี่หุ้น หรือขายแล้วได้กำไรจริงเท่าไหร่"
-                : "Pick a holding to model a buy (new average, budget → shares) or a sell (realized P/L)"}
+                ? "เลือกหุ้นที่ถือ หรือค้นหาตัวที่ยังไม่ได้ถือเพื่อวางแผนซื้อครั้งแรก — ใส่งบเงินก็คำนวณหุ้นให้"
+                : "Pick a holding, or search a symbol you don't hold yet to plan a first buy"}
             </div>
           </div>
-          <select value="" onChange={e => { const g = calcChoices.find(x => x.ticker === e.target.value); if (g) setCalcHolding(g) }}
-            style={{ padding: "9px 12px", borderRadius: 8, fontSize: 13, border: "1.5px solid var(--line)",
-                     background: "var(--bg)", color: "var(--ink)", outline: "none", minWidth: 210, cursor: "pointer" }}>
-            <option value="" disabled>{th ? "เลือกหลักทรัพย์…" : "Choose a holding…"}</option>
-            {calcChoices.map(g => (
-              <option key={g.ticker} value={g.ticker}>
-                {g.ticker} · {th ? "ถือ" : "holding"} {Number(g.shares).toLocaleString(undefined, { maximumFractionDigits: 4 })}
-              </option>
-            ))}
-          </select>
+          {calcChoices.length > 0 && (
+            <select value="" onChange={e => { const g = calcChoices.find(x => x.ticker === e.target.value); if (g) setCalcHolding(g) }}
+              style={{ padding: "9px 12px", borderRadius: 8, fontSize: 13, border: "1.5px solid var(--line)",
+                       background: "var(--bg)", color: "var(--ink)", outline: "none", minWidth: 190, cursor: "pointer" }}>
+              <option value="" disabled>{th ? "หุ้นที่ถืออยู่…" : "Your holdings…"}</option>
+              {calcChoices.map(g => (
+                <option key={g.ticker} value={g.ticker}>
+                  {g.ticker} · {th ? "ถือ" : "holding"} {Number(g.shares).toLocaleString(undefined, { maximumFractionDigits: 4 })}
+                </option>
+              ))}
+            </select>
+          )}
+          {/* Search any symbol — incl. ones not held yet */}
+          <div style={{ position: "relative", minWidth: 210, flex: "0 1 240px" }}>
+            <input value={calcQuery} onChange={e => setCalcQuery(e.target.value)}
+              placeholder={th ? "🔍 ค้นหาตัวใหม่ เช่น NVDA, PTT…" : "🔍 Search any symbol…"}
+              style={{ width: "100%", padding: "9px 12px", borderRadius: 8, fontSize: 13, border: "1.5px solid var(--line)",
+                       background: "var(--bg)", color: "var(--ink)", outline: "none", boxSizing: "border-box" }} />
+            {(calcSearching || calcLoadingPx) && (
+              <span style={{ position: "absolute", right: 10, top: 10, fontSize: 11, color: "var(--ink-3)" }}>
+                {calcLoadingPx ? (th ? "ดึงราคา…" : "price…") : "…"}
+              </span>
+            )}
+            {calcResults.length > 0 && (
+              <div style={{ position: "absolute", top: "calc(100% + 4px)", left: 0, right: 0, zIndex: 400,
+                            background: "var(--bg)", border: "1.5px solid var(--line)", borderRadius: 10,
+                            boxShadow: "0 8px 32px rgba(0,0,0,0.16)", maxHeight: 280, overflowY: "auto" }}>
+                {calcResults.map((r, i) => (
+                  <button key={r.symbol + i} onMouseDown={e => { e.preventDefault(); pickNewSymbol(r) }}
+                    style={{ width: "100%", padding: "9px 12px", display: "flex", alignItems: "center", gap: 8,
+                             border: "none", background: "transparent", cursor: "pointer", textAlign: "left",
+                             borderBottom: i < calcResults.length - 1 ? "1px solid var(--line)" : "none" }}>
+                    <span style={{ fontSize: 14 }}>{(r.exchange === 'SET' || /\.BK$/i.test(r.symbol)) ? '🇹🇭' : '🇺🇸'}</span>
+                    <span style={{ fontWeight: 700, fontFamily: "var(--font-mono)", fontSize: 12 }}>{r.symbol.replace(/\.BK$/i, '')}</span>
+                    <span style={{ fontSize: 11, color: "var(--ink-3)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", flex: 1 }}>{r.name}</span>
+                  </button>
+                ))}
+              </div>
+            )}
+          </div>
         </div>
       )}
 
