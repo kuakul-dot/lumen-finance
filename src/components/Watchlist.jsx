@@ -4,6 +4,8 @@ import { TradingViewChart } from './TradingViewChart'
 import { LWChart } from './LWChart'
 import { fetchHistory, fetchPrices, toYahooSymbol } from '../lib/prices'
 import { getWatchlist, addWatchlistItem, updateWatchlistNote, removeWatchlistItem, migrateLocalWatchlist } from '../lib/watchlistDb'
+import { loadAlerts } from '../lib/alerts'
+import { AlertsModal } from './AlertsModal'
 
 const WATCHLIST_KEY = 'lumen_watchlist_v1'
 
@@ -347,12 +349,14 @@ const CHART_RANGES = ['1mo', '3mo', '6mo', '1y']
 const RANGE_LABEL  = { '1mo': '1M', '3mo': '3M', '6mo': '6M', '1y': '1Y' }
 
 // ── Watchlist card ────────────────────────────────────────────────────────────
-function WatchlistCard({ item, priceData, sr, onRemove, onNoteChange, showChart, onToggleChart, onExpand, lang }) {
+function WatchlistCard({ item, priceData, sr, alerts = [], onSetAlert, onRemove, onNoteChange, showChart, onToggleChart, onExpand, lang }) {
   const th = lang === 'th'
   const livePrice = priceData?.price ?? null
   const changePct = priceData?.changePct ?? 0
   const currency  = priceData?.currency ?? (item.region === 'TH' ? 'THB' : 'USD')
   const gain = changePct > 0, loss = changePct < 0
+  const activeAlerts    = alerts.filter(a => a.active && !a.triggered)
+  const triggeredAlerts = alerts.filter(a => a.triggered)
 
   // ── Chart-specific state (self-contained in the card) ──────────────────────
   const [chartMode,    setChartMode]    = useState('sr')   // 'sr' | 'tv'
@@ -490,6 +494,22 @@ function WatchlistCard({ item, priceData, sr, onRemove, onNoteChange, showChart,
               {item.name}
             </div>
           </div>
+          <button onClick={onSetAlert}
+            style={{ position: 'relative', background: 'none', border: 'none', cursor: 'pointer',
+                     color: activeAlerts.length > 0 ? 'var(--accent-ink)' : 'var(--ink-3)',
+                     padding: 4, borderRadius: 6, flexShrink: 0, lineHeight: 0 }}
+            title={th ? 'ตั้งแจ้งเตือนราคา' : 'Set price alert'}>
+            <Icon name="bell" size={14} />
+            {activeAlerts.length > 0 && (
+              <span style={{
+                position: 'absolute', top: -2, right: -3,
+                minWidth: 12, height: 12, borderRadius: 99,
+                background: 'var(--accent)', color: '#fff',
+                fontSize: 8, fontWeight: 800, lineHeight: '12px',
+                textAlign: 'center', padding: '0 2px', boxSizing: 'border-box',
+              }}>{activeAlerts.length}</span>
+            )}
+          </button>
           <button onClick={onRemove}
             style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--ink-3)', padding: 4, borderRadius: 6, flexShrink: 0, lineHeight: 0 }}
             title={th ? 'นำออก' : 'Remove'}>
@@ -514,6 +534,39 @@ function WatchlistCard({ item, priceData, sr, onRemove, onNoteChange, showChart,
             </span>
           )}
         </div>
+
+        {/* Existing price alerts for this symbol */}
+        {(activeAlerts.length > 0 || triggeredAlerts.length > 0) && (
+          <div style={{ display: 'flex', flexWrap: 'wrap', gap: 5, margin: '2px 0 8px' }}>
+            {activeAlerts.map(a => {
+              const above = a.direction === 'above'
+              return (
+                <button key={a.id} onClick={onSetAlert}
+                  title={th ? 'จัดการแจ้งเตือน' : 'Manage alerts'}
+                  style={{
+                    fontSize: 10, fontWeight: 600, padding: '3px 8px', borderRadius: 99,
+                    border: 'none', cursor: 'pointer', fontFamily: 'var(--font-mono)',
+                    background: above ? 'oklch(0.95 0.03 25)' : 'oklch(0.95 0.03 160)',
+                    color: above ? 'var(--loss)' : 'var(--gain)',
+                    display: 'inline-flex', alignItems: 'center', gap: 4,
+                  }}>
+                  🔔 {above ? '▲' : '▼'} {fmtPrice(a.targetPrice, a.currency)}
+                  {livePrice != null && <span style={{ opacity: 0.7 }}>{distPct(a.targetPrice, livePrice)}</span>}
+                </button>
+              )
+            })}
+            {triggeredAlerts.length > 0 && (
+              <button onClick={onSetAlert}
+                style={{
+                  fontSize: 10, fontWeight: 600, padding: '3px 8px', borderRadius: 99,
+                  border: 'none', cursor: 'pointer',
+                  background: 'var(--bg-2)', color: 'var(--ink-3)',
+                }}>
+                ✓ {th ? `แตะเป้าแล้ว ${triggeredAlerts.length}` : `${triggeredAlerts.length} triggered`}
+              </button>
+            )}
+          </div>
+        )}
 
         {/* S/R Ladder */}
         {livePrice != null && (
@@ -1308,6 +1361,17 @@ export function WatchlistPage({ lang, ccy, fxRate = 36, session }) {
   const [loadingPrices,  setLoadingPrices]  = useState(false)
   // Fullscreen state — stored at page level so modal renders outside the grid
   const [fullscreenItem, setFullscreenItem] = useState(null) // null | { item, priceData, sr }
+  // Quick price-alert modal — prefilled from a watchlist card's bell button
+  const [alertPrefill,   setAlertPrefill]   = useState(null) // null | { ticker, name, region, cls, yahooSym, livePrice, currency }
+
+  // Existing alerts (localStorage cache, kept fresh by lumen-alerts-changed)
+  const [alerts, setAlerts] = useState([])
+  useEffect(() => {
+    const reload = () => setAlerts(loadAlerts())
+    reload()
+    window.addEventListener('lumen-alerts-changed', reload)
+    return () => window.removeEventListener('lumen-alerts-changed', reload)
+  }, [])
 
   // ── Load items: Supabase when logged in, localStorage otherwise ─────────────
   useEffect(() => {
@@ -1511,6 +1575,16 @@ export function WatchlistPage({ lang, ccy, fxRate = 36, session }) {
                   item={item}
                   priceData={priceData}
                   sr={sr}
+                  alerts={alerts.filter(a => a.yahooSym === yahooSym)}
+                  onSetAlert={() => setAlertPrefill({
+                    ticker:    item.symbol,
+                    name:      item.name || item.symbol,
+                    region:    item.region || 'US',
+                    cls:       item.cls || 'Equity',
+                    yahooSym,
+                    livePrice,
+                    currency:  priceData?.currency ?? (item.region === 'TH' ? 'THB' : 'USD'),
+                  })}
                   onRemove={() => removeItem(idx)}
                   onNoteChange={(note) => updateNote(idx, note)}
                   showChart={expandedKey === chartKey}
@@ -1537,6 +1611,11 @@ export function WatchlistPage({ lang, ccy, fxRate = 36, session }) {
       )}
 
       {showAdd && <AddModal th={th} onClose={() => setShowAdd(false)} onAdd={addItem} />}
+
+      {/* Quick price-alert modal — opens on a card's bell, prefilled with that symbol */}
+      {alertPrefill && (
+        <AlertsModal lang={lang} prefill={alertPrefill} onClose={() => setAlertPrefill(null)} />
+      )}
 
       {/* Fullscreen chart — rendered here (outside grid) to avoid createPortal crashes */}
       {fullscreenItem && (
