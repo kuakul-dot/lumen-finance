@@ -262,7 +262,8 @@ function LivePortfolioPage({ t, lang, ccy, portfolio, liveHoldings, prices = {},
   const totalPlPct     = totalCostBasis > 0 ? (totalPL / totalCostBasis) * 100 : 0
   const hasLivePrices  = viewRows.some(r => r.hasLivePrice)
   const annualDiv      = viewRows.reduce((s, r) => s + r.value * (r.divYield || 0) / 100, 0)
-  const largestPos     = viewRows.length > 0 ? [...viewRows].sort((a, b) => b.value - a.value)[0] : null
+  // Group lots per ticker first — a 17-lot position is one position, not 17 small ones
+  const largestPos     = viewRows.length > 0 ? groupByTicker(viewRows).sort((a, b) => b.value - a.value)[0] : null
 
   // Portfolio-level 30D return: value-weighted average of individual stock 30D returns
   const portfolio30dRet = useMemo(() => {
