@@ -626,15 +626,15 @@ function LivePortfolioPage({ t, lang, ccy, portfolio, liveHoldings, prices = {},
             <table className="table tbl-portfolio">
               <thead>
                 <tr>
-                  <SortHeader id="ticker" label={t.portfolio.holding} sortKey={sortKey} sortDir={sortDir} onSort={setSort} />
+                  <SortHeader id="ticker" label={t.portfolio.holding} sortKey={sortKey} sortDir={sortDir} onSort={setSort} className="tbl-col-holding" />
                   <SortHeader id="shares" label={t.portfolio.shares} sortKey={sortKey} sortDir={sortDir} onSort={setSort} align="right" className="hide-tab" />
-                  <th className="num hide-mob">{th ? "ราคา / ทุน" : "Price / Cost"}</th>
+                  <th className="num hide-mob tbl-col-price">{th ? "ราคา / ทุน" : "Price / Cost"}</th>
                   <SortHeader id="costBasis" label={th ? "ต้นทุนรวม" : "Cost"} sortKey={sortKey} sortDir={sortDir} onSort={setSort} align="right" className="hide-tab" />
-                  <SortHeader id="value"     label={t.portfolio.value} sortKey={sortKey} sortDir={sortDir} onSort={setSort} align="right" />
+                  <SortHeader id="value"     label={t.portfolio.value} sortKey={sortKey} sortDir={sortDir} onSort={setSort} align="right" className="tbl-col-value" />
                   <th className="num hide-tab">{th ? "30 วัน" : "30d"}</th>
-                  <SortHeader id="pl"     label={t.portfolio.pl} sortKey={sortKey} sortDir={sortDir} onSort={setSort} align="right" />
-                  <SortHeader id="weight" label={t.portfolio.weight} sortKey={sortKey} sortDir={sortDir} onSort={setSort} align="right" />
-                  <th></th>
+                  <SortHeader id="pl"     label={t.portfolio.pl} sortKey={sortKey} sortDir={sortDir} onSort={setSort} align="right" className="tbl-col-pl" />
+                  <SortHeader id="weight" label={t.portfolio.weight} sortKey={sortKey} sortDir={sortDir} onSort={setSort} align="right" className="tbl-col-weight" />
+                  <th className="tbl-col-actions"></th>
                 </tr>
               </thead>
               <tbody>

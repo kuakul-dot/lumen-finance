@@ -637,8 +637,24 @@ hr.rule { border: 0; border-top: 1px solid var(--line); margin: 24px 0; }
   .row-actions .act-secondary { display: none !important; }
 
   /* ── Portfolio holdings table: flex rows — bypasses table-layout:auto ─── */
-  /* thead hidden; each <tr> becomes a flex row with explicit column widths.  */
-  .tbl-portfolio thead { display: none; }
+  /* Both thead and tbody rows become flex rows sharing the same .tbl-col-*
+     widths, so headers stay aligned with their columns. */
+  .tbl-portfolio thead { display: block; }
+  .tbl-portfolio thead tr {
+    display: flex;
+    align-items: center;
+    flex-wrap: nowrap;
+    padding: 10px 14px 8px;
+    border-bottom: 1px solid var(--line);
+    gap: 8px;
+  }
+  .tbl-portfolio thead th {
+    display: block;
+    border: none;
+    padding: 0;
+  }
+  .tbl-portfolio thead th.num { text-align: right; }
+  .tbl-portfolio thead th.hide-tab { display: none !important; }
 
   .tbl-portfolio tbody tr {
     display: flex;
@@ -665,7 +681,9 @@ hr.rule { border: 0; border-top: 1px solid var(--line); margin: 24px 0; }
   .tbl-col-value   { flex: 0 0 94px;  text-align: right; }
   .tbl-col-pl      { flex: 0 0 90px;  text-align: right; }
   .tbl-col-weight  { flex: 0 0 108px; text-align: right; }
-  .tbl-col-actions { flex: 0 0 auto; }
+  /* Fixed (not auto) so the empty header cell matches the buttons cell and
+     the flexible holding column gets the same width in thead and tbody */
+  .tbl-col-actions { flex: 0 0 96px; }
 
   /* Truncate long company name */
   .tbl-col-holding .holding-sub {
