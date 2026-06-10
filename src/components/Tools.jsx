@@ -185,10 +185,32 @@ export function ToolsPage({ t, lang, ccy, dataState, liveHoldings = [], prices =
   useEffect(() => { try { localStorage.setItem("lumen_rebalance_mode", targetMode) } catch {} }, [targetMode])
   useEffect(() => { try { localStorage.setItem("lumen_rebalance_ticker_weights", JSON.stringify(tickerWeights)) } catch {} }, [tickerWeights])
 
-  // Persist to Supabase (debounced 1.5 s) — syncs targets across all devices
+  // Re-read config when App pulls a fresh copy from Supabase (login / app resume).
+  // _applyingSync stops the save effect below from echoing the pull back up.
+  const _applyingSync = useRef(false)
+  useEffect(() => {
+    const h = () => {
+      _applyingSync.current = true
+      setTargets(loadTargets())
+      setBand(loadBand())
+      setBandMode(loadBandMode())
+      try { setTargetMode(localStorage.getItem("lumen_rebalance_mode") === "hybrid" ? "hybrid" : "class") } catch {}
+      try { setTickerWeights(JSON.parse(localStorage.getItem("lumen_rebalance_ticker_weights") || "{}")) } catch {}
+    }
+    window.addEventListener('lumen-rebal-synced', h)
+    return () => window.removeEventListener('lumen-rebal-synced', h)
+  }, [])
+
+  // Persist to Supabase (debounced 1.5 s) — syncs targets across all devices.
+  // Saves only after a real user edit: the initial mount and applied remote
+  // syncs must NOT write, or a device with stale data would clobber the fresh
+  // config the moment Tools opens.
   const _rebalSaveTimer = useRef(null)
+  const _rebalDirty     = useRef(false)
   useEffect(() => {
     if (!portfolio?.id) return
+    if (_applyingSync.current) { _applyingSync.current = false; return }
+    if (!_rebalDirty.current)  { _rebalDirty.current = true; return }
     clearTimeout(_rebalSaveTimer.current)
     _rebalSaveTimer.current = setTimeout(() => {
       updatePortfolio(portfolio.id, {

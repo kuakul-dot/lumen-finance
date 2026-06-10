@@ -54,6 +54,20 @@ const DENSITY_MAP = {
   airy:    { pad: "36px", gap: "24px", radius: "18px" },
 }
 
+// Write a rebalance config pulled from Supabase into localStorage, then tell
+// mounted pages (Tools / Portfolio) to re-read it.
+function applyRebalConfig(cfg) {
+  if (!cfg) return
+  try {
+    if (cfg.targets)      localStorage.setItem('lumen_rebalance_targets',        JSON.stringify(cfg.targets))
+    if (cfg.band != null) localStorage.setItem('lumen_rebalance_band',           String(cfg.band))
+    if (cfg.mode)         localStorage.setItem('lumen_rebalance_mode',           cfg.mode)
+    if (cfg.bandMode)     localStorage.setItem('lumen_rebalance_band_mode',      cfg.bandMode)
+    if (cfg.tickerW)      localStorage.setItem('lumen_rebalance_ticker_weights', JSON.stringify(cfg.tickerW))
+    window.dispatchEvent(new CustomEvent('lumen-rebal-synced'))
+  } catch {}
+}
+
 export default function App() {
   const [t, setTweak] = useTweaks(TWEAK_DEFAULTS)
   const [route, setRoute] = useState("onboarding")
@@ -132,16 +146,7 @@ export default function App() {
       setPortfolio(active)
       // ── Sync rebalance config from Supabase → localStorage ──────────────
       // Ensures targets are consistent across all devices (iPad / desktop / etc.)
-      if (active.rebalance_config) {
-        const cfg = active.rebalance_config
-        try {
-          if (cfg.targets)  localStorage.setItem('lumen_rebalance_targets',        JSON.stringify(cfg.targets))
-          if (cfg.band != null) localStorage.setItem('lumen_rebalance_band',       String(cfg.band))
-          if (cfg.mode)     localStorage.setItem('lumen_rebalance_mode',           cfg.mode)
-          if (cfg.bandMode) localStorage.setItem('lumen_rebalance_band_mode',      cfg.bandMode)
-          if (cfg.tickerW)  localStorage.setItem('lumen_rebalance_ticker_weights', JSON.stringify(cfg.tickerW))
-        } catch {}
-      }
+      applyRebalConfig(active.rebalance_config)
       await loadActivePortfolioData(active)
     } catch (err) {
       console.error('[Lumen] loadPortfolioData error:', err)
@@ -294,6 +299,21 @@ export default function App() {
     }
     return () => unsubscribeAlertsRealtime()
   }, [session?.user?.id])
+
+  // Re-pull rebalance config when returning to the app — the iPad PWA stays
+  // alive for days, so a config edited on the PC would otherwise never arrive
+  useEffect(() => {
+    if (!session?.user || !portfolio?.id) return
+    const h = async () => {
+      if (document.visibilityState !== 'visible') return
+      try {
+        const { data } = await supabase.from('portfolios').select('rebalance_config').eq('id', portfolio.id).single()
+        if (data?.rebalance_config) applyRebalConfig(data.rebalance_config)
+      } catch {}
+    }
+    document.addEventListener('visibilitychange', h)
+    return () => document.removeEventListener('visibilitychange', h)
+  }, [session?.user?.id, portfolio?.id])
 
   useEffect(() => {
     const root = document.documentElement

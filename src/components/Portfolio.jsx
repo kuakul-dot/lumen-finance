@@ -185,6 +185,14 @@ function LivePortfolioPage({ t, lang, ccy, portfolio, liveHoldings, prices = {},
   const rows = useMemo(() => deriveHoldings(liveHoldings, ccy, prices, fxRate), [liveHoldings, ccy, prices, fxRate])
 
   // ── Rebalance targets (links to Tools.jsx via shared localStorage) ────────
+  // Re-read targets when App pulls a fresh rebalance config from Supabase
+  const [rebalVer, setRebalVer] = useState(0)
+  useEffect(() => {
+    const h = () => setRebalVer(v => v + 1)
+    window.addEventListener('lumen-rebal-synced', h)
+    return () => window.removeEventListener('lumen-rebal-synced', h)
+  }, [])
+
   const rebalState = useMemo(() => {
     try {
       const raw = localStorage.getItem(REBAL_TARGETS_KEY)
@@ -196,7 +204,7 @@ function LivePortfolioPage({ t, lang, ccy, portfolio, liveHoldings, prices = {},
         band    : parseFloat(localStorage.getItem(REBAL_BAND_KEY) || "5") || 5,
       }
     } catch { return null }
-  }, [])   // read once on mount; updates when user opens Portfolio after changing targets
+  }, [rebalVer])
 
   const classTotals = useMemo(() => {
     const m = {}
