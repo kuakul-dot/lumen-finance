@@ -56,6 +56,7 @@ export function getActiveCount() {
 // Any local-only alerts (not yet synced) are pushed up to Supabase as well.
 export async function initAlertsFromSupabase(userId) {
   if (!userId) return
+  setAlertsUserId(userId)
   try {
     const { data, error } = await supabase
       .from('price_alerts')
@@ -83,20 +84,36 @@ export async function initAlertsFromSupabase(userId) {
       triggeredAt: r.triggered_at,
     }))
 
+    // Read localStorage NOW (after async fetch) — user may have added/deleted while waiting
+    const local     = loadAlerts()
+    const localMap  = new Map(local.map(a => [a.id, a]))
     const remoteIds = new Set(remote.map(a => a.id))
 
-    // Local alerts not yet in Supabase → push up
-    const localOnly = loadAlerts().filter(a => !remoteIds.has(a.id))
+    // Push local-only alerts to Supabase
+    const localOnly = local.filter(a => !remoteIds.has(a.id))
     for (const a of localOnly) await _syncAdd(userId, a)
 
-    // Merge: Supabase wins for overlapping IDs (source of truth across devices)
-    const localOnlyMap = new Map(localOnly.map(a => [a.id, a]))
+    // Merge strategy:
+    //   • Remote alerts PRESENT in local → use remote (has authoritative triggered/active state)
+    //   • Remote alerts NOT in local → add them (new from another device) UNLESS local was
+    //     more recently active (i.e. user just deleted it this session — treat missing as deleted)
+    //   • Local-only alerts → keep as-is (already pushed to Supabase above)
+    //
+    // Key fix: read localMap AFTER the async fetch so any delete that happened during the
+    // fetch is already reflected — those IDs won't be in localMap, so they won't be restored.
+    const remoteKept = remote.filter(a => localMap.has(a.id))
+    const remoteNew  = remote.filter(a => !localMap.has(a.id))
+
     const merged = [
-      ...remote,
-      ...localOnly.filter(a => !remote.some(r => r.id === a.id)),
+      ...remoteNew,                               // genuinely new alerts from other devices
+      ...remoteKept.map(r => {                    // sync triggered/active state from Supabase
+        const l = localMap.get(r.id)
+        if (r.triggered && !l.triggered) return { ...l, triggered: true, active: false, triggeredAt: r.triggeredAt }
+        return l
+      }),
+      ...localOnly,                               // local-only (just pushed above)
     ]
     save(merged)
-    setAlertsUserId(userId)
   } catch (err) {
     console.warn('[Alerts] initFromSupabase:', err.message)
   }
