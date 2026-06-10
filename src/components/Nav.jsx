@@ -419,7 +419,7 @@ function MenuRow({ icon, label, children }) {
   )
 }
 
-export function BottomNav({ route, setRoute, lang }) {
+export function BottomNav({ route, setRoute, lang, alertCount = 0 }) {
   const items = [
     { id: "dashboard", labelTh: "หน้าหลัก", labelEn: "Home",      icon: "home"      },
     { id: "portfolio", labelTh: "พอร์ต",    labelEn: "Portfolio",  icon: "filter"    },
@@ -427,6 +427,7 @@ export function BottomNav({ route, setRoute, lang }) {
     { id: "tools",     labelTh: "เครื่องมือ", labelEn: "Tools",    icon: "sort"      },
     { id: "planning",  labelTh: "วางแผน",    labelEn: "Plan",      icon: "leaf"      },
     { id: "watchlist", labelTh: "ติดตาม",    labelEn: "Watch",     icon: "eye"       },
+    { id: "alerts",    labelTh: "แจ้งเตือน",  labelEn: "Alerts",    icon: "bell"      },
   ]
   return (
     <nav className="bottom-nav" aria-label="Bottom navigation">
@@ -435,8 +436,21 @@ export function BottomNav({ route, setRoute, lang }) {
           key={it.id}
           className={"bottom-nav-item" + (route === it.id ? " active" : "")}
           onClick={() => setRoute(it.id)}
+          style={{ position: "relative" }}
         >
           <Icon name={it.icon} size={22} />
+          {it.id === "alerts" && alertCount > 0 && (
+            <span style={{
+              position: "absolute", top: 2, left: "calc(50% + 6px)",
+              minWidth: 14, height: 14, borderRadius: 99,
+              background: "var(--loss)", color: "#fff",
+              fontSize: 9, fontWeight: 800, lineHeight: "14px",
+              textAlign: "center", padding: "0 3px",
+              boxSizing: "border-box",
+            }}>
+              {alertCount > 9 ? '9+' : alertCount}
+            </span>
+          )}
           <span>{lang === "th" ? it.labelTh : it.labelEn}</span>
         </button>
       ))}
@@ -504,6 +518,7 @@ export function Icon({ name, size = 18 }) {
     case "lang":     return (<svg {...props}><path d="M3 7V5h10"/><path d="M8 5v14"/><path d="M13 19h9M16 13h6"/><path d="M17.5 19c-.5-3 .5-5 2-6"/></svg>)
     case "user":     return (<svg {...props}><circle cx="12" cy="8" r="4"/><path d="M4 20c0-4 3.6-7 8-7s8 3 8 7"/></svg>)
     case "eye":      return (<svg {...props}><path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7S2 12 2 12Z"/><circle cx="12" cy="12" r="3"/></svg>)
+    case "bell":     return (<svg {...props}><path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.73 21a2 2 0 0 1-3.46 0"/></svg>)
     case "eye-off":  return (<svg {...props}><path d="M3 3l18 18"/><path d="M10.6 6.1A10.9 10.9 0 0 1 12 6c6.5 0 10 7 10 7a14 14 0 0 1-3.4 4.1"/><path d="M6.1 7.1A14 14 0 0 0 2 12s3.5 7 10 7a10.9 10.9 0 0 0 4.5-1"/><path d="M9 9a4 4 0 0 0 6 6"/></svg>)
     case "refresh":  return (<svg {...props}><path d="M3 12a9 9 0 0 1 9-9 9.75 9.75 0 0 1 6.74 2.74L21 8"/><path d="M21 3v5h-5"/><path d="M21 12a9 9 0 0 1-9 9 9.75 9.75 0 0 1-6.74-2.74L3 16"/><path d="M8 16H3v5"/></svg>)
     case "chart":    return (<svg {...props}><line x1="3" y1="20" x2="21" y2="20"/><rect x="5" y="11" width="3" height="8"/><rect x="11" y="6" width="3" height="13"/><rect x="17" y="13" width="3" height="6"/></svg>)

@@ -527,7 +527,7 @@ export default function App() {
       {page}
 
       {route !== "onboarding" && (
-        <BottomNav route={route} setRoute={setRoute} lang={lang} />
+        <BottomNav route={route} setRoute={setRoute} lang={lang} alertCount={alertCount} />
       )}
 
 

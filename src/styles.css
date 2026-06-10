@@ -755,6 +755,10 @@ hr.rule { border: 0; border-top: 1px solid var(--line); margin: 24px 0; }
   .bottom-nav-item.active { color: var(--ink); }
   .bottom-nav-item.active svg { stroke: var(--ink); }
 
+  /* Lift the tweaks gear above the bottom nav so it doesn't cover the last item.
+     !important beats the component's injected <style> (same specificity, later order). */
+  .twk-fab { bottom: calc(64px + env(safe-area-inset-bottom)) !important; }
+
   /* Hero responsive */
   .hero-grid { grid-template-columns: 1fr !important; }
   .hero-num  { font-size: 44px !important; }
