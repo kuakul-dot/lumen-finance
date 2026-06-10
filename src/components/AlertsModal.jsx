@@ -17,17 +17,27 @@ class AlertsBoundary extends Component {
   render() {
     if (this.state.err) {
       const th = this.props.lang === 'th'
+      const msg = this.state.err?.message || String(this.state.err)
       return (
-        <div style={{ padding: '40px 20px', textAlign: 'center', color: 'var(--ink-3)' }}>
-          <div style={{ fontSize: 32, marginBottom: 12 }}>⚠️</div>
-          <div style={{ fontSize: 14, marginBottom: 16 }}>
-            {th ? 'เกิดข้อผิดพลาด กรุณาลองใหม่' : 'Something went wrong. Please try again.'}
+        <div style={{ padding: '32px 20px', color: 'var(--ink-3)' }}>
+          <div style={{ textAlign: 'center', marginBottom: 16 }}>
+            <div style={{ fontSize: 28, marginBottom: 8 }}>⚠️</div>
+            <div style={{ fontSize: 14 }}>
+              {th ? 'เกิดข้อผิดพลาด' : 'Something went wrong'}
+            </div>
           </div>
-          <button onClick={() => this.setState({ err: null })}
-            style={{ padding: '8px 20px', borderRadius: 8, border: '1px solid var(--line)',
-                     background: 'var(--accent)', color: '#fff', fontSize: 13, cursor: 'pointer' }}>
-            {th ? 'ลองใหม่' : 'Retry'}
-          </button>
+          <div style={{ fontSize: 11, fontFamily: 'var(--font-mono)', padding: '10px 14px',
+                        borderRadius: 8, background: 'var(--bg-2)', border: '1px solid var(--line)',
+                        wordBreak: 'break-all', marginBottom: 16, color: 'var(--loss)' }}>
+            {msg}
+          </div>
+          <div style={{ textAlign: 'center' }}>
+            <button onClick={() => this.setState({ err: null })}
+              style={{ padding: '8px 20px', borderRadius: 8, border: '1px solid var(--line)',
+                       background: 'var(--accent)', color: '#fff', fontSize: 13, cursor: 'pointer' }}>
+              {th ? 'ลองใหม่' : 'Retry'}
+            </button>
+          </div>
         </div>
       )
     }
