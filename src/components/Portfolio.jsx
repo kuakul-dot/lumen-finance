@@ -326,6 +326,20 @@ function LivePortfolioPage({ t, lang, ccy, portfolio, liveHoldings, prices = {},
     })
   }, [rows, filter, sortKey, sortDir, q])
 
+  // When a filter chip or search is active, weights re-normalise to the visible
+  // rows (groupByTicker divides by the filtered total). Targets must move to the
+  // same basis — sum to 100% within the view — or every row looks overweight.
+  const isFilteredView = filter !== "all" || !!q
+  const viewTargetSum  = useMemo(
+    () => isFilteredView ? grouped.reduce((s, r) => s + getTargetPct(r), 0) : 0,
+    [isFilteredView, grouped, getTargetPct]
+  )
+  const getViewTargetPct = useCallback((r) => {
+    const tgt = getTargetPct(r)
+    if (!isFilteredView || !tgt) return tgt
+    return viewTargetSum > 0 ? (tgt / viewTargetSum) * 100 : 0
+  }, [getTargetPct, isFilteredView, viewTargetSum])
+
   const setSort = k => {
     if (sortKey === k) setSortDir(d => d === "asc" ? "desc" : "asc")
     else { setSortKey(k); setSortDir("desc") }
@@ -715,7 +729,7 @@ function LivePortfolioPage({ t, lang, ccy, portfolio, liveHoldings, prices = {},
                       </td>
                       <td className="num tbl-col-weight">
                         {(() => {
-                          const tgt  = getTargetPct(r)
+                          const tgt  = getViewTargetPct(r)
                           const band = rebalState?.band ?? 5
                           const diff = tgt > 0 ? r.weight - tgt : 0
                           // Action vs target: over band → trim, under band → add, inside band → hold
