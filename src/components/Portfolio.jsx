@@ -733,6 +733,12 @@ function LivePortfolioPage({ t, lang, ccy, portfolio, liveHoldings, prices = {},
                           const tgt  = getViewTargetPct(r)
                           const band = rebalState?.band ?? 5
                           const diff = tgt > 0 ? r.weight - tgt : 0
+                          // Tickers without an explicit per-ticker weight fall back to
+                          // "target = current share of class". In a filtered view that
+                          // makes diff ≡ 0 by construction — hide the meaningless line.
+                          // (Unfiltered view still shows class-level drift, so keep it.)
+                          const hasOwnTarget = rebalState?.mode === "hybrid" && rebalState?.tickerW?.[r.ticker] != null
+                          const showPlan = tgt > 0 && (!isFilteredView || hasOwnTarget)
                           // Action vs target: over band → trim, under band → add, inside band → hold
                           const action = tgt > 0 ? (diff > band ? 'sell' : diff < -band ? 'buy' : 'hold') : null
                           const actionColor = action === 'sell' ? 'var(--loss)'
@@ -760,7 +766,7 @@ function LivePortfolioPage({ t, lang, ccy, portfolio, liveHoldings, prices = {},
                                 }
                                 <span style={{ minWidth: 36 }}>{r.weight.toFixed(1)}%</span>
                               </div>
-                              {tgt > 0 && (
+                              {showPlan && (
                                 <div style={{ display: "flex", alignItems: "center", gap: 5 }} title={actionHint}>
                                   <span style={{
                                     fontSize: 9, fontWeight: 700, padding: "1px 6px", borderRadius: 99,
