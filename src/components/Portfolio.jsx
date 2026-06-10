@@ -11,6 +11,7 @@ import { TradingViewChart } from './TradingViewChart'
 import { SRPanel } from './SRPanel'
 import { AlertsModal } from './AlertsModal'
 import { CalcInput } from './CalcInput'
+import { AvgCostModal } from './AvgCostModal'
 
 // ── Rebalance target integration ─────────────────────────────────────────────
 // Uses the same localStorage keys as Tools.jsx so the two pages share one source of truth.
@@ -126,6 +127,8 @@ function LivePortfolioPage({ t, lang, ccy, portfolio, liveHoldings, prices = {},
   const [deleting, setDeleting] = useState(null)
   const [editHolding, setEditHolding] = useState(null)
   const [sellHolding, setSellHolding] = useState(null)
+  const [calcHolding, setCalcHolding] = useState(null)   // avg-cost calculator
+  const [addInitial,  setAddInitial]  = useState(null)   // prefill for AddHoldingModal (from calculator)
   const [sortKey, setSortKey] = useState("value")
   const [sortDir, setSortDir] = useState("desc")
   const [q, setQ] = useState("")
@@ -784,6 +787,11 @@ function LivePortfolioPage({ t, lang, ccy, portfolio, liveHoldings, prices = {},
                       <td className="tbl-col-actions">
                         <div className="row-actions" style={{ display: "flex", gap: 2, justifyContent: "flex-end" }}>
                           <button
+                            onClick={() => setCalcHolding(r)}
+                            style={{ background: "none", border: "none", cursor: "pointer", color: "var(--ink-3)", padding: "4px 6px", borderRadius: 6, lineHeight: 1, display: "inline-flex", alignItems: "center" }}
+                            title={th ? "คำนวณถัวเฉลี่ย ซื้อ/ขาย" : "Average cost calculator"}
+                          ><Icon name="calc" size={14} /></button>
+                          <button
                             onClick={() => setChartHolding(r)}
                             style={{ background: "none", border: "none", cursor: "pointer", color: "var(--ink-3)", padding: "4px 6px", borderRadius: 6, lineHeight: 1, display: "inline-flex", alignItems: "center" }}
                             title={th ? "แนวรับ/ต้าน + กราฟ" : "S/R levels + chart"}
@@ -882,12 +890,36 @@ function LivePortfolioPage({ t, lang, ccy, portfolio, liveHoldings, prices = {},
         </>
       )}
 
-      {showAdd && (
+      {(showAdd || addInitial) && (
         <AddHoldingModal
           lang={lang}
           portfolioId={portfolio?.id}
-          onClose={() => setShowAdd(false)}
-          onSaved={async () => { setShowAdd(false); await refreshHoldings() }}
+          initial={addInitial}
+          onClose={() => { setShowAdd(false); setAddInitial(null) }}
+          onSaved={async () => { setShowAdd(false); setAddInitial(null); await refreshHoldings() }}
+        />
+      )}
+      {calcHolding && (
+        <AvgCostModal
+          lang={lang}
+          holding={calcHolding}
+          onClose={() => setCalcHolding(null)}
+          onCommit={(mode, { qty, price }) => {
+            const h = calcHolding
+            setCalcHolding(null)
+            if (mode === 'sell') {
+              // SellModal prefers prefillShares/priceNative when present
+              setSellHolding({ ...h, prefillShares: qty, priceNative: price })
+            } else {
+              setAddInitial({
+                ticker: h.ticker, name: h.name || h.ticker,
+                asset_class: h.cls || 'Equity', region: h.region || 'TH',
+                sector: h.sector && h.sector !== '—' ? h.sector : '',
+                shares: String(qty), cost_price: String(price),
+                currency: h.nativeCcy || (h.region === 'US' ? 'USD' : 'THB'),
+              })
+            }
+          }}
         />
       )}
       {editHolding && (
@@ -1132,7 +1164,7 @@ function groupByTicker(rows) {
 }
 
 // ─── Add Holding Modal ───────────────────────────────────────────────────────
-function AddHoldingModal({ lang, portfolioId, onClose, onSaved }) {
+function AddHoldingModal({ lang, portfolioId, onClose, onSaved, initial = null }) {
   const th = lang === "th"
   const today = new Date().toISOString().split('T')[0]
   const [form, setForm] = useState({
@@ -1141,6 +1173,7 @@ function AddHoldingModal({ lang, portfolioId, onClose, onSaved }) {
     shares: '', cost_price: '', currency: 'THB', div_yield: '', div_frequency: '2',
     fee: '', tax: '',
     purchased_at: today,
+    ...(initial || {}),   // prefill from the avg-cost calculator
   })
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState(null)
@@ -1592,7 +1625,7 @@ function SellModal({ lang, ccy, holding, portfolioId, onClose, onSaved }) {
   const isUS = (holding.region === 'US') || nativeCcy === 'USD'
 
   const [form, setForm] = useState({
-    shares: String(heldShares),
+    shares: String(holding.prefillShares ?? heldShares),
     price:  holding.priceNative != null ? String(+Number(holding.priceNative).toFixed(2)) : '',
     fee: '', tax: '',
     date: today,
