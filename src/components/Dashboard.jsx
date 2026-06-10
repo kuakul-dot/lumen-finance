@@ -501,8 +501,8 @@ function AlertProximityCard({ prices = {}, setRoute, lang }) {
         {rows.map(a => {
           const above  = a.direction === 'above'
           const absD   = a.dist == null ? null : Math.abs(a.dist)
-          // Proximity bar fills as price approaches target (full at 0%, empty ≥10% away)
-          const fill   = absD == null ? 0 : Math.max(0, Math.min(1, 1 - absD / 10))
+          // Proximity bar fills as price approaches target (full at 0%, empty ≥30% away)
+          const fill   = absD == null ? 0 : Math.max(0, Math.min(1, 1 - absD / 30))
           const hot    = absD != null && absD <= 1
           const warm   = absD != null && absD <= 3
           const distColor = hot ? 'var(--loss)' : warm ? 'oklch(0.62 0.14 65)' : 'var(--ink-3)'
