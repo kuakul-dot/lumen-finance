@@ -1,15 +1,34 @@
-// Price Alert engine — localStorage cache + optional Supabase sync
-// When a user is logged in, alerts are persisted to Supabase so they
-// survive across devices. localStorage acts as a fast local cache.
+// Price Alert engine — localStorage cache + Supabase sync
+//
+// Sync design:
+//   _synced flag  — set true once _syncAdd confirms the alert is in Supabase
+//   tombstone     — IDs deleted on THIS device; prevents Supabase from restoring them
+//
+// initAlertsFromSupabase merge rules:
+//   local + NOT in remote + _synced=false  → never reached Supabase → push up
+//   local + NOT in remote + _synced=true   → deleted on another device → drop from local
+//   local + in tombstone                   → deleted here; retry Supabase delete
+//   remote + NOT in local + NOT tombstoned → new from another device → add to local
+//   remote + NOT in local + tombstoned     → deleted here (sync may have been slow) → skip
 
 import { supabase } from './supabase'
 
-const KEY = 'lumen_alerts_v1'
+const KEY       = 'lumen_alerts_v1'
+const TOMB_KEY  = 'lumen_alerts_deleted_v1'
 
-// Current logged-in user ID (set by App.jsx on session change)
+// ── Current logged-in user ID ─────────────────────────────────────────────────
 let _userId = null
 export function setAlertsUserId(id) { _userId = id }
 export function clearAlertsUserId() { _userId = null }
+
+// ── Tombstone helpers ─────────────────────────────────────────────────────────
+function loadTombstones() {
+  try { return new Set(JSON.parse(localStorage.getItem(TOMB_KEY) || '[]')) } catch { return new Set() }
+}
+function addTombstone(id) {
+  const ids = [...loadTombstones(), id].slice(-300)   // cap at 300 to prevent unbounded growth
+  try { localStorage.setItem(TOMB_KEY, JSON.stringify(ids)) } catch {}
+}
 
 // ── Local cache (localStorage) ────────────────────────────────────────────────
 export function loadAlerts() {
@@ -21,6 +40,14 @@ function save(list) {
   window.dispatchEvent(new CustomEvent('lumen-alerts-changed'))
 }
 
+// Silently update _synced flag without triggering a UI re-render
+function markSynced(id) {
+  try {
+    const list = loadAlerts().map(a => a.id === id ? { ...a, _synced: true } : a)
+    localStorage.setItem(KEY, JSON.stringify(list))
+  } catch {}
+}
+
 // ── CRUD ──────────────────────────────────────────────────────────────────────
 export function addAlert(data) {
   const id = Date.now().toString(36) + Math.random().toString(36).slice(2, 5)
@@ -29,20 +56,22 @@ export function addAlert(data) {
     active: true, triggered: false,
     createdAt: new Date().toISOString(),
     triggeredAt: null,
+    _synced: false,
   }
   save([alert, ...loadAlerts()])
-  // Fire-and-forget sync to Supabase
-  if (_userId) _syncAdd(_userId, alert)
+  if (_userId) _syncAdd(_userId, alert).then(() => markSynced(id)).catch(() => {})
   return alert
 }
 
 export function removeAlert(id) {
+  addTombstone(id)
   save(loadAlerts().filter(a => a.id !== id))
   if (_userId) _syncRemove(_userId, id)
 }
 
 export function clearTriggered() {
   const toRemove = loadAlerts().filter(a => a.triggered).map(a => a.id)
+  toRemove.forEach(id => addTombstone(id))
   save(loadAlerts().filter(a => !a.triggered))
   if (_userId) toRemove.forEach(id => _syncRemove(_userId, id))
 }
@@ -52,8 +81,11 @@ export function getActiveCount() {
 }
 
 // ── Supabase bootstrap ─────────────────────────────────────────────────────────
-// Call once on login. Loads all alerts from Supabase → merges into localStorage.
-// Any local-only alerts (not yet synced) are pushed up to Supabase as well.
+// Call once on login. Full bidirectional sync:
+//   - New remote alerts (from other devices) → added to local
+//   - Deleted remote alerts (by other devices) → removed from local
+//   - Local-only never-synced alerts → pushed to Supabase
+//   - Locally-deleted alerts (tombstoned) → Supabase delete retried if still there
 export async function initAlertsFromSupabase(userId) {
   if (!userId) return
   setAlertsUserId(userId)
@@ -65,7 +97,7 @@ export async function initAlertsFromSupabase(userId) {
       .order('created_at', { ascending: false })
     if (error) { console.warn('[Alerts] init fetch:', error.message); return }
 
-    // Supabase rows → local alert shape
+    // Map Supabase rows → local alert shape
     const remote = (data || []).map(r => ({
       id:          r.local_id || r.id,
       ticker:      r.ticker,
@@ -82,37 +114,52 @@ export async function initAlertsFromSupabase(userId) {
       triggered:   r.triggered,
       createdAt:   r.created_at,
       triggeredAt: r.triggered_at,
+      _synced:     true,
     }))
 
-    // Read localStorage NOW (after async fetch) — user may have added/deleted while waiting
-    const local     = loadAlerts()
-    const localMap  = new Map(local.map(a => [a.id, a]))
-    const remoteIds = new Set(remote.map(a => a.id))
+    // Read localStorage AFTER the async fetch (captures any user actions during the fetch)
+    const local      = loadAlerts()
+    const localMap   = new Map(local.map(a => [a.id, a]))
+    const remoteIds  = new Set(remote.map(a => a.id))
+    const tombstones = loadTombstones()
 
-    // Push local-only alerts to Supabase
-    const localOnly = local.filter(a => !remoteIds.has(a.id))
-    for (const a of localOnly) await _syncAdd(userId, a)
+    // ── Local alerts not in Supabase ──────────────────────────────────────────
+    const localNotInRemote = local.filter(a => !remoteIds.has(a.id))
 
-    // Merge strategy:
-    //   • Remote alerts PRESENT in local → use remote (has authoritative triggered/active state)
-    //   • Remote alerts NOT in local → add them (new from another device) UNLESS local was
-    //     more recently active (i.e. user just deleted it this session — treat missing as deleted)
-    //   • Local-only alerts → keep as-is (already pushed to Supabase above)
-    //
-    // Key fix: read localMap AFTER the async fetch so any delete that happened during the
-    // fetch is already reflected — those IDs won't be in localMap, so they won't be restored.
-    const remoteKept = remote.filter(a => localMap.has(a.id))
-    const remoteNew  = remote.filter(a => !localMap.has(a.id))
+    for (const a of localNotInRemote) {
+      if (tombstones.has(a.id)) {
+        // Tombstoned + not in remote → already deleted from Supabase (or never got there). No-op.
+        continue
+      }
+      if (!a._synced) {
+        // Never made it to Supabase (e.g. was offline when added) → push up now
+        await _syncAdd(userId, a)
+      }
+      // If _synced=true but NOT in remote → deleted on another device → will be excluded from merged
+    }
 
+    // Retry Supabase delete for tombstoned IDs that are STILL in Supabase
+    for (const r of remote) {
+      if (tombstones.has(r.id)) await _syncRemove(userId, r.id)
+    }
+
+    // ── Build merged list ─────────────────────────────────────────────────────
     const merged = [
-      ...remoteNew,                               // genuinely new alerts from other devices
-      ...remoteKept.map(r => {                    // sync triggered/active state from Supabase
-        const l = localMap.get(r.id)
-        if (r.triggered && !l.triggered) return { ...l, triggered: true, active: false, triggeredAt: r.triggeredAt }
-        return l
-      }),
-      ...localOnly,                               // local-only (just pushed above)
+      // Remote alerts not tombstoned: source of truth for cross-device state
+      ...remote
+        .filter(a => !tombstones.has(a.id))
+        .map(r => {
+          const l = localMap.get(r.id)
+          if (!l) return r   // New from another device
+          // Sync triggered/active state if Supabase is ahead
+          if (r.triggered && !l.triggered) return { ...l, triggered: true, active: false, triggeredAt: r.triggeredAt, _synced: true }
+          return { ...l, _synced: true }
+        }),
+
+      // Local-only alerts that were never synced (just pushed above)
+      ...localNotInRemote.filter(a => !a._synced && !tombstones.has(a.id)),
     ]
+
     save(merged)
   } catch (err) {
     console.warn('[Alerts] initFromSupabase:', err.message)
@@ -146,8 +193,6 @@ function fireNotif(alert, currentPrice) {
 }
 
 // ── Check all active alerts against a live prices map ────────────────────────
-// Call this every time prices update.
-// Returns the number of newly triggered alerts.
 export function checkAndFireAlerts(prices) {
   if (!prices || typeof prices !== 'object') return 0
   const alerts = loadAlerts()
@@ -164,7 +209,6 @@ export function checkAndFireAlerts(prices) {
       count++
       fireNotif(a, px)
       const triggered = { ...a, triggered: true, active: false, triggeredAt: new Date().toISOString() }
-      // Sync triggered state to Supabase
       if (_userId) _syncTrigger(_userId, triggered)
       return triggered
     }
