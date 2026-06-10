@@ -1402,10 +1402,12 @@ export function WatchlistPage({ lang, ccy, fxRate = 36, session }) {
     return () => { cancelled = true }
   }, [userId])
 
-  // Persist to localStorage when not logged in (localStorage is sole store)
+  // Persist to localStorage when not logged in (localStorage is sole store).
+  // Skip while the initial load is in flight — otherwise the mount-time run
+  // writes [] over the stored list before setItems lands.
   useEffect(() => {
-    if (!userId) saveList(items)
-  }, [items, userId])
+    if (!userId && !loadingList) saveList(items)
+  }, [items, userId, loadingList])
 
   // ── Fetch live prices for all watchlist items ───────────────────────────────
   const refreshPrices = useCallback(async () => {
