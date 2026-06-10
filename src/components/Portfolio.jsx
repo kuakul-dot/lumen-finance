@@ -718,9 +718,22 @@ function LivePortfolioPage({ t, lang, ccy, portfolio, liveHoldings, prices = {},
                           const tgt  = getTargetPct(r)
                           const band = rebalState?.band ?? 5
                           const diff = tgt > 0 ? r.weight - tgt : 0
-                          const statusColor = diff >  band ? "var(--gain)"
-                                            : diff < -band ? "var(--loss)"
-                                            : "oklch(0.72 0.15 60)"
+                          // Action vs target: over band → trim, under band → add, inside band → hold
+                          const action = tgt > 0 ? (diff > band ? 'sell' : diff < -band ? 'buy' : 'hold') : null
+                          const actionColor = action === 'sell' ? 'var(--loss)'
+                                            : action === 'buy'  ? 'var(--gain)'
+                                            : 'oklch(0.55 0.10 60)'
+                          const actionBg    = action === 'sell' ? 'oklch(0.95 0.03 25)'
+                                            : action === 'buy'  ? 'oklch(0.95 0.03 160)'
+                                            : 'oklch(0.96 0.04 85)'
+                          const actionLabel = action === 'sell' ? (th ? 'ขาย' : 'Trim')
+                                            : action === 'buy'  ? (th ? 'ซื้อ' : 'Buy')
+                                            : (th ? 'ถือ' : 'Hold')
+                          const actionHint  = action === 'sell'
+                            ? (th ? `เกินเป้า ${diff.toFixed(1)}% (band ±${band}%) — ควรลดสัดส่วน` : `${diff.toFixed(1)}% over target (band ±${band}%) — consider trimming`)
+                            : action === 'buy'
+                            ? (th ? `ต่ำกว่าเป้า ${Math.abs(diff).toFixed(1)}% (band ±${band}%) — ควรซื้อเพิ่ม` : `${Math.abs(diff).toFixed(1)}% under target (band ±${band}%) — consider adding`)
+                            : (th ? `อยู่ในกรอบเป้าหมาย ±${band}% — ไม่ต้องปรับ` : `Within ±${band}% of target — no action needed`)
                           return (
                             <div style={{ display: "flex", flexDirection: "column", alignItems: "flex-end", gap: 3 }}>
                               <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
@@ -733,8 +746,14 @@ function LivePortfolioPage({ t, lang, ccy, portfolio, liveHoldings, prices = {},
                                 <span style={{ minWidth: 36 }}>{r.weight.toFixed(1)}%</span>
                               </div>
                               {tgt > 0 && (
-                                <div style={{ fontSize: 9, fontFamily: "var(--font-mono)", color: statusColor, letterSpacing: "0.01em" }}>
-                                  {diff >= 0 ? "+" : ""}{diff.toFixed(1)}% vs {tgt.toFixed(1)}%
+                                <div style={{ display: "flex", alignItems: "center", gap: 5 }} title={actionHint}>
+                                  <span style={{
+                                    fontSize: 9, fontWeight: 700, padding: "1px 6px", borderRadius: 99,
+                                    background: actionBg, color: actionColor, letterSpacing: "0.02em",
+                                  }}>{actionLabel}</span>
+                                  <span style={{ fontSize: 9, fontFamily: "var(--font-mono)", color: actionColor, letterSpacing: "0.01em" }}>
+                                    {diff >= 0 ? "+" : ""}{diff.toFixed(1)}% vs {tgt.toFixed(1)}%
+                                  </span>
                                 </div>
                               )}
                             </div>
