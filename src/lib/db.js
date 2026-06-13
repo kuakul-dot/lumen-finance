@@ -355,6 +355,19 @@ export async function upsertSnapshots(portfolioId, rows) {
   return { error, count: error ? 0 : rows.length }
 }
 
+// Delete snapshots strictly after a given date — used after backfill to remove
+// recent bad data that historical prices can't yet cover.
+export async function deleteSnapshotsAfterDate(portfolioId, date) {
+  if (!portfolioId || !date) return { error: null }
+  const { error } = await supabase
+    .from('portfolio_snapshots')
+    .delete()
+    .eq('portfolio_id', portfolioId)
+    .gt('date', date)
+  if (error) console.warn('[Lumen] deleteSnapshotsAfterDate:', error.message)
+  return { error }
+}
+
 // Reconstruct a daily {date,total_value,total_cost} series from transactions +
 // historical price series.  Lets TWR / Sharpe / drawdown work without waiting
 // days for live snapshots to accumulate.

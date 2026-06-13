@@ -4,7 +4,7 @@ import { PageHead, Delta, Icon, TickerLogo } from './Nav'
 import { CalcInput } from './CalcInput'
 import { LineChart, Donut, BarChart } from './Charts'
 import { LUMEN_FMT, LUMEN_DERIVE, LUMEN_HISTORY, LUMEN_BENCH } from '../data'
-import { deriveHoldings, getTransactions, getSnapshots, getAllTransactions, upsertSnapshots, buildSnapshotSeries, addTransaction, updateTransaction, deleteTransaction } from '../lib/db'
+import { deriveHoldings, getTransactions, getSnapshots, getAllTransactions, upsertSnapshots, deleteSnapshotsAfterDate, buildSnapshotSeries, addTransaction, updateTransaction, deleteTransaction } from '../lib/db'
 import { fetchHistory, toYahooSymbol } from '../lib/prices'
 
 export function AnalyticsPage({ t, lang, ccy, dataState, liveHoldings = [], prices = {}, fxRate = 36, portfolio }) {
@@ -2335,6 +2335,13 @@ function AnalyticsMetrics({ t, lang, ccy, rows = [], totalValue = 0, totalPL = 0
 
       const { error } = await upsertSnapshots(portfolio.id, series)
       if (error) { setBackfillMsg((th ? "บันทึกไม่สำเร็จ: " : "Save failed: ") + error.message); return }
+
+      // Delete snapshots newer than the last rebuilt date — these are "live"
+      // snapshots from days Yahoo historical prices don't cover yet (typically
+      // last 1-2 days). If they contain corrupted data they'll be re-recorded
+      // correctly once the page reloads with fixed holdings.
+      const lastRebuiltDate = series[series.length - 1].date
+      await deleteSnapshotsAfterDate(portfolio.id, lastRebuiltDate)
 
       const fresh = await getSnapshots(portfolio.id)
       setSnaps(fresh)
