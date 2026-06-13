@@ -717,13 +717,13 @@ function LivePortfolioPage({ t, lang, ccy, portfolio, liveHoldings, prices = {},
                                 The stored cost may be in THB even for USD holdings (e.g. BTC bought in THB).
                                 Compare P/L in THB (r.pl) rather than priceNative vs costNative which may be in different currencies. */}
                             <div className="cost-line" style={{ fontSize: 11, color: (r.pl ?? 0) >= 0 ? "var(--gain)" : "var(--loss)", fontFamily: "var(--font-mono)" }}>
-                              {fmtCostNative(r.cost, r.nativeCcy, fxRate)} {th ? "ทุน" : "cost"}
+                              {fmtCostNative(r.cost, r.costNativeCcy, fxRate)} {th ? "ทุน" : "cost"}
                             </div>
                           </>
                         ) : (
                           <>
                             <div style={{ fontFamily: "var(--font-mono)", fontSize: 13, color: "var(--ink-2)" }}>
-                              {fmtCostNative(r.cost, r.nativeCcy, fxRate)}
+                              {fmtCostNative(r.cost, r.costNativeCcy, fxRate)}
                             </div>
                             <div className="muted" style={{ fontSize: 10 }}>{th ? "ราคาซื้อ" : "avg cost"}</div>
                           </>
