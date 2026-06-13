@@ -639,12 +639,16 @@ export function deriveHoldings(holdings, currency = 'THB', prices = {}, fxRate =
     const sym = toYahooSymbol(h.ticker, h.region || 'TH', h.asset_class || 'Equity')
     const priceData = prices[sym]
 
+    // XAU/GOLD tickers are always physical gold regardless of the asset_class entered
+    const isGoldTH = h.asset_class === 'GoldTH' ||
+      ['XAU', 'GOLD'].includes(h.ticker?.toUpperCase())
+
     let currentPriceInTHB = costPriceInTHB
     let currentValue = costValue
     let pl = 0, plPct = 0, hasLivePrice = false, changePct = 0
 
     if (priceData?.price != null) {
-      if (h.asset_class === 'GoldTH') {
+      if (isGoldTH) {
         // GC=F = USD/troy oz → THB per Thai บาท ทอง
         // purity stored in logo_url (new) or sector (legacy — migrated on next edit)
         const purity = parseFloat(h.logo_url) || parseFloat(h.sector) || 96.5
@@ -662,7 +666,6 @@ export function deriveHoldings(holdings, currency = 'THB', prices = {}, fxRate =
     }
 
     // Native (untransformed) price & cost — for per-share display columns
-    const isGoldTH   = h.asset_class === 'GoldTH'
     // nativeCcy: currency the LIVE PRICE is quoted in (USD for US stocks/crypto, THB for SET)
     const nativeCcy   = isGoldTH ? 'THB' : (priceData?.currency || (h.region === 'TH' ? 'THB' : 'USD'))
     const priceNative = isGoldTH ? currentPriceInTHB : (priceData?.price ?? h.cost_price)

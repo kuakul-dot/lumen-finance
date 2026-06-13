@@ -59,6 +59,8 @@ export async function fetchFxRate() {
 
 export function toYahooSymbol(ticker, region = 'TH', assetClass = 'Equity') {
   const t = ticker.toUpperCase()
+  // Gold tickers always use futures regardless of how the asset class was entered
+  if (t === 'XAU' || t === 'GOLD') return 'GC=F'
   if (assetClass === 'Crypto')     return t.includes('-') ? t : `${t}-USD`
   if (assetClass === 'GoldTH')     return 'GC=F'   // Thai physical gold → gold futures
   if (assetClass === 'Commodity') {

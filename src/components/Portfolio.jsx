@@ -3980,7 +3980,7 @@ function PortMetric({ label, value, sub, onClick }) {
     <div onClick={onClick} style={onClick ? { cursor: "pointer", minWidth: 0, overflow: "hidden" } : { minWidth: 0, overflow: "hidden" }} title={onClick ? "ดูรายละเอียด" : undefined}>
       <div className="label-up" style={{ marginBottom: 6 }}>{label}{onClick && <span style={{ marginLeft: 4, color: "var(--ink-4)" }}>›</span>}</div>
       <div className="port-metric-val" style={{ fontFamily: "var(--font-display)", fontSize: 26, lineHeight: 1, letterSpacing: "-0.02em", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{value}</div>
-      <div style={{ fontSize: 11, color: "var(--ink-3)", marginTop: 4 }}>{sub}</div>
+      <div style={{ fontSize: 11, color: "var(--ink-3)", marginTop: 4, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{sub}</div>
     </div>
   )
 }
