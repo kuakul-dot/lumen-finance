@@ -277,8 +277,17 @@ export default function App() {
     if (snapshotKeyRef.current === key) return
 
     const derived = deriveHoldings(liveHoldings, 'THB', prices, fxRate)
-    const total_value = derived.reduce((s, r) => s + r.value, 0)
-    const total_pl    = derived.reduce((s, r) => s + r.pl, 0)
+    // Merge duplicate-lot rows by ticker before summing so the snapshot ratio
+    // isn't skewed when the same ticker has multiple holding rows.
+    const byTicker = new Map()
+    for (const r of derived) {
+      const g = byTicker.get(r.ticker)
+      if (!g) byTicker.set(r.ticker, { value: r.value, pl: r.pl })
+      else { g.value += r.value; g.pl += r.pl }
+    }
+    const merged = [...byTicker.values()]
+    const total_value = merged.reduce((s, r) => s + r.value, 0)
+    const total_pl    = merged.reduce((s, r) => s + r.pl, 0)
     const total_cost  = total_value - total_pl
     if (total_value > 0) {
       snapshotKeyRef.current = key
