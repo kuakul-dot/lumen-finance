@@ -705,6 +705,17 @@ hr.rule { border: 0; border-top: 1px solid var(--line); margin: 24px 0; }
   }
 }
 
+/* ─── iPad landscape (900px – 1200px): restore 12-col grid for 2-col layout ─ */
+@media (min-width: 900px) and (max-width: 1200px) {
+  .grid-12 { grid-template-columns: repeat(12, 1fr); }
+  .col-span-4  { grid-column: span 4  !important; }
+  .col-span-5  { grid-column: span 5  !important; }
+  .col-span-6  { grid-column: span 6  !important; }
+  .col-span-7  { grid-column: span 7  !important; }
+  .col-span-8  { grid-column: span 8  !important; }
+  .col-span-12 { grid-column: span 12 !important; }
+}
+
 /* ─── Mobile responsive ─────────────────────────────────────────────────── */
 @media (max-width: 768px) {
   .shell, .shell-narrow { padding: 16px 16px 88px; }

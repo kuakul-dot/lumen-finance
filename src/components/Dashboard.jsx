@@ -1138,7 +1138,6 @@ function LiveDashboardPage({ t, lang, ccy, setRoute, liveHoldings, prices = {}, 
 
       {/* ── HERO ── */}
       <section className="card" style={{ padding: 36, marginBottom: 16, position: "relative", overflow: "hidden" }}>
-        <div className="hero-grid" style={{ display: "grid", gridTemplateColumns: "1.1fr 1fr", gap: 56, alignItems: "center" }}>
           <div>
             <div className="label-up" style={{ marginBottom: 12 }}>
               {hasCash ? (th ? "มูลค่าสุทธิ (Net Worth)" : "Net Worth") : (th ? "มูลค่าพอร์ต" : "Portfolio value")} · {ccy}
@@ -1190,40 +1189,46 @@ function LiveDashboardPage({ t, lang, ccy, setRoute, liveHoldings, prices = {}, 
                 sub={annualDiv > 0 ? LUMEN_FMT.money(annualDiv / 12, ccy, { compact: true }) + (th ? "/เดือน" : "/mo") : (th ? "ยังไม่มีปันผล" : "No dividends")} />
             </div>
           </div>
-          <div>
-            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 8, flexWrap: "wrap", gap: 8 }}>
-              <div>
-                <div className="label-up">{th ? "มูลค่าพอร์ต" : "Portfolio value"} · {chartLabel}</div>
-                {earliestHoldingDate && (
-                  <div style={{ fontSize: 10, color: hasRealHistory ? "var(--gain)" : "var(--ink-4)", marginTop: 2 }}>
-                    {hasRealHistory
-                      ? (th ? `ราคาจริงจาก Yahoo Finance · ${daysSinceFirst} วัน` : `Real prices · Yahoo Finance · ${daysSinceFirst} days`)
-                      : (th ? `กำลังโหลดราคาจริง…` : `Loading real prices…`)}
-                  </div>
-                )}
-              </div>
-              <div className="segmented" style={{ gap: 0 }}>
-                {["1Y", "3Y", "5Y", "All"].map(p => {
-                  const enabled = isPeriodEnabled(p)
-                  return (
-                    <button key={p} className={chartPeriod === p ? "on" : ""}
-                      disabled={!enabled}
-                      title={!enabled ? (th ? "ข้อมูลย้อนหลังไม่พอ" : "Not enough history") : undefined}
-                      onClick={() => enabled && setChartPeriod(p)}
-                      style={{ fontSize: 12, padding: "4px 10px", opacity: enabled ? 1 : 0.35, cursor: enabled ? "pointer" : "not-allowed" }}>{p}</button>
-                  )
-                })}
-              </div>
+      </section>
+
+      {/* ── ROW 2: Chart + Alert Proximity ── */}
+      <section className="grid grid-12" style={{ marginBottom: 16 }}>
+        <div className="card col-span-7">
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 8, flexWrap: "wrap", gap: 8 }}>
+            <div>
+              <div className="label-up">{th ? "มูลค่าพอร์ต" : "Portfolio value"} · {chartLabel}</div>
+              {earliestHoldingDate && (
+                <div style={{ fontSize: 10, color: hasRealHistory ? "var(--gain)" : "var(--ink-4)", marginTop: 2 }}>
+                  {hasRealHistory
+                    ? (th ? `ราคาจริงจาก Yahoo Finance · ${daysSinceFirst} วัน` : `Real prices · Yahoo Finance · ${daysSinceFirst} days`)
+                    : (th ? `กำลังโหลดราคาจริง…` : `Loading real prices…`)}
+                </div>
+              )}
             </div>
-            {histSeries.length > 0
-              ? <LineChart series={histSeries} height={220} fmt={v => LUMEN_FMT.money(v, ccy, { compact: true })} />
-              : <div className="muted" style={{ paddingTop: 80, textAlign: "center", fontSize: 13 }}>{th ? "กำลังโหลด…" : "Loading…"}</div>
-            }
+            <div className="segmented" style={{ gap: 0 }}>
+              {["1Y", "3Y", "5Y", "All"].map(p => {
+                const enabled = isPeriodEnabled(p)
+                return (
+                  <button key={p} className={chartPeriod === p ? "on" : ""}
+                    disabled={!enabled}
+                    title={!enabled ? (th ? "ข้อมูลย้อนหลังไม่พอ" : "Not enough history") : undefined}
+                    onClick={() => enabled && setChartPeriod(p)}
+                    style={{ fontSize: 12, padding: "4px 10px", opacity: enabled ? 1 : 0.35, cursor: enabled ? "pointer" : "not-allowed" }}>{p}</button>
+                )
+              })}
+            </div>
           </div>
+          {histSeries.length > 0
+            ? <LineChart series={histSeries} height={220} fmt={v => LUMEN_FMT.money(v, ccy, { compact: true })} />
+            : <div className="muted" style={{ paddingTop: 80, textAlign: "center", fontSize: 13 }}>{th ? "กำลังโหลด…" : "Loading…"}</div>
+          }
+        </div>
+        <div className="col-span-5">
+          <AlertProximityCard prices={prices} setRoute={setRoute} lang={lang} />
         </div>
       </section>
 
-      {/* ── ROW 2: Allocation + Top Movers ── */}
+      {/* ── ROW 3: Allocation + Category Breakdown ── */}
       <section className="grid grid-12" style={{ marginBottom: 16 }}>
         <div className="card col-span-5">
           <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 20, gap: 8 }}>
@@ -1550,29 +1555,26 @@ function LiveDashboardPage({ t, lang, ccy, setRoute, liveHoldings, prices = {}, 
           )}
         </div>
 
-        <div className="col-span-5" style={{ display: "grid", gap: 16 }}>
-          <AlertProximityCard prices={prices} setRoute={setRoute} lang={lang} />
-          <div className="card">
-            <h3 className="section-title" style={{ marginBottom: 16 }}>{t.dashboard.insights}</h3>
-            {insights.length === 0 ? (
-              <p className="muted" style={{ fontSize: 13 }}>{th ? "เพิ่มข้อมูลพอร์ตเพื่อดู insights" : "Add portfolio data to see insights"}</p>
-            ) : (
-              <div style={{ display: "grid", gap: 14 }}>
-                {insights.map((it, i) => {
-                  const dotColor = it.tone === "good" ? "var(--gain)" : it.tone === "warn" ? "var(--loss)" : "var(--ink-3)"
-                  return (
-                    <div key={i} style={{ display: "flex", gap: 12, paddingBottom: 14, borderBottom: i < insights.length - 1 ? "1px solid var(--line)" : "" }}>
-                      <span className="dot" style={{ background: dotColor, marginTop: 6, flexShrink: 0 }} />
-                      <div>
-                        <div style={{ fontWeight: 500, fontSize: 13 }}>{it.title}</div>
-                        <div className="muted" style={{ fontSize: 12, marginTop: 2, lineHeight: 1.5 }}>{it.body}</div>
-                      </div>
+        <div className="card col-span-5">
+          <h3 className="section-title" style={{ marginBottom: 16 }}>{t.dashboard.insights}</h3>
+          {insights.length === 0 ? (
+            <p className="muted" style={{ fontSize: 13 }}>{th ? "เพิ่มข้อมูลพอร์ตเพื่อดู insights" : "Add portfolio data to see insights"}</p>
+          ) : (
+            <div style={{ display: "grid", gap: 14 }}>
+              {insights.map((it, i) => {
+                const dotColor = it.tone === "good" ? "var(--gain)" : it.tone === "warn" ? "var(--loss)" : "var(--ink-3)"
+                return (
+                  <div key={i} style={{ display: "flex", gap: 12, paddingBottom: 14, borderBottom: i < insights.length - 1 ? "1px solid var(--line)" : "" }}>
+                    <span className="dot" style={{ background: dotColor, marginTop: 6, flexShrink: 0 }} />
+                    <div>
+                      <div style={{ fontWeight: 500, fontSize: 13 }}>{it.title}</div>
+                      <div className="muted" style={{ fontSize: 12, marginTop: 2, lineHeight: 1.5 }}>{it.body}</div>
                     </div>
-                  )
-                })}
-              </div>
-            )}
-          </div>
+                  </div>
+                )
+              })}
+            </div>
+          )}
         </div>
       </section>
 
