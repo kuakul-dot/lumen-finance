@@ -4,7 +4,7 @@ import { PageHead, Delta, Icon, TickerLogo } from './Nav'
 import { CalcInput } from './CalcInput'
 import { LineChart, Donut, BarChart } from './Charts'
 import { LUMEN_FMT, LUMEN_DERIVE, LUMEN_HISTORY, LUMEN_BENCH } from '../data'
-import { deriveHoldings, getTransactions, getSnapshots, getAllTransactions, upsertSnapshots, deleteAllSnapshots, deleteSnapshotsAfterDate, buildSnapshotSeries, addTransaction, updateTransaction, deleteTransaction } from '../lib/db'
+import { deriveHoldings, getTransactions, getSnapshots, getAllTransactions, upsertSnapshots, deleteAllSnapshots, deleteSnapshotsAfterDate, buildSnapshotSeries, computeRealized, addTransaction, updateTransaction, deleteTransaction } from '../lib/db'
 import { fetchHistory, toYahooSymbol } from '../lib/prices'
 
 export function AnalyticsPage({ t, lang, ccy, dataState, liveHoldings = [], prices = {}, fxRate = 36, portfolio }) {
@@ -136,6 +136,7 @@ export function AnalyticsPage({ t, lang, ccy, dataState, liveHoldings = [], pric
     { id: "dividends",       label: t.analytics.tabs.dividends,       icon: "dividend" },
     { id: "growth",          label: t.analytics.tabs.growth,          icon: "play" },
     { id: "metrics",         label: t.analytics.tabs.metrics,         icon: "info" },
+    { id: "tax",             label: t.analytics.tabs.tax,             icon: "receipt" },
   ]
 
   return (
@@ -184,6 +185,7 @@ export function AnalyticsPage({ t, lang, ccy, dataState, liveHoldings = [], pric
       {tab === "dividends"       && <AnalyticsDiv2 t={t} lang={lang} ccy={ccy} rows={rows} totalValue={totalValue} dataState={dataState} liveHoldings={liveHoldings} fxRate={fxRate} transactions={transactions} portfolio={portfolio} onTransactionAdded={handleTransactionAdded} onTransactionUpdated={handleTransactionUpdated} onTransactionDeleted={handleTransactionDeleted} />}
       {tab === "growth"          && <AnalyticsGrowth t={t} lang={lang} ccy={ccy} rows={rows} fxRate={fxRate} totalValue={totalValue} totalCost={totalCost} totalPL={totalPL} totalPlPct={totalPlPct} dataState={dataState} earliestHoldingDate={earliestHoldingDate} portfolio={portfolio} snapsVersion={snapsVersion} />}
       {tab === "metrics"         && <AnalyticsMetrics t={t} lang={lang} ccy={ccy} rows={rows} totalValue={totalValue} totalPL={totalPL} totalPlPct={totalPlPct} dataState={dataState} portfolio={portfolio} fxRate={fxRate} onSnapsRebuild={bumpSnapsVersion} />}
+      {tab === "tax"             && <AnalyticsTax t={t} lang={lang} ccy={ccy} dataState={dataState} transactions={transactions} fxRate={fxRate} />}
     </div>
   )
 }
@@ -2707,6 +2709,321 @@ function BigKpi({ label, value, sub, tone, className }) {
       <div className="label-up" style={{ marginBottom: 8 }}>{label}</div>
       <div className="display" style={{ fontSize: 32, color, lineHeight: 1 }}>{value}</div>
       <div className="muted" style={{ fontSize: 12, marginTop: 8 }}>{sub}</div>
+    </div>
+  )
+}
+
+/* ─── Tax tab ────────────────────────────────────────────────────────────────── */
+function AnalyticsTax({ t, lang, ccy, dataState, transactions = [], fxRate = 36 }) {
+  const FMT = LUMEN_FMT
+  const th = lang === "th"
+
+  // ── Compute realized P/L once from all transactions ──────────────────────────
+  const realized = useMemo(() => computeRealized(transactions, fxRate), [transactions, fxRate])
+
+  // ── Available tax years ───────────────────────────────────────────────────────
+  const years = useMemo(() => {
+    const set = new Set()
+    transactions.forEach(tx => {
+      const y = String(tx.transacted_at || '').slice(0, 4)
+      if (y) set.add(y)
+    })
+    return [...set].sort().reverse()
+  }, [transactions])
+
+  const currentYear = String(new Date().getFullYear())
+  const [selYear, setSelYear] = useState(currentYear)
+
+  // ── Sales filtered to selected year ──────────────────────────────────────────
+  const salesThisYear = useMemo(
+    () => realized.sales.filter(s => s.date.startsWith(selYear)),
+    [realized.sales, selYear]
+  )
+  const salesTH = salesThisYear.filter(s => s.currency === 'THB')
+  const salesUS = salesThisYear.filter(s => s.currency === 'USD')
+  const gainTH  = salesTH.reduce((a, s) => a + s.gainTHB, 0)
+  const gainUS  = salesUS.reduce((a, s) => a + s.gainTHB, 0)
+
+  // ── Dividends filtered to selected year ───────────────────────────────────────
+  const divTxsYear = useMemo(
+    () => transactions.filter(tx =>
+      tx.type === 'Dividend' && String(tx.transacted_at || '').startsWith(selYear)
+    ),
+    [transactions, selYear]
+  )
+  const divByTicker = useMemo(() => {
+    const map = {}
+    divTxsYear.forEach(tx => {
+      const tk = tx.ticker || '—'
+      if (!map[tk]) map[tk] = { ticker: tk, currency: tx.currency || 'THB', total: 0, count: 0, withholding: 0 }
+      const amt = Number(tx.shares) * Number(tx.price)   // shares × price used as amount
+      const fx  = tx.currency === 'USD' ? fxRate : 1
+      map[tk].total      += amt * fx
+      map[tk].withholding += (Number(tx.tax) || 0) * fx
+      map[tk].count++
+    })
+    return Object.values(map).sort((a, b) => b.total - a.total)
+  }, [divTxsYear, fxRate])
+  const totalDiv         = divByTicker.reduce((a, d) => a + d.total, 0)
+  const totalWithholding = divByTicker.reduce((a, d) => a + d.withholding, 0)
+
+  // ── CSV export ────────────────────────────────────────────────────────────────
+  const exportCSV = useCallback(() => {
+    const rows = [
+      ['Section', 'Date', 'Ticker', 'Region', 'Shares', 'Price', 'Proceeds (THB)', 'Cost (THB)', 'Gain/Loss (THB)', 'Gain/Loss %'],
+      ...salesThisYear.map(s => [
+        'Realized P/L',
+        s.date,
+        s.ticker,
+        s.currency === 'USD' ? 'US' : 'TH',
+        s.shares,
+        s.price,
+        s.proceedsTHB.toFixed(2),
+        s.costTHB.toFixed(2),
+        s.gainTHB.toFixed(2),
+        s.gainPct.toFixed(2) + '%',
+      ]),
+      [],
+      ['Section', 'Ticker', 'Currency', 'Total Dividend (THB)', 'Withholding Tax (THB)', 'Times'],
+      ...divByTicker.map(d => [
+        'Dividend',
+        d.ticker,
+        d.currency,
+        d.total.toFixed(2),
+        d.withholding.toFixed(2),
+        d.count,
+      ]),
+    ]
+    const csv = rows.map(r => r.join(',')).join('\n')
+    const blob = new Blob(['﻿' + csv], { type: 'text/csv;charset=utf-8' })
+    const url  = URL.createObjectURL(blob)
+    const a    = document.createElement('a')
+    a.href = url; a.download = `tax-report-${selYear}.csv`; a.click()
+    URL.revokeObjectURL(url)
+  }, [salesThisYear, divByTicker, selYear])
+
+  if (dataState !== 'live') {
+    return (
+      <div className="fade-in" style={{ padding: '48px 0', textAlign: 'center', color: 'var(--ink-4)' }}>
+        {th ? 'ใช้งานได้เฉพาะโหมด Live' : 'Available in live mode only'}
+      </div>
+    )
+  }
+
+  const fmtB = v => FMT.money(v, 'THB', { compact: false })
+  const fmtG = v => (
+    <span style={{ color: v >= 0 ? 'var(--gain)' : 'var(--loss)', fontWeight: 600 }}>
+      {v >= 0 ? '+' : ''}{fmtB(v)}
+    </span>
+  )
+
+  return (
+    <div className="fade-in">
+      {/* ── Year picker + export ───────────────────────────────────────────────── */}
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 20 }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+          <span style={{ fontSize: 13, color: 'var(--ink-3)' }}>{th ? 'ปีภาษี' : 'Tax year'}</span>
+          <select value={selYear} onChange={e => setSelYear(e.target.value)}
+            style={{ padding: '5px 10px', borderRadius: 8, fontSize: 13, border: '1.5px solid var(--line)',
+                     background: 'var(--bg)', color: 'var(--ink)', cursor: 'pointer', outline: 'none',
+                     fontFamily: 'var(--font-mono)' }}>
+            {years.map(y => <option key={y} value={y}>{y}</option>)}
+            {!years.includes(currentYear) && <option value={currentYear}>{currentYear}</option>}
+          </select>
+        </div>
+        <button className="btn btn-outline btn-sm" onClick={exportCSV}
+          title={th ? 'ดาวน์โหลด CSV' : 'Download CSV'}>
+          <Icon name="upload" size={14} />
+          {th ? 'ดาวน์โหลด CSV' : 'Download CSV'}
+        </button>
+      </div>
+
+      {/* ── Summary cards ─────────────────────────────────────────────────────── */}
+      <div className="grid grid-12" style={{ marginBottom: 20 }}>
+        <div className="card col-span-3">
+          <div className="label-up" style={{ marginBottom: 8 }}>{th ? 'กำไร/ขาดทุนรับรู้ (TH)' : 'Realized P/L · TH'}</div>
+          <div className="display" style={{ fontSize: 26, lineHeight: 1.1, color: gainTH >= 0 ? 'var(--gain)' : 'var(--loss)' }}>
+            {gainTH >= 0 ? '+' : ''}{fmtB(gainTH)}
+          </div>
+          <div className="muted" style={{ fontSize: 12, marginTop: 6 }}>
+            {salesTH.length} {th ? 'รายการขาย' : 'sales'} · {th ? 'ยกเว้นภาษี (SET)' : 'tax-exempt (SET)'}
+          </div>
+        </div>
+        <div className="card col-span-3">
+          <div className="label-up" style={{ marginBottom: 8 }}>{th ? 'กำไร/ขาดทุนรับรู้ (US)' : 'Realized P/L · US'}</div>
+          <div className="display" style={{ fontSize: 26, lineHeight: 1.1, color: gainUS >= 0 ? 'var(--gain)' : 'var(--loss)' }}>
+            {gainUS >= 0 ? '+' : ''}{fmtB(gainUS)}
+          </div>
+          <div className="muted" style={{ fontSize: 12, marginTop: 6 }}>
+            {salesUS.length} {th ? 'รายการขาย' : 'sales'} · {th ? 'รายได้ต่างประเทศ' : 'foreign income'}
+          </div>
+        </div>
+        <div className="card col-span-3">
+          <div className="label-up" style={{ marginBottom: 8 }}>{th ? 'ปันผลรับรวม' : 'Total dividends'}</div>
+          <div className="display" style={{ fontSize: 26, lineHeight: 1.1, color: 'var(--gain)' }}>
+            +{fmtB(totalDiv)}
+          </div>
+          <div className="muted" style={{ fontSize: 12, marginTop: 6 }}>
+            {divTxsYear.length} {th ? 'ครั้ง' : 'payments'}
+          </div>
+        </div>
+        <div className="card col-span-3">
+          <div className="label-up" style={{ marginBottom: 8 }}>{th ? 'ภาษีหัก ณ ที่จ่าย' : 'Withholding tax'}</div>
+          <div className="display" style={{ fontSize: 26, lineHeight: 1.1 }}>
+            {fmtB(totalWithholding)}
+          </div>
+          <div className="muted" style={{ fontSize: 12, marginTop: 6 }}>
+            {th ? 'สามารถขอคืน/เครดิตได้' : 'claimable as tax credit'}
+          </div>
+        </div>
+      </div>
+
+      {/* ── Tax notes ─────────────────────────────────────────────────────────── */}
+      <div className="card" style={{ marginBottom: 20, padding: '12px 16px', background: 'var(--line-2)', border: 'none' }}>
+        <div style={{ fontSize: 12, color: 'var(--ink-3)', lineHeight: 1.7 }}>
+          <strong style={{ color: 'var(--ink)' }}>{th ? 'หมายเหตุด้านภาษี' : 'Tax notes'}</strong>
+          {th ? (
+            <ul style={{ margin: '4px 0 0', paddingLeft: 18 }}>
+              <li>หุ้น SET: <strong>ไม่เสียภาษี capital gains</strong> (ยกเว้นตามกฎหมาย)</li>
+              <li>หุ้น US: ถือเป็น<strong>รายได้ต่างประเทศ</strong> — ต้องนำรวมยื่น ภ.ง.ด. 90</li>
+              <li>ปันผล TH: ถูกหัก ณ ที่จ่าย 10% — ขอเครดิตภาษีคืนได้เมื่อยื่น ภ.ง.ด. 90</li>
+              <li>ปันผล US: หัก ณ ที่จ่าย 30% (อนุสัญญาภาษีไทย-สหรัฐ ลดเหลือ 15%)</li>
+            </ul>
+          ) : (
+            <ul style={{ margin: '4px 0 0', paddingLeft: 18 }}>
+              <li>TH stocks: <strong>capital gains are tax-exempt</strong> (SET-listed)</li>
+              <li>US stocks: treated as <strong>foreign income</strong> — declare in annual return (ภ.ง.ด. 90)</li>
+              <li>TH dividends: 10% withheld — claimable as tax credit in annual return</li>
+              <li>US dividends: 30% withheld (Thailand–US treaty reduces to 15%)</li>
+            </ul>
+          )}
+        </div>
+      </div>
+
+      {/* ── Realized sales table ──────────────────────────────────────────────── */}
+      <div className="card" style={{ marginBottom: 20 }}>
+        <h3 className="section-title" style={{ marginBottom: 14 }}>
+          {th ? 'รายการขาย (Realized P/L)' : 'Realized sales'}
+          <span className="muted" style={{ fontSize: 12, fontWeight: 400, marginLeft: 8 }}>
+            {th ? 'คำนวณต้นทุนแบบ weighted average' : 'weighted average cost method'}
+          </span>
+        </h3>
+        {salesThisYear.length === 0 ? (
+          <div style={{ color: 'var(--ink-4)', fontSize: 13, padding: '12px 0' }}>
+            {th ? `ไม่มีรายการขายในปี ${selYear}` : `No sales in ${selYear}`}
+          </div>
+        ) : (
+          <div style={{ overflowX: 'auto' }}>
+            <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13 }}>
+              <thead>
+                <tr style={{ borderBottom: '1.5px solid var(--line)' }}>
+                  {[
+                    th ? 'วันที่' : 'Date',
+                    'Ticker',
+                    th ? 'หน่วย' : 'Shares',
+                    th ? 'ราคาขาย' : 'Sell price',
+                    th ? 'รายรับสุทธิ' : 'Proceeds',
+                    th ? 'ต้นทุน' : 'Cost basis',
+                    th ? 'กำไร/ขาดทุน' : 'Gain / Loss',
+                    '%',
+                  ].map(h => (
+                    <th key={h} style={{ textAlign: 'left', padding: '6px 8px', color: 'var(--ink-3)',
+                                        fontWeight: 500, whiteSpace: 'nowrap' }}>{h}</th>
+                  ))}
+                </tr>
+              </thead>
+              <tbody>
+                {salesThisYear.map((s, i) => (
+                  <tr key={i} style={{ borderBottom: '1px solid var(--line-2)' }}>
+                    <td style={{ padding: '7px 8px', fontFamily: 'var(--font-mono)', fontSize: 12 }}>{s.date}</td>
+                    <td style={{ padding: '7px 8px', fontWeight: 600 }}>
+                      {s.ticker}
+                      <span style={{ fontSize: 10, marginLeft: 4, color: 'var(--ink-4)',
+                                     background: 'var(--line-2)', borderRadius: 4, padding: '1px 4px' }}>
+                        {s.currency === 'USD' ? 'US' : 'TH'}
+                      </span>
+                    </td>
+                    <td style={{ padding: '7px 8px', textAlign: 'right', fontFamily: 'var(--font-mono)' }}>{s.shares}</td>
+                    <td style={{ padding: '7px 8px', textAlign: 'right', fontFamily: 'var(--font-mono)' }}>{fmtB(s.price * (s.currency === 'USD' ? fxRate : 1))}</td>
+                    <td style={{ padding: '7px 8px', textAlign: 'right', fontFamily: 'var(--font-mono)' }}>{fmtB(s.proceedsTHB)}</td>
+                    <td style={{ padding: '7px 8px', textAlign: 'right', fontFamily: 'var(--font-mono)' }}>{fmtB(s.costTHB)}</td>
+                    <td style={{ padding: '7px 8px', textAlign: 'right' }}>{fmtG(s.gainTHB)}</td>
+                    <td style={{ padding: '7px 8px', textAlign: 'right', fontFamily: 'var(--font-mono)',
+                                 color: s.gainPct >= 0 ? 'var(--gain)' : 'var(--loss)' }}>
+                      {s.gainPct >= 0 ? '+' : ''}{s.gainPct.toFixed(1)}%
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+              <tfoot>
+                <tr style={{ borderTop: '1.5px solid var(--line)' }}>
+                  <td colSpan={6} style={{ padding: '8px 8px', fontWeight: 600, fontSize: 12 }}>
+                    {th ? 'รวม' : 'Total'}
+                  </td>
+                  <td style={{ padding: '8px 8px', textAlign: 'right', fontWeight: 700 }}>{fmtG(salesThisYear.reduce((a, s) => a + s.gainTHB, 0))}</td>
+                  <td />
+                </tr>
+              </tfoot>
+            </table>
+          </div>
+        )}
+      </div>
+
+      {/* ── Dividends table ───────────────────────────────────────────────────── */}
+      <div className="card" style={{ marginBottom: 20 }}>
+        <h3 className="section-title" style={{ marginBottom: 14 }}>
+          {th ? 'ปันผลรับ' : 'Dividends received'}
+        </h3>
+        {divByTicker.length === 0 ? (
+          <div style={{ color: 'var(--ink-4)', fontSize: 13, padding: '12px 0' }}>
+            {th ? `ไม่มีปันผลในปี ${selYear}` : `No dividends in ${selYear}`}
+          </div>
+        ) : (
+          <div style={{ overflowX: 'auto' }}>
+            <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13 }}>
+              <thead>
+                <tr style={{ borderBottom: '1.5px solid var(--line)' }}>
+                  {[
+                    'Ticker',
+                    th ? 'ปันผลรับ (฿)' : 'Dividend (THB)',
+                    th ? 'ภาษีหัก ณ ที่จ่าย (฿)' : 'Withholding (THB)',
+                    th ? 'รับสุทธิ (฿)' : 'Net received (THB)',
+                    th ? 'ครั้ง' : 'Payments',
+                  ].map(h => (
+                    <th key={h} style={{ textAlign: 'left', padding: '6px 8px', color: 'var(--ink-3)', fontWeight: 500 }}>{h}</th>
+                  ))}
+                </tr>
+              </thead>
+              <tbody>
+                {divByTicker.map((d, i) => (
+                  <tr key={i} style={{ borderBottom: '1px solid var(--line-2)' }}>
+                    <td style={{ padding: '7px 8px', fontWeight: 600 }}>
+                      {d.ticker}
+                      <span style={{ fontSize: 10, marginLeft: 4, color: 'var(--ink-4)',
+                                     background: 'var(--line-2)', borderRadius: 4, padding: '1px 4px' }}>
+                        {d.currency === 'USD' ? 'US' : 'TH'}
+                      </span>
+                    </td>
+                    <td style={{ padding: '7px 8px', textAlign: 'right', fontFamily: 'var(--font-mono)' }}>{fmtB(d.total)}</td>
+                    <td style={{ padding: '7px 8px', textAlign: 'right', fontFamily: 'var(--font-mono)', color: 'var(--loss)' }}>{d.withholding > 0 ? '−' + fmtB(d.withholding) : '—'}</td>
+                    <td style={{ padding: '7px 8px', textAlign: 'right', fontFamily: 'var(--font-mono)', color: 'var(--gain)', fontWeight: 600 }}>+{fmtB(d.total - d.withholding)}</td>
+                    <td style={{ padding: '7px 8px', textAlign: 'right', color: 'var(--ink-3)' }}>{d.count}</td>
+                  </tr>
+                ))}
+              </tbody>
+              <tfoot>
+                <tr style={{ borderTop: '1.5px solid var(--line)' }}>
+                  <td style={{ padding: '8px 8px', fontWeight: 600, fontSize: 12 }}>{th ? 'รวม' : 'Total'}</td>
+                  <td style={{ padding: '8px 8px', textAlign: 'right', fontWeight: 700 }}>{fmtB(totalDiv)}</td>
+                  <td style={{ padding: '8px 8px', textAlign: 'right', color: 'var(--loss)', fontWeight: 700 }}>{totalWithholding > 0 ? '−' + fmtB(totalWithholding) : '—'}</td>
+                  <td style={{ padding: '8px 8px', textAlign: 'right', color: 'var(--gain)', fontWeight: 700 }}>+{fmtB(totalDiv - totalWithholding)}</td>
+                  <td />
+                </tr>
+              </tfoot>
+            </table>
+          </div>
+        )}
+      </div>
     </div>
   )
 }
