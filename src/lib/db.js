@@ -368,6 +368,19 @@ export async function deleteSnapshotsAfterDate(portfolioId, date) {
   return { error }
 }
 
+// Delete ALL snapshots for a portfolio — used before a full rebuild so that
+// weekend/holiday App.jsx snapshots (which aren't in Yahoo data and wouldn't
+// be overwritten by upsert) don't survive as orphan bad data points.
+export async function deleteAllSnapshots(portfolioId) {
+  if (!portfolioId) return { error: null }
+  const { error } = await supabase
+    .from('portfolio_snapshots')
+    .delete()
+    .eq('portfolio_id', portfolioId)
+  if (error) console.warn('[Lumen] deleteAllSnapshots:', error.message)
+  return { error }
+}
+
 // Reconstruct a daily {date,total_value,total_cost} series from transactions +
 // historical price series.  Lets TWR / Sharpe / drawdown work without waiting
 // days for live snapshots to accumulate.
