@@ -639,9 +639,9 @@ export function deriveHoldings(holdings, currency = 'THB', prices = {}, fxRate =
     const sym = toYahooSymbol(h.ticker, h.region || 'TH', h.asset_class || 'Equity')
     const priceData = prices[sym]
 
-    // XAU/GOLD tickers are always physical gold regardless of the asset_class entered
-    const isGoldTH = h.asset_class === 'GoldTH' ||
-      ['XAU', 'GOLD'].includes(h.ticker?.toUpperCase())
+    // GoldTH: shares stored in Thai baht weight (บาท ทอง), needs troy-oz → baht conversion
+    // XAU/GOLD with other asset classes are stored in troy ounces — use plain USD→THB
+    const isGoldTH = h.asset_class === 'GoldTH'
 
     let currentPriceInTHB = costPriceInTHB
     let currentValue = costValue
