@@ -13,6 +13,17 @@ import { AlertsModal } from './AlertsModal'
 import { CalcInput } from './CalcInput'
 import { AvgCostModal } from './AvgCostModal'
 
+// Per-share avg cost formatted in the same currency as the live price (nativeCcy).
+// Uses r.cost (per-share in THB) — always correct even after groupByTicker merges
+// lots that have different costNativeCcy values.
+function fmtCostNative(costTHB, nativeCcy, fxRate) {
+  const dispCcy = nativeCcy || 'THB'
+  const v = dispCcy === 'USD' ? (costTHB ?? 0) / (fxRate || 36) : (costTHB ?? 0)
+  const sym = dispCcy === 'USD' ? '$' : '฿'
+  const dp  = !v ? 2 : Math.abs(v) < 1 ? 4 : Math.abs(v) < 100 ? 2 : 0
+  return sym + Math.abs(v).toLocaleString(undefined, { minimumFractionDigits: dp, maximumFractionDigits: dp })
+}
+
 // ── Rebalance target integration ─────────────────────────────────────────────
 // Uses the same localStorage keys as Tools.jsx so the two pages share one source of truth.
 const REBAL_TARGETS_KEY      = "lumen_rebalance_targets"
@@ -704,13 +715,13 @@ function LivePortfolioPage({ t, lang, ccy, portfolio, liveHoldings, prices = {},
                                 The stored cost may be in THB even for USD holdings (e.g. BTC bought in THB).
                                 Compare P/L in THB (r.pl) rather than priceNative vs costNative which may be in different currencies. */}
                             <div className="cost-line" style={{ fontSize: 11, color: (r.pl ?? 0) >= 0 ? "var(--gain)" : "var(--loss)", fontFamily: "var(--font-mono)" }}>
-                              {LUMEN_FMT.money(r.costNative, (r.costNativeCcy || r.nativeCcy) === 'USD' ? 'USD' : 'THB', { compact: true })} {th ? "ทุน" : "cost"}
+                              {fmtCostNative(r.cost, r.nativeCcy, fxRate)} {th ? "ทุน" : "cost"}
                             </div>
                           </>
                         ) : (
                           <>
                             <div style={{ fontFamily: "var(--font-mono)", fontSize: 13, color: "var(--ink-2)" }}>
-                              {LUMEN_FMT.money(r.costNative, (r.costNativeCcy || r.nativeCcy) === 'USD' ? 'USD' : 'THB', { compact: true })}
+                              {fmtCostNative(r.cost, r.nativeCcy, fxRate)}
                             </div>
                             <div className="muted" style={{ fontSize: 10 }}>{th ? "ราคาซื้อ" : "avg cost"}</div>
                           </>

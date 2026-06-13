@@ -13,7 +13,7 @@ import { LUMEN_I18N, setLiveFxRate } from './data'
 import { supabase } from './lib/supabase'
 import { getOrCreatePortfolio, getPortfolios, addPortfolio, updatePortfolio, deletePortfolioCascade, getHoldingsSafe, getCashAccounts, deriveHoldings, recordSnapshot, exportData, addTransaction, rebuildAllHoldings, upsertCashAccount, upsertGoal } from './lib/db'
 import { fetchPrices, fetchFxRate, clearPriceCache } from './lib/prices'
-import { checkAndFireAlerts, getActiveCount, setAlertsUserId, clearAlertsUserId, initAlertsFromSupabase, subscribeAlertsRealtime, unsubscribeAlertsRealtime } from './lib/alerts'
+import { loadAlerts, checkAndFireAlerts, getActiveCount, setAlertsUserId, clearAlertsUserId, initAlertsFromSupabase, subscribeAlertsRealtime, unsubscribeAlertsRealtime } from './lib/alerts'
 import { AlertsModal, AlertsPage } from './components/AlertsModal'
 
 const TWEAK_DEFAULTS = {
@@ -103,11 +103,24 @@ export default function App() {
     return () => window.removeEventListener('lumen-alerts-changed', h)
   }, [])
 
-  // Check alerts every time prices update
+  // Check alerts every time prices update.
+  // Also fetches prices for watchlist-only / future symbols whose yahooSym is
+  // not in the portfolio prices map (those would otherwise be silently skipped).
   useEffect(() => {
-    if (!prices || !Object.keys(prices).length) return
-    checkAndFireAlerts(prices)
-    setAlertCount(getActiveCount())
+    const active = loadAlerts().filter(a => a.active && !a.triggered)
+    if (!active.length) { setAlertCount(0); return }
+
+    const p = prices || {}
+    const missing = [...new Set(active.map(a => a.yahooSym).filter(sym => sym && !p[sym]))]
+    const run = (merged) => { checkAndFireAlerts(merged); setAlertCount(getActiveCount()) }
+
+    if (!missing.length) { run(p); return }
+
+    // Fetch live prices for symbols not held in the portfolio
+    fetch(`/api/prices?symbols=${encodeURIComponent(missing.join(','))}`)
+      .then(r => r.ok ? r.json() : {})
+      .then(extra => run({ ...p, ...extra }))
+      .catch(() => run(p))
   }, [prices])
 
   // Fetch FX rate on mount, then refresh every hour
