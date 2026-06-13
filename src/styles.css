@@ -39,6 +39,7 @@
   --font-display: "Instrument Serif", "Noto Serif Thai", Georgia, serif;
   --font-ui: "Geist", "IBM Plex Sans Thai", "Helvetica Neue", system-ui, sans-serif;
   --font-mono: "JetBrains Mono", "IBM Plex Mono", ui-monospace, monospace;
+  --font-weight-body: 400;
 
   /* Density */
   --pad-card: 24px;
@@ -89,6 +90,7 @@ html, body {
   background: var(--bg);
   color: var(--ink);
   font-family: var(--font-ui);
+  font-weight: var(--font-weight-body, 400);
   font-size: 14px;
   line-height: 1.45;
   -webkit-font-smoothing: antialiased;

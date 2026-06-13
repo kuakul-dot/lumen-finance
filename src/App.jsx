@@ -349,18 +349,19 @@ export default function App() {
     root.style.setProperty("--gap", d.gap)
     root.style.setProperty("--radius", d.radius)
     const FONT_PRESETS = {
-      elegant:   { display: '"Instrument Serif","Noto Serif Thai",Georgia,serif',                             ui: '"Geist","IBM Plex Sans Thai","Helvetica Neue",system-ui,sans-serif',       mono: '"JetBrains Mono","IBM Plex Mono",ui-monospace,monospace' },
-      clean:     { display: '"Inter","IBM Plex Sans Thai",system-ui,sans-serif',                              ui: '"Inter","IBM Plex Sans Thai",system-ui,sans-serif',                         mono: '"JetBrains Mono",ui-monospace,monospace' },
-      sharp:     { display: '"DM Serif Display","Noto Serif Thai",Georgia,serif',                             ui: '"DM Sans","IBM Plex Sans Thai",system-ui,sans-serif',                       mono: '"IBM Plex Mono",ui-monospace,monospace' },
-      space:     { display: '"Space Grotesk","IBM Plex Sans Thai",system-ui,sans-serif',                      ui: '"Space Grotesk","IBM Plex Sans Thai",system-ui,sans-serif',                 mono: '"JetBrains Mono",ui-monospace,monospace' },
-      sora:      { display: '"Sora","IBM Plex Sans Thai",system-ui,sans-serif',                               ui: '"Sora","IBM Plex Sans Thai",system-ui,sans-serif',                          mono: '"JetBrains Mono",ui-monospace,monospace' },
-      editorial: { display: '"Instrument Serif","Noto Serif Thai",Georgia,serif',                             ui: '"Geist","IBM Plex Sans Thai","Helvetica Neue",system-ui,sans-serif',       mono: '"JetBrains Mono","IBM Plex Mono",ui-monospace,monospace' },
-      modern:    { display: '"Geist","IBM Plex Sans Thai","Helvetica Neue",system-ui,sans-serif',             ui: '"Geist","IBM Plex Sans Thai","Helvetica Neue",system-ui,sans-serif',       mono: '"JetBrains Mono","IBM Plex Mono",ui-monospace,monospace' },
+      elegant:   { display: '"Instrument Serif","Noto Serif Thai",Georgia,serif',                             ui: '"Geist","IBM Plex Sans Thai","Helvetica Neue",system-ui,sans-serif',       mono: '"JetBrains Mono","IBM Plex Mono",ui-monospace,monospace', weight: "400" },
+      clean:     { display: '"Inter","IBM Plex Sans Thai",system-ui,sans-serif',                              ui: '"Inter","IBM Plex Sans Thai",system-ui,sans-serif',                         mono: '"JetBrains Mono",ui-monospace,monospace',                 weight: "500" },
+      sharp:     { display: '"DM Serif Display","Noto Serif Thai",Georgia,serif',                             ui: '"DM Sans","IBM Plex Sans Thai",system-ui,sans-serif',                       mono: '"IBM Plex Mono",ui-monospace,monospace',                  weight: "400" },
+      space:     { display: '"Space Grotesk","IBM Plex Sans Thai",system-ui,sans-serif',                      ui: '"Space Grotesk","IBM Plex Sans Thai",system-ui,sans-serif',                 mono: '"JetBrains Mono",ui-monospace,monospace',                 weight: "500" },
+      sora:      { display: '"Sora","IBM Plex Sans Thai",system-ui,sans-serif',                               ui: '"Sora","IBM Plex Sans Thai",system-ui,sans-serif',                          mono: '"JetBrains Mono",ui-monospace,monospace',                 weight: "500" },
+      editorial: { display: '"Instrument Serif","Noto Serif Thai",Georgia,serif',                             ui: '"Geist","IBM Plex Sans Thai","Helvetica Neue",system-ui,sans-serif',       mono: '"JetBrains Mono","IBM Plex Mono",ui-monospace,monospace', weight: "400" },
+      modern:    { display: '"Geist","IBM Plex Sans Thai","Helvetica Neue",system-ui,sans-serif',             ui: '"Geist","IBM Plex Sans Thai","Helvetica Neue",system-ui,sans-serif',       mono: '"JetBrains Mono","IBM Plex Mono",ui-monospace,monospace', weight: "400" },
     }
     const fp = FONT_PRESETS[t.type] || FONT_PRESETS.elegant
-    root.style.setProperty("--font-display", fp.display)
-    root.style.setProperty("--font-ui",      fp.ui)
-    root.style.setProperty("--font-mono",    fp.mono)
+    root.style.setProperty("--font-display",    fp.display)
+    root.style.setProperty("--font-ui",         fp.ui)
+    root.style.setProperty("--font-mono",       fp.mono)
+    root.style.setProperty("--font-weight-body", fp.weight)
   }, [t.accent, t.density, t.type, t.theme])
 
   const signOut = () => supabase.auth.signOut()
