@@ -1363,6 +1363,8 @@ export function WatchlistPage({ lang, ccy, fxRate = 36, session }) {
   const [fullscreenItem, setFullscreenItem] = useState(null) // null | { item, priceData, sr }
   // Quick price-alert modal — prefilled from a watchlist card's bell button
   const [alertPrefill,   setAlertPrefill]   = useState(null) // null | { ticker, name, region, cls, yahooSym, livePrice, currency }
+  const [filterRegion,   setFilterRegion]   = useState('all') // 'all' | 'US' | 'TH' | 'Crypto'
+  const [sortBy,         setSortBy]         = useState('default')
 
   // Existing alerts (localStorage cache, kept fresh by lumen-alerts-changed)
   const [alerts, setAlerts] = useState([])
@@ -1499,6 +1501,34 @@ export function WatchlistPage({ lang, ccy, fxRate = 36, session }) {
     }
   }, [items, userId])
 
+  const displayItems = useMemo(() => {
+    let list = items.map((item, idx) => {
+      const yahooSym  = toYahooSymbol(item.symbol, item.region || 'US', item.cls || 'Equity')
+      const priceData = prices[yahooSym]
+      return { item, idx, yahooSym, priceData }
+    })
+    if (filterRegion === 'US')          list = list.filter(x => x.item.region !== 'TH' && x.item.cls !== 'Crypto')
+    else if (filterRegion === 'TH')     list = list.filter(x => x.item.region === 'TH')
+    else if (filterRegion === 'Crypto') list = list.filter(x => x.item.cls === 'Crypto')
+    if (sortBy === 'change-desc')      list.sort((a, b) => (b.priceData?.changePct ?? -999) - (a.priceData?.changePct ?? -999))
+    else if (sortBy === 'change-asc')  list.sort((a, b) => (a.priceData?.changePct ?? 999)  - (b.priceData?.changePct ?? 999))
+    else if (sortBy === 'name')        list.sort((a, b) => a.item.symbol.localeCompare(b.item.symbol))
+    else if (sortBy === 's1-near') {
+      list.sort((a, b) => {
+        const dist = (x) => {
+          const bars  = histories[x.yahooSym]
+          const price = x.priceData?.price
+          if (!bars || !price) return 999
+          const sr = computeSR(bars, price)
+          if (!sr?.supports?.length) return 999
+          return Math.abs((price - sr.supports[0].price) / price)
+        }
+        return dist(a) - dist(b)
+      })
+    }
+    return list
+  }, [items, prices, histories, filterRegion, sortBy])
+
   return (
     <div className="shell fade-in" data-screen-label="Watchlist">
       <PageHead
@@ -1555,18 +1585,41 @@ export function WatchlistPage({ lang, ccy, fxRate = 36, session }) {
             </span>
           </div>
 
-          {/* Card grid — max 3 columns, min 300px each.
-               width:100% is required for iOS Safari to compute auto-fill correctly. */}
-          <div className="watchlist-grid" style={{
-            display: 'grid',
-            width: '100%',
-            gridTemplateColumns: 'repeat(auto-fill, minmax(300px, 1fr))',
-            gap: 'var(--gap)',
-            maxWidth: 1200,
-          }}>
-            {items.map((item, idx) => {
-              const yahooSym  = toYahooSymbol(item.symbol, item.region || 'US', item.cls || 'Equity')
-              const priceData = prices[yahooSym]
+          {/* Filter + Sort bar */}
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 16, flexWrap: 'wrap' }}>
+            <div style={{ display: 'flex', gap: 4, overflowX: 'auto', WebkitOverflowScrolling: 'touch' }}>
+              {[
+                { key: 'all',    label: th ? 'ทั้งหมด' : 'All' },
+                { key: 'US',     label: '🇺🇸 US' },
+                { key: 'TH',     label: '🇹🇭 TH' },
+                { key: 'Crypto', label: '⬡ Crypto' },
+              ].map(f => (
+                <button key={f.key} onClick={() => setFilterRegion(f.key)} style={{
+                  padding: '5px 12px', borderRadius: 999, fontSize: 12, fontWeight: 600,
+                  border: '1px solid var(--line)',
+                  background: filterRegion === f.key ? 'var(--ink)' : 'transparent',
+                  color: filterRegion === f.key ? 'var(--bg)' : 'var(--ink-2)',
+                  cursor: 'pointer', whiteSpace: 'nowrap', flexShrink: 0,
+                }}>{f.label}</button>
+              ))}
+            </div>
+            <div style={{ flex: 1 }} />
+            <select value={sortBy} onChange={e => setSortBy(e.target.value)} style={{
+              padding: '5px 10px', borderRadius: 8, fontSize: 12,
+              border: '1px solid var(--line)', background: 'var(--bg-2)', color: 'var(--ink)',
+              outline: 'none', cursor: 'pointer', flexShrink: 0,
+            }}>
+              <option value="default">{th ? 'เรียงตาม: ปกติ' : 'Sort: default'}</option>
+              <option value="change-desc">{th ? '▲ %วันนี้ มากสุด' : '▲ Change% high'}</option>
+              <option value="change-asc">{th ? '▼ %วันนี้ น้อยสุด' : '▼ Change% low'}</option>
+              <option value="name">{th ? 'A–Z ชื่อ' : 'A–Z name'}</option>
+              <option value="s1-near">{th ? 'ใกล้ S1 มากสุด' : 'Nearest to S1'}</option>
+            </select>
+          </div>
+
+          {/* Card grid — width:100% required for iOS Safari auto-fill */}
+          <div className="watchlist-grid" style={{ display: 'grid', width: '100%', gap: 'var(--gap)', maxWidth: 1200 }}>
+            {displayItems.map(({ item, idx, yahooSym, priceData }) => {
               const bars      = histories[yahooSym]
               const livePrice = priceData?.price ?? null
               const sr        = (bars && livePrice) ? computeSR(bars, livePrice) : null
