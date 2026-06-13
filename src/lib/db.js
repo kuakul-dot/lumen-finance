@@ -234,15 +234,18 @@ export async function rebuildHolding(portfolioId, ticker) {
   }
 
   const existing = await getHoldings(portfolioId)
-  const h = existing.find(x => x.ticker?.toUpperCase() === key)
+  const matches = existing.filter(x => x.ticker?.toUpperCase() === key)
+  const h = matches[0]
 
   if (shares <= SHARE_EPS) {
-    if (h) await deleteHolding(h.id)
+    for (const m of matches) await deleteHolding(m.id)
     return { error: null }
   }
 
   const cost_price = costTotal / shares
   if (h) {
+    // Delete duplicate lots first, then update the canonical row
+    for (const extra of matches.slice(1)) await deleteHolding(extra.id)
     return updateHolding(h.id, { shares, cost_price })
   }
   const isUSD = (currency || 'THB') === 'USD'
@@ -505,15 +508,24 @@ export async function rebuildAllHoldings(portfolioId) {
   }
 
   const existing = await getHoldings(portfolioId)
-  const byTicker = new Map(existing.map(h => [h.ticker?.toUpperCase(), h]))
+  // Group by ticker — a ticker may have multiple lot rows; keep the first as canonical
+  const byTicker = {}
+  for (const h of existing) {
+    const tk = h.ticker?.toUpperCase()
+    if (!byTicker[tk]) byTicker[tk] = []
+    byTicker[tk].push(h)
+  }
   let updated = 0, created = 0, removed = 0
   const errors = []
 
   for (const [tk, P] of Object.entries(pos)) {
-    const h = byTicker.get(tk)
+    const rows = byTicker[tk] || []
+    const h = rows[0]
     if (P.shares > SHARE_EPS) {
       const cost_price = P.cost / P.shares
       if (h) {
+        // Delete duplicate lots, then update the canonical row
+        for (const extra of rows.slice(1)) await deleteHolding(extra.id)
         const { error } = await updateHolding(h.id, { shares: P.shares, cost_price })
         if (error) errors.push(`${tk}: ${error.message}`); else updated++
       } else {
@@ -526,12 +538,13 @@ export async function rebuildAllHoldings(portfolioId) {
         })
         if (error) errors.push(`${tk}: ${error.message}`); else created++
       }
-    } else if (h) {
-      await deleteHolding(h.id); removed++
+    } else {
+      for (const row of rows) { await deleteHolding(row.id); removed++ }
     }
   }
 
-  const orphans = existing.filter(h => !(h.ticker?.toUpperCase() in pos)).map(h => h.ticker)
+  const seenTickers = new Set(Object.keys(pos))
+  const orphans = [...new Set(existing.filter(h => !seenTickers.has(h.ticker?.toUpperCase())).map(h => h.ticker))]
   return { error: errors.length ? errors.join('; ') : null, updated, created, removed, orphans }
 }
 
