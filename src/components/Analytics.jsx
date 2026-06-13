@@ -486,7 +486,16 @@ function AnalyticsCommon({ t, lang, ccy, rows, totalValue, totalPL, totalPlPct, 
       from = new Date(Date.now() - days * 86400000).toISOString().split("T")[0]
     }
     const w = snaps.filter(s => s.date >= from)
-    return w.length >= 2 ? w : snaps
+    const windowed = w.length >= 2 ? w : snaps
+    // Drop snapshots where day-over-day portfolio ratio jumps >50% — data artifact
+    // (even a crypto-heavy portfolio rarely moves ±50% in a single day)
+    return windowed.filter((s, i) => {
+      if (i === 0) return true
+      const prev = windowed[i - 1]
+      const pi = Number(prev.total_cost) > 0 ? Number(prev.total_value) / Number(prev.total_cost) : null
+      const ci = Number(s.total_cost) > 0 ? Number(s.total_value) / Number(s.total_cost) : null
+      return pi == null || ci == null || pi === 0 || Math.abs(ci / pi - 1) <= 0.50
+    })
   }, [snaps, chartPeriod, periodDaysMap])
 
   const labelFor = useMemo(() => {
@@ -1905,6 +1914,15 @@ function AnalyticsGrowth({ t, lang, ccy, rows = [], fxRate = 36, totalValue, tot
     const fromTs = Date.now() - days * 86400000
     let w = snaps.filter(s => new Date(s.date).getTime() >= fromTs)
     if (w.length < 2) w = snaps
+    // Drop snapshots where day-over-day portfolio ratio jumps >50% — data artifact
+    w = w.filter((s, i) => {
+      if (i === 0) return true
+      const prev = w[i - 1]
+      const pi = Number(prev.total_cost) > 0 ? Number(prev.total_value) / Number(prev.total_cost) : null
+      const ci = Number(s.total_cost) > 0 ? Number(s.total_value) / Number(s.total_cost) : null
+      return pi == null || ci == null || pi === 0 || Math.abs(ci / pi - 1) <= 0.50
+    })
+    if (w.length < 2) return null
     const locale = th ? "th-TH" : "en-US"
     const span = (new Date(w[w.length - 1].date) - new Date(w[0].date)) / 86400000
     const mkLabel = dt => span < 60 ? dt.toLocaleString(locale, { month: "short", day: "numeric" })
