@@ -348,11 +348,19 @@ export default function App() {
     root.style.setProperty("--pad-card", d.pad)
     root.style.setProperty("--gap", d.gap)
     root.style.setProperty("--radius", d.radius)
-    if (t.type === "modern") {
-      root.style.setProperty("--font-display", '"Geist", "IBM Plex Sans Thai", "Helvetica Neue", system-ui, sans-serif')
-    } else {
-      root.style.setProperty("--font-display", '"Instrument Serif", "Noto Serif Thai", Georgia, serif')
+    const FONT_PRESETS = {
+      elegant:   { display: '"Instrument Serif","Noto Serif Thai",Georgia,serif',                             ui: '"Geist","IBM Plex Sans Thai","Helvetica Neue",system-ui,sans-serif',       mono: '"JetBrains Mono","IBM Plex Mono",ui-monospace,monospace' },
+      clean:     { display: '"Inter","IBM Plex Sans Thai",system-ui,sans-serif',                              ui: '"Inter","IBM Plex Sans Thai",system-ui,sans-serif',                         mono: '"JetBrains Mono",ui-monospace,monospace' },
+      sharp:     { display: '"DM Serif Display","Noto Serif Thai",Georgia,serif',                             ui: '"DM Sans","IBM Plex Sans Thai",system-ui,sans-serif',                       mono: '"IBM Plex Mono",ui-monospace,monospace' },
+      space:     { display: '"Space Grotesk","IBM Plex Sans Thai",system-ui,sans-serif',                      ui: '"Space Grotesk","IBM Plex Sans Thai",system-ui,sans-serif',                 mono: '"JetBrains Mono",ui-monospace,monospace' },
+      sora:      { display: '"Sora","IBM Plex Sans Thai",system-ui,sans-serif',                               ui: '"Sora","IBM Plex Sans Thai",system-ui,sans-serif',                          mono: '"JetBrains Mono",ui-monospace,monospace' },
+      editorial: { display: '"Instrument Serif","Noto Serif Thai",Georgia,serif',                             ui: '"Geist","IBM Plex Sans Thai","Helvetica Neue",system-ui,sans-serif',       mono: '"JetBrains Mono","IBM Plex Mono",ui-monospace,monospace' },
+      modern:    { display: '"Geist","IBM Plex Sans Thai","Helvetica Neue",system-ui,sans-serif',             ui: '"Geist","IBM Plex Sans Thai","Helvetica Neue",system-ui,sans-serif',       mono: '"JetBrains Mono","IBM Plex Mono",ui-monospace,monospace' },
     }
+    const fp = FONT_PRESETS[t.type] || FONT_PRESETS.elegant
+    root.style.setProperty("--font-display", fp.display)
+    root.style.setProperty("--font-ui",      fp.ui)
+    root.style.setProperty("--font-mono",    fp.mono)
   }, [t.accent, t.density, t.type, t.theme])
 
   const signOut = () => supabase.auth.signOut()
@@ -618,8 +626,11 @@ export default function App() {
           label={i18n.tweaks.type}
           value={t.type}
           options={[
-            { value: "editorial", label: i18n.tweaks.classic },
-            { value: "modern",    label: i18n.tweaks.modern },
+            { value: "elegant", label: i18n.tweaks.classic },
+            { value: "clean",   label: i18n.tweaks.clean },
+            { value: "sharp",   label: i18n.tweaks.sharp },
+            { value: "space",   label: i18n.tweaks.space },
+            { value: "sora",    label: i18n.tweaks.sora },
           ]}
           onChange={(v) => setTweak("type", v)}
         />
