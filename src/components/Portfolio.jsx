@@ -556,19 +556,21 @@ function LivePortfolioPage({ t, lang, ccy, portfolio, liveHoldings, prices = {},
       />
 
       {/* Tab switcher */}
-      <div className="segmented" style={{ marginBottom: 16, width: "fit-content" }}>
-        <button className={tab === "holdings" ? "on" : ""} onClick={() => setTab("holdings")}>
-          {th ? "หลักทรัพย์" : "Holdings"} {allGrouped.length > 0 && <span style={{ opacity: 0.6, marginLeft: 4 }}>{allGrouped.length}</span>}
-        </button>
-        <button className={tab === "cash" ? "on" : ""} onClick={() => setTab("cash")}>
-          {th ? "เงินสด" : "Cash"} {cashAccounts.length > 0 && <span style={{ opacity: 0.6, marginLeft: 4 }}>{cashAccounts.length}</span>}
-        </button>
-        <button className={tab === "categories" ? "on" : ""} onClick={() => setTab("categories")}>
-          {th ? "หมวดหมู่" : "Categories"}
-        </button>
-        <button className={tab === "transactions" ? "on" : ""} onClick={() => setTab("transactions")}>
-          {th ? "ธุรกรรม" : "Transactions"}
-        </button>
+      <div style={{ marginBottom: 16, overflowX: "auto", WebkitOverflowScrolling: "touch" }}>
+        <div className="segmented">
+          <button className={tab === "holdings" ? "on" : ""} onClick={() => setTab("holdings")}>
+            {th ? "หลักทรัพย์" : "Holdings"} {allGrouped.length > 0 && <span style={{ opacity: 0.6, marginLeft: 4 }}>{allGrouped.length}</span>}
+          </button>
+          <button className={tab === "cash" ? "on" : ""} onClick={() => setTab("cash")}>
+            {th ? "เงินสด" : "Cash"} {cashAccounts.length > 0 && <span style={{ opacity: 0.6, marginLeft: 4 }}>{cashAccounts.length}</span>}
+          </button>
+          <button className={tab === "categories" ? "on" : ""} onClick={() => setTab("categories")}>
+            {th ? "หมวดหมู่" : "Categories"}
+          </button>
+          <button className={tab === "transactions" ? "on" : ""} onClick={() => setTab("transactions")}>
+            {th ? "ธุรกรรม" : "Transactions"}
+          </button>
+        </div>
       </div>
 
       {tab === "transactions" ? (
@@ -856,7 +858,6 @@ function LivePortfolioPage({ t, lang, ccy, portfolio, liveHoldings, prices = {},
                           >{th ? "ขาย" : "Sell"}</button>
                           <button
                             onClick={() => { const orig = liveHoldings.find(h => h.id === r._ids[0]); if (orig) setEditHolding({ ...orig, _lots: r._lots }) }}
-                            className="act-secondary"
                             style={{ background: "none", border: "none", cursor: "pointer", color: "var(--ink-3)", padding: "4px 7px", borderRadius: 6, fontSize: 15, lineHeight: 1 }}
                             title={th ? "แก้ไข" : "Edit"}
                           >✎</button>
