@@ -11,6 +11,9 @@ export function AnalyticsPage({ t, lang, ccy, dataState, liveHoldings = [], pric
   const [tab, setTab] = useState("common")
   const [transactions, setTransactions] = useState([])
   const [pendingDivCount, setPendingDivCount] = useState(0)
+  // Bump this counter after any snapshot rebuild so all tab components re-fetch
+  const [snapsVersion, setSnapsVersion] = useState(0)
+  const bumpSnapsVersion = useCallback(() => setSnapsVersion(v => v + 1), [])
 
   // Fetch ALL transactions — the earliest-investment date and per-ticker
   // purchase dates must see the full history, not just the latest 50.
@@ -176,11 +179,11 @@ export function AnalyticsPage({ t, lang, ccy, dataState, liveHoldings = [], pric
         ))}
       </div>
 
-      {tab === "common"          && <AnalyticsCommon t={t} lang={lang} ccy={ccy} rows={rows} totalValue={totalValue} totalPL={totalPL} totalPlPct={totalPlPct} totalCost={totalCost} hasLivePrices={hasLivePrices} demoData={demoData} dataState={dataState} earliestHoldingDate={earliestHoldingDate} liveHoldings={liveHoldings} transactions={transactions} fxRate={fxRate} portfolio={portfolio} />}
+      {tab === "common"          && <AnalyticsCommon t={t} lang={lang} ccy={ccy} rows={rows} totalValue={totalValue} totalPL={totalPL} totalPlPct={totalPlPct} totalCost={totalCost} hasLivePrices={hasLivePrices} demoData={demoData} dataState={dataState} earliestHoldingDate={earliestHoldingDate} liveHoldings={liveHoldings} transactions={transactions} fxRate={fxRate} portfolio={portfolio} snapsVersion={snapsVersion} />}
       {tab === "diversification" && <AnalyticsDiv t={t} lang={lang} ccy={ccy} rows={rows} totalValue={totalValue} demoData={demoData} dataState={dataState} />}
       {tab === "dividends"       && <AnalyticsDiv2 t={t} lang={lang} ccy={ccy} rows={rows} totalValue={totalValue} dataState={dataState} liveHoldings={liveHoldings} fxRate={fxRate} transactions={transactions} portfolio={portfolio} onTransactionAdded={handleTransactionAdded} onTransactionUpdated={handleTransactionUpdated} onTransactionDeleted={handleTransactionDeleted} />}
-      {tab === "growth"          && <AnalyticsGrowth t={t} lang={lang} ccy={ccy} rows={rows} fxRate={fxRate} totalValue={totalValue} totalCost={totalCost} totalPL={totalPL} totalPlPct={totalPlPct} dataState={dataState} earliestHoldingDate={earliestHoldingDate} portfolio={portfolio} />}
-      {tab === "metrics"         && <AnalyticsMetrics t={t} lang={lang} ccy={ccy} rows={rows} totalValue={totalValue} totalPL={totalPL} totalPlPct={totalPlPct} dataState={dataState} portfolio={portfolio} fxRate={fxRate} />}
+      {tab === "growth"          && <AnalyticsGrowth t={t} lang={lang} ccy={ccy} rows={rows} fxRate={fxRate} totalValue={totalValue} totalCost={totalCost} totalPL={totalPL} totalPlPct={totalPlPct} dataState={dataState} earliestHoldingDate={earliestHoldingDate} portfolio={portfolio} snapsVersion={snapsVersion} />}
+      {tab === "metrics"         && <AnalyticsMetrics t={t} lang={lang} ccy={ccy} rows={rows} totalValue={totalValue} totalPL={totalPL} totalPlPct={totalPlPct} dataState={dataState} portfolio={portfolio} fxRate={fxRate} onSnapsRebuild={bumpSnapsVersion} />}
     </div>
   )
 }
@@ -224,7 +227,7 @@ function groupRowsByTicker(rows) {
 }
 
 /* ─── Common tab ─────────────────────────────────────────────────────────────── */
-function AnalyticsCommon({ t, lang, ccy, rows, totalValue, totalPL, totalPlPct, totalCost, hasLivePrices, demoData, dataState, earliestHoldingDate, liveHoldings = [], transactions = [], fxRate = 36, portfolio }) {
+function AnalyticsCommon({ t, lang, ccy, rows, totalValue, totalPL, totalPlPct, totalCost, hasLivePrices, demoData, dataState, earliestHoldingDate, liveHoldings = [], transactions = [], fxRate = 36, portfolio, snapsVersion = 0 }) {
   const FMT = LUMEN_FMT
   const th = lang === "th"
 
@@ -279,7 +282,7 @@ function AnalyticsCommon({ t, lang, ccy, rows, totalValue, totalPL, totalPlPct, 
     let cancelled = false
     getSnapshots(portfolio.id).then(d => { if (!cancelled) setSnaps(d) }).catch(() => {})
     return () => { cancelled = true }
-  }, [dataState, portfolio?.id])
+  }, [dataState, portfolio?.id, snapsVersion])
 
   // ── Real holding price histories (same logic as Dashboard) ─────────────────
   const [holdingHistories, setHoldingHistories] = useState({})
@@ -1768,7 +1771,7 @@ const BENCHMARKS = {
 }
 
 /* ─── Growth tab ─────────────────────────────────────────────────────────────── */
-function AnalyticsGrowth({ t, lang, ccy, rows = [], fxRate = 36, totalValue, totalCost, totalPL, totalPlPct, dataState, earliestHoldingDate, portfolio }) {
+function AnalyticsGrowth({ t, lang, ccy, rows = [], fxRate = 36, totalValue, totalCost, totalPL, totalPlPct, dataState, earliestHoldingDate, portfolio, snapsVersion = 0 }) {
   const FMT = LUMEN_FMT
   const th = lang === "th"
   const isLive = dataState === "live"
@@ -1829,7 +1832,7 @@ function AnalyticsGrowth({ t, lang, ccy, rows = [], fxRate = 36, totalValue, tot
       if (!cancelled) { setSnaps(d || []); setBuilding(false) }
     })()
     return () => { cancelled = true }
-  }, [isLive, portfolio?.id, fxRate])
+  }, [isLive, portfolio?.id, fxRate, snapsVersion])
 
   // ── How many calendar days since first purchase ────────────────────────────
   const daysSinceFirst = useMemo(() => {
@@ -2271,7 +2274,7 @@ function AnalyticsGrowth({ t, lang, ccy, rows = [], fxRate = 36, totalValue, tot
 }
 
 /* ─── Metrics tab — live-aware ──────────────────────────────────────────────── */
-function AnalyticsMetrics({ t, lang, ccy, rows = [], totalValue = 0, totalPL = 0, totalPlPct = 0, dataState, portfolio, fxRate = 36 }) {
+function AnalyticsMetrics({ t, lang, ccy, rows = [], totalValue = 0, totalPL = 0, totalPlPct = 0, dataState, portfolio, fxRate = 36, onSnapsRebuild }) {
   const th = lang === "th"
   const isLive = dataState === "live"
   const [openKey, setOpenKey] = useState(null)   // which metric's formula is expanded
@@ -2335,6 +2338,7 @@ function AnalyticsMetrics({ t, lang, ccy, rows = [], totalValue = 0, totalPL = 0
 
       const fresh = await getSnapshots(portfolio.id)
       setSnaps(fresh)
+      onSnapsRebuild?.()   // notify Common + Growth tabs to re-fetch
       setBackfillMsg(th
         ? `สร้างประวัติ ${series.length} วัน · ${txs.length} ธุรกรรม · เริ่มจาก ${earliest}`
         : `Rebuilt ${series.length} days · ${txs.length} transactions · since ${earliest}`)
@@ -2343,7 +2347,7 @@ function AnalyticsMetrics({ t, lang, ccy, rows = [], totalValue = 0, totalPL = 0
     } finally {
       setBackfilling(false)
     }
-  }, [portfolio?.id, fxRate, th])
+  }, [portfolio?.id, fxRate, th, onSnapsRebuild])
 
   // Auto-trigger backfill once when the Metrics tab first opens with no snapshot data
   const autoFilled = useRef(false)
