@@ -630,10 +630,8 @@ function AnalyticsCommon({ t, lang, ccy, rows, totalValue, totalPL, totalPlPct, 
   const valueSeries = useMemo(() => {
     if (dataState !== "live" || windowSnaps.length < 2) return null
     const win = windowSnaps
-    const stride = Math.max(1, Math.floor(win.length / 80))
     const val = [], cost = []
-    win.forEach((s, i) => {
-      if (i % stride !== 0 && i !== win.length - 1) return
+    win.forEach((s) => {
       const label = labelFor(new Date(s.date))
       val.push({ x: val.length, y: Number(s.total_value) || 0, label })
       cost.push({ x: cost.length, y: Number(s.total_cost) || 0, label })
