@@ -2718,14 +2718,12 @@ function AnalyticsMetrics({ t, lang, ccy, rows = [], totalValue = 0, totalPL = 0
 
           {snaps.length > 0 && (() => {
             const ratios = snaps.map(s => Number(s.total_value) / Number(s.total_cost))
-            // Detect outliers using same Hampel logic as buildSnapshotSeries
+            // Detect outliers using same look-ahead logic as buildSnapshotSeries:
+            // isolated spike >15% above both neighbors = likely bad Yahoo Finance price
             const isOutlier = ratios.map((r, i) => {
-              const lo = Math.max(0, i - 7), hi = Math.min(ratios.length - 1, i + 7)
-              const win = ratios.slice(lo, hi + 1).sort((a, b) => a - b)
-              const med = win[Math.floor(win.length / 2)]
-              const mad = win.map(v => Math.abs(v - med)).sort((a, b) => a - b)[Math.floor(win.length / 2)]
-              const sigma = 1.4826 * mad
-              return sigma >= 1e-8 && Math.abs(r - med) > 3.0 * sigma
+              if (i === 0 || i === ratios.length - 1) return false
+              const pi = ratios[i - 1], ni = ratios[i + 1]
+              return r > pi * 1.15 && r > ni * 1.15
             })
             const outlierCount = isOutlier.filter(Boolean).length
             const minR = Math.min(...ratios), maxR = Math.max(...ratios)

@@ -466,39 +466,32 @@ export function buildSnapshotSeries(transactions, seriesByTicker, ccyByTicker, f
       rows.push({ date, total_value: +total_value.toFixed(2), total_cost: +total_cost.toFixed(2) })
   }
 
-  // ── Layer 2: Hampel filter on portfolio-level output ──────────────────────
-  // Removes any snapshot row whose value/cost ratio is a statistical outlier
-  // relative to the surrounding 15-day window (±7 days).  Uses Median Absolute
-  // Deviation so the threshold adapts to actual portfolio volatility: genuine
-  // multi-day market moves (crash, rally) shift the local median with them and
-  // are preserved; single-day data artifacts stand out and are removed.
-  const filtered = hampelFilter(rows, 7, 3.0, true)
-  const ratios = filtered.map(r => r.total_value / r.total_cost)
-  const minR = Math.min(...ratios), maxR = Math.max(...ratios)
-  console.log(
-    `[Lumen] snapshot built: ${filtered.length} rows (${rows.length - filtered.length} removed by Hampel)` +
-    ` | ratio range ${(minR*100-100).toFixed(1)}% – ${(maxR*100-100).toFixed(1)}%` +
-    (Object.keys(priceFixes).length ? ` | price fixes: ${JSON.stringify(priceFixes)}` : '')
-  )
-  return filtered
-}
-
-function hampelFilter(rows, halfWindow = 7, nsigma = 3.0, verbose = false) {
-  if (rows.length < 3) return rows
+  // ── Layer 2: look-ahead spike filter on portfolio-level output ───────────
+  // Removes rows where the value/cost ratio is an isolated spike — more than
+  // 15% above BOTH its immediate neighbors.  Targets genuine single-day data
+  // artifacts (bad Yahoo Finance price) while leaving trend moves, cash
+  // injections, and market crashes untouched (those affect consecutive days,
+  // so at least one neighbor is also elevated/depressed).
   const ratios = rows.map(r => r.total_value / r.total_cost)
-  return rows.filter((_, i) => {
-    const lo = Math.max(0, i - halfWindow)
-    const hi = Math.min(rows.length - 1, i + halfWindow)
-    const win = ratios.slice(lo, hi + 1)
-    const sorted = [...win].sort((a, b) => a - b)
-    const med = sorted[Math.floor(sorted.length / 2)]
-    const mad = sorted.map(v => Math.abs(v - med)).sort((a, b) => a - b)[Math.floor(sorted.length / 2)]
-    const sigma = 1.4826 * mad   // consistent estimator of std deviation
-    const keep = sigma < 1e-8 || Math.abs(ratios[i] - med) <= nsigma * sigma
-    if (!keep && verbose)
-      console.warn(`[Lumen] snapshot: Hampel removed ${rows[i].date} ratio=${(ratios[i]*100-100).toFixed(2)}% (median=${(med*100-100).toFixed(2)}%, sigma=${(sigma*100).toFixed(3)}%)`)
-    return keep
+  const filtered = rows.filter((_, i) => {
+    if (i === 0 || i === rows.length - 1) return true
+    const ci = ratios[i], pi = ratios[i - 1], ni = ratios[i + 1]
+    if (ci > pi * 1.15 && ci > ni * 1.15) {
+      console.warn(`[Lumen] snapshot: spike removed ${rows[i].date} ratio=${(ci*100-100).toFixed(2)}% (prev=${(pi*100-100).toFixed(2)}%, next=${(ni*100-100).toFixed(2)}%)`)
+      return false
+    }
+    return true
   })
+  const fRatios = filtered.map(r => r.total_value / r.total_cost)
+  if (fRatios.length) {
+    const minR = Math.min(...fRatios), maxR = Math.max(...fRatios)
+    console.log(
+      `[Lumen] snapshot built: ${filtered.length} rows (${rows.length - filtered.length} spike(s) removed)` +
+      ` | ratio range ${(minR*100-100).toFixed(1)}% – ${(maxR*100-100).toFixed(1)}%` +
+      (Object.keys(priceFixes).length ? ` | price fixes: ${JSON.stringify(priceFixes)}` : '')
+    )
+  }
+  return filtered
 }
 
 // Realized P/L from all transactions, returned in THB (USD converted at the
