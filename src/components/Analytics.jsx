@@ -590,10 +590,8 @@ function AnalyticsCommon({ t, lang, ccy, rows, totalValue, totalPL, totalPlPct, 
       : win[0].date
     const spxBase = spxSorted.length ? spxOnOrBefore(spxBaseDate) : null
 
-    const stride = Math.max(1, Math.floor(win.length / 80))
     const port = [], sp = []
     win.forEach((s, i) => {
-      if (i % stride !== 0 && i !== win.length - 1) return
       const gi = indexOf(s)
       const label = labelFor(new Date(s.date))
       port.push({ x: port.length, y: 100 * (gi != null ? gi : base) / base, label })
