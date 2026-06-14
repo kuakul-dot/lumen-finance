@@ -53,7 +53,14 @@ export function LineChart({ series, height = 280, fmt, labelFmt, hLines = [] }) 
   const yTicks = 4
   const gridYs = Array.from({ length: yTicks + 1 }, (_, i) => yLo + (ySpan * i) / yTicks)
   const labelEvery = Math.max(1, Math.floor(series[0].data.length / 6))
-  const xLabels = series[0].data.map((d, i) => ({ ...d, i })).filter((d, i) => i % labelEvery === 0 || i === series[0].data.length - 1)
+  const xLabels = series[0].data.map((d, i) => ({ ...d, i })).filter((d, i, arr) => {
+    if (i % labelEvery === 0) return true
+    if (i === arr.length - 1) {
+      const prevTick = Math.floor(i / labelEvery) * labelEvery
+      return i - prevTick >= labelEvery / 2
+    }
+    return false
+  })
 
   const handleMove = e => {
     const r = e.currentTarget.getBoundingClientRect()
