@@ -395,15 +395,36 @@ export function buildSnapshotSeries(transactions, seriesByTicker, ccyByTicker, f
   const firstDate = dayOf(transactions[0].transacted_at)
   const today = new Date().toISOString().split('T')[0]
 
+  // ── Layer 1: sanitize per-ticker price series ─────────────────────────────
+  // Yahoo Finance occasionally returns a bad closing price for one day
+  // (ex-dividend adjustment artifact, split mismatch, data error).
+  // Detect isolated spikes: price jumps >30% vs prev AND reverts >20% next day
+  // while prev→next is <15% — clear artifact; replace with previous valid price.
+  const cleanedSeries = {}
+  for (const tk in seriesByTicker) {
+    const s = seriesByTicker[tk]
+    if (!s || s.length < 3) { cleanedSeries[tk] = s; continue }
+    const arr = s.map(p => ({ ...p }))   // shallow copy — don't mutate original
+    for (let i = 1; i < arr.length - 1; i++) {
+      const prev = arr[i - 1].c, curr = arr[i].c, next = arr[i + 1].c
+      if (prev <= 0 || curr <= 0 || next <= 0) continue
+      const fwd = Math.abs(curr / prev - 1)
+      const bk  = Math.abs(next / curr - 1)
+      const thru = Math.abs(next / prev - 1)
+      if (fwd > 0.30 && bk > 0.20 && thru < 0.15) arr[i] = { ...arr[i], c: prev }
+    }
+    cleanedSeries[tk] = arr
+  }
+
   const dateSet = new Set()
-  for (const tk in seriesByTicker)
-    for (const p of seriesByTicker[tk])
+  for (const tk in cleanedSeries)
+    for (const p of cleanedSeries[tk])
       if (p.d >= firstDate && p.d <= today) dateSet.add(p.d)
   for (const t of transactions) dateSet.add(dayOf(t.transacted_at))
   const dates = [...dateSet].sort()
 
   const priceOnOrBefore = (tk, date) => {
-    const s = seriesByTicker[tk]; if (!s) return null
+    const s = cleanedSeries[tk]; if (!s) return null
     let best = null
     for (const p of s) { if (p.d <= date) best = p.c; else break }
     return best
@@ -437,7 +458,29 @@ export function buildSnapshotSeries(transactions, seriesByTicker, ccyByTicker, f
     if (total_cost > 0 && total_value > 0)
       rows.push({ date, total_value: +total_value.toFixed(2), total_cost: +total_cost.toFixed(2) })
   }
-  return rows
+
+  // ── Layer 2: Hampel filter on portfolio-level output ──────────────────────
+  // Removes any snapshot row whose value/cost ratio is a statistical outlier
+  // relative to the surrounding 15-day window (±7 days).  Uses Median Absolute
+  // Deviation so the threshold adapts to actual portfolio volatility: genuine
+  // multi-day market moves (crash, rally) shift the local median with them and
+  // are preserved; single-day data artifacts stand out and are removed.
+  return hampelFilter(rows)
+}
+
+function hampelFilter(rows, halfWindow = 7, nsigma = 3.0) {
+  if (rows.length < 3) return rows
+  const ratios = rows.map(r => r.total_value / r.total_cost)
+  return rows.filter((_, i) => {
+    const lo = Math.max(0, i - halfWindow)
+    const hi = Math.min(rows.length - 1, i + halfWindow)
+    const win = ratios.slice(lo, hi + 1)
+    const sorted = [...win].sort((a, b) => a - b)
+    const med = sorted[Math.floor(sorted.length / 2)]
+    const mad = sorted.map(v => Math.abs(v - med)).sort((a, b) => a - b)[Math.floor(sorted.length / 2)]
+    const sigma = 1.4826 * mad   // consistent estimator of std deviation
+    return sigma < 1e-8 || Math.abs(ratios[i] - med) <= nsigma * sigma
+  })
 }
 
 // Realized P/L from all transactions, returned in THB (USD converted at the
