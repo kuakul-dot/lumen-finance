@@ -385,11 +385,16 @@ export async function deleteAllSnapshots(portfolioId) {
 // historical price series.  Lets TWR / Sharpe / drawdown work without waiting
 // days for live snapshots to accumulate.
 //   transactions:   all txs, ascending by transacted_at
-//   seriesByTicker: { TICKER: [{ d:'YYYY-MM-DD', c:close(native ccy) }] } asc
-//   ccyByTicker:    { TICKER: 'USD' | 'THB' }
-//   fxRate:         USD→THB fallback (used when fxByDate has no entry for a date)
-//   fxByDate:       optional { 'YYYY-MM-DD': rate } for historically-accurate FX conversion
-export function buildSnapshotSeries(transactions, seriesByTicker, ccyByTicker, fxRate = 36, fxByDate = {}) {
+//   seriesByTicker:    { TICKER: [{ d:'YYYY-MM-DD', c:close(native ccy) }] } asc
+//   costCcyByTicker:   { TICKER: 'USD' | 'THB' } — currency the transaction COST was entered in
+//   fxRate:            USD→THB fallback (used when fxByDate has no entry for a date)
+//   fxByDate:          optional { 'YYYY-MM-DD': rate } for historically-accurate FX conversion
+//   priceCcyByTicker:  { TICKER: 'USD' | 'THB' } — currency the Yahoo Finance PRICE is quoted in
+//                      (based on holding.region, NOT tx.currency).  Defaults to costCcyByTicker.
+//                      Must differ from costCcyByTicker when the user recorded cost in THB
+//                      for a US-region holding (entered THB equivalent instead of USD price).
+export function buildSnapshotSeries(transactions, seriesByTicker, costCcyByTicker, fxRate = 36, fxByDate = {}, priceCcyByTicker = costCcyByTicker, clsByTicker = {}) {
+  const ccyByTicker = costCcyByTicker  // alias kept for clarity below
   if (!transactions?.length) return []
   const dayOf = (v) => String(v).split('T')[0]
   const firstDate = dayOf(transactions[0].transacted_at)
@@ -457,10 +462,20 @@ export function buildSnapshotSeries(transactions, seriesByTicker, ccyByTicker, f
     let total_value = 0, total_cost = 0
     for (const tk in pos) {
       if (pos[tk].shares <= 0) continue
-      const fx = (ccyByTicker[tk] === 'USD') ? (fxByDate[date] ?? fxRate) : 1
+      // priceFx: FX for Yahoo Finance prices (USD→THB when needed)
+      // costFx:  FX for accumulated transaction cost (from tx.currency)
+      // GoldTH (GC=F) and Crypto (BTC-USD) are always quoted in USD on Yahoo
+      // regardless of how tx.currency was recorded — force USD FX for them.
+      const isGoldTH = clsByTicker[tk] === 'GoldTH'
+      const isCrypto = clsByTicker[tk] === 'Crypto'
+      const priceIsUSD = isGoldTH || isCrypto || priceCcyByTicker[tk] === 'USD'
+      const priceFx = priceIsUSD ? (fxByDate[date] ?? fxRate) : 1
+      const costFx  = (ccyByTicker[tk] === 'USD') ? (fxByDate[date] ?? fxRate) : 1
+      // GoldTH: shares stored in Thai baht-weight (บาท); 1 บาท = 15.244g = 0.4902 troy oz
+      const weightFactor = isGoldTH ? (15.244 / 31.1035) : 1
       const px = priceOnOrBefore(tk, date)
-      if (px != null) total_value += pos[tk].shares * px * fx
-      total_cost += pos[tk].cost * fx
+      if (px != null) total_value += pos[tk].shares * weightFactor * px * priceFx
+      total_cost += pos[tk].cost * costFx
     }
     if (total_cost > 0 && total_value > 0)
       rows.push({ date, total_value: +total_value.toFixed(2), total_cost: +total_cost.toFixed(2) })

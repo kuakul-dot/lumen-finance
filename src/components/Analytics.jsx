@@ -50,24 +50,38 @@ export function AnalyticsPage({ t, lang, ccy, dataState, liveHoldings = [], pric
           const tk = (tx.ticker || '').toUpperCase()
           if (tk && !ccyByTicker[tk]) ccyByTicker[tk] = tx.currency || 'THB'
         }
+        // priceCcyByTicker: currency Yahoo Finance prices are quoted in.
+        // GoldTH (GC=F) and Crypto (BTC-USD) are always USD on Yahoo regardless
+        // of how the user recorded the transaction. US-region equities are also USD.
+        const clsByTicker = {}
+        const priceCcyByTicker = { ...ccyByTicker }
+        for (const h of liveHoldings) {
+          const tk = (h.ticker || '').toUpperCase()
+          if (!tk) continue
+          clsByTicker[tk] = h.cls || 'Equity'
+          const pc = (h.cls === 'GoldTH' || h.cls === 'Crypto' || h.region === 'US') ? 'USD' : 'THB'
+          if (pc !== priceCcyByTicker[tk])
+            console.log(`[Lumen] rebuild: ${tk} cls=${h.cls} region=${h.region} → price_ccy overridden to ${pc}`)
+          priceCcyByTicker[tk] = pc
+        }
         const tickers = Object.keys(ccyByTicker)
         const spanDays = (Date.now() - new Date(txs[0].transacted_at)) / 86400000
         const range = spanDays > 365 * 2 ? '5y' : spanDays > 365 ? '2y' : spanDays > 180 ? '1y'
                     : spanDays > 90 ? '6mo' : spanDays > 30 ? '3mo' : '1mo'
         const seriesByTicker = {}
         await Promise.all(tickers.map(async tk => {
-          const region = ccyByTicker[tk] === 'USD' ? 'US' : 'TH'
-          const sym = toYahooSymbol(tk, region, 'Equity')
+          const region = priceCcyByTicker[tk] === 'USD' ? 'US' : 'TH'
+          const sym = toYahooSymbol(tk, region, clsByTicker[tk] || 'Equity')
           const h = await fetchHistory(sym, range).catch(() => ({ series: [] }))
           seriesByTicker[tk] = (h?.series || []).map(p => ({ d: new Date(p.t * 1000).toISOString().split('T')[0], c: p.c }))
         }))
         const fxByDate = {}
-        if (Object.values(ccyByTicker).some(c => c === 'USD')) {
+        if (Object.values(priceCcyByTicker).some(c => c === 'USD')) {
           const fxH = await fetchHistory('USDTHB=X', range).catch(() => ({ series: [] }))
           for (const p of (fxH?.series || []))
             fxByDate[new Date(p.t * 1000).toISOString().split('T')[0]] = p.c
         }
-        const series = buildSnapshotSeries(txs, seriesByTicker, ccyByTicker, fxRate, fxByDate)
+        const series = buildSnapshotSeries(txs, seriesByTicker, ccyByTicker, fxRate, fxByDate, priceCcyByTicker, clsByTicker)
         if (series.length && !cancelled) {
           await deleteAllSnapshots(portfolio.id)
           await upsertSnapshots(portfolio.id, series)
@@ -1876,25 +1890,37 @@ function AnalyticsGrowth({ t, lang, ccy, rows = [], fxRate = 36, totalValue, tot
             const tk = (tx.ticker || "").toUpperCase()
             if (tk && !ccyByTicker[tk]) ccyByTicker[tk] = tx.currency || "THB"
           }
+          // priceCcyByTicker: currency Yahoo Finance quotes prices in.
+          // GoldTH (GC=F) and Crypto (BTC-USD) are always USD on Yahoo.
+          const priceCcyByTicker = { ...ccyByTicker }
+          for (const r of rows) {
+            const tk = (r.ticker || "").toUpperCase()
+            if (!tk) continue
+            clsByTicker[tk] = r.cls || "Equity"
+            const pc = (r.cls === "GoldTH" || r.cls === "Crypto" || r.region === "US") ? "USD" : "THB"
+            if (pc !== priceCcyByTicker[tk])
+              console.log(`[Lumen] growth rebuild: ${tk} cls=${r.cls} region=${r.region} → price_ccy overridden to ${pc}`)
+            priceCcyByTicker[tk] = pc
+          }
           const tickers = Object.keys(ccyByTicker)
           const spanDays = (Date.now() - new Date(sorted[0].transacted_at)) / 86400000
           const range = spanDays > 365 * 2 ? "5y" : spanDays > 365 ? "2y" : spanDays > 180 ? "1y"
                       : spanDays > 90 ? "6mo" : spanDays > 30 ? "3mo" : "1mo"
           const seriesByTicker = {}
           await Promise.all(tickers.map(async tk => {
-            const region = ccyByTicker[tk] === "USD" ? "US" : "TH"
+            const region = priceCcyByTicker[tk] === "USD" ? "US" : "TH"
             const sym = toYahooSymbol(tk, region, clsByTicker[tk] || "Equity")
             const h = await fetchHistory(sym, range).catch(() => ({ series: [] }))
             seriesByTicker[tk] = (h?.series || []).map(p => ({ d: new Date(p.t * 1000).toISOString().split("T")[0], c: p.c }))
           }))
           // Fetch historical USDTHB rates so each date uses its own FX rate (not today's)
           const fxByDate = {}
-          if (Object.values(ccyByTicker).some(c => c === "USD")) {
+          if (Object.values(priceCcyByTicker).some(c => c === "USD")) {
             const fxH = await fetchHistory("USDTHB=X", range).catch(() => ({ series: [] }))
             for (const p of (fxH?.series || []))
               fxByDate[new Date(p.t * 1000).toISOString().split("T")[0]] = p.c
           }
-          const series = buildSnapshotSeries(txs, seriesByTicker, ccyByTicker, fxRate, fxByDate)
+          const series = buildSnapshotSeries(txs, seriesByTicker, ccyByTicker, fxRate, fxByDate, priceCcyByTicker, clsByTicker)
           if (series.length) {
             await upsertSnapshots(portfolio.id, series)
             d = await getSnapshots(portfolio.id).catch(() => d)
@@ -2390,6 +2416,19 @@ function AnalyticsMetrics({ t, lang, ccy, rows = [], totalValue = 0, totalPL = 0
         const tk = (tx.ticker || "").toUpperCase()
         if (tk && !ccyByTicker[tk]) ccyByTicker[tk] = tx.currency || "THB"
       }
+      // priceCcyByTicker: currency Yahoo Finance quotes prices in.
+      // GoldTH (GC=F) and Crypto (BTC-USD) are always USD on Yahoo.
+      const clsByTicker = {}
+      const priceCcyByTicker = { ...ccyByTicker }
+      for (const r of rows) {
+        const tk = (r.ticker || "").toUpperCase()
+        if (!tk) continue
+        clsByTicker[tk] = r.cls || "Equity"
+        const pc = (r.cls === "GoldTH" || r.cls === "Crypto" || r.region === "US") ? "USD" : "THB"
+        if (pc !== priceCcyByTicker[tk])
+          console.log(`[Lumen] backfill: ${tk} cls=${r.cls} region=${r.region} → price_ccy overridden to ${pc}`)
+        priceCcyByTicker[tk] = pc
+      }
       const tickers = Object.keys(ccyByTicker)
       const spanDays = (Date.now() - new Date(txs[0].transacted_at)) / 86400000
       const range = spanDays > 365 * 2 ? "5y" : spanDays > 365 ? "2y" : spanDays > 180 ? "1y"
@@ -2397,20 +2436,20 @@ function AnalyticsMetrics({ t, lang, ccy, rows = [], totalValue = 0, totalPL = 0
 
       const seriesByTicker = {}
       await Promise.all(tickers.map(async tk => {
-        const region = ccyByTicker[tk] === "USD" ? "US" : "TH"
-        const sym = toYahooSymbol(tk, region, "Equity")
+        const region = priceCcyByTicker[tk] === "USD" ? "US" : "TH"
+        const sym = toYahooSymbol(tk, region, clsByTicker[tk] || "Equity")
         const h = await fetchHistory(sym, range).catch(() => ({ series: [] }))
         seriesByTicker[tk] = (h?.series || []).map(p => ({ d: new Date(p.t * 1000).toISOString().split("T")[0], c: p.c }))
       }))
       // Fetch historical USDTHB rates so each date uses its own FX rate (not today's)
       const fxByDate = {}
-      if (Object.values(ccyByTicker).some(c => c === "USD")) {
+      if (Object.values(priceCcyByTicker).some(c => c === "USD")) {
         const fxH = await fetchHistory("USDTHB=X", range).catch(() => ({ series: [] }))
         for (const p of (fxH?.series || []))
           fxByDate[new Date(p.t * 1000).toISOString().split("T")[0]] = p.c
       }
 
-      const series = buildSnapshotSeries(txs, seriesByTicker, ccyByTicker, fxRate, fxByDate)
+      const series = buildSnapshotSeries(txs, seriesByTicker, ccyByTicker, fxRate, fxByDate, priceCcyByTicker, clsByTicker)
       if (!series.length) { setBackfillMsg(th ? "ดึงราคาย้อนหลังไม่ได้ ลองใหม่อีกครั้ง" : "Couldn't fetch historical prices — try again"); return }
 
       // Nuclear: delete ALL existing snapshots first so weekend/holiday entries
