@@ -509,14 +509,18 @@ function AnalyticsCommon({ t, lang, ccy, rows, totalValue, totalPL, totalPlPct, 
   }, [th])
 
   // ── Mode A: growth % comparison (rebased to 100) ───────────────────────────
-  // Portfolio uses the contribution-neutral value/cost index; S&P uses real
-  // closes.  Both rebased to 100 at the window start → fair, same-scale.
+  // "All" period: base = 1 (cost basis) so the final point matches the Total
+  // Return KPI exactly.  Other periods: base = value/cost at window start so
+  // the chart shows in-period movement.  S&P 500 is rebased to the same start.
   const growthSeries = useMemo(() => {
     if (dataState !== "live" || windowSnaps.length < 2) return null
     const win = windowSnaps
     const indexOf = s => Number(s.total_cost) > 0 ? Number(s.total_value) / Number(s.total_cost) : null
-    const base = indexOf(win.find(s => indexOf(s) != null))
-    if (base == null || base === 0) return null
+
+    // "All" period anchors to cost basis (ratio = 1) so the last plotted value
+    // equals Total Return (value/cost – 1). Other periods rebase to window start.
+    const base = chartPeriod === "all" ? 1 : (indexOf(win.find(s => indexOf(s) != null)) ?? 1)
+    if (base === 0) return null
 
     const spxSorted = [...(spxData?.series || [])].sort((a, b) => a.t - b.t)
     const spxOnOrBefore = dateStr => {
@@ -525,7 +529,12 @@ function AnalyticsCommon({ t, lang, ccy, rows, totalValue, totalPL, totalPlPct, 
       for (const p of spxSorted) { if (p.t <= sec) best = p.c; else break }
       return best
     }
-    const spxBase = spxSorted.length ? spxOnOrBefore(win[0].date) : null
+    // For "All" use the first investment date as SPX baseline so the comparison
+    // covers the same time horizon as the portfolio's cost history.
+    const spxBaseDate = chartPeriod === "all" && earliestHoldingDate
+      ? earliestHoldingDate.toISOString().slice(0, 10)
+      : win[0].date
+    const spxBase = spxSorted.length ? spxOnOrBefore(spxBaseDate) : null
 
     const stride = Math.max(1, Math.floor(win.length / 80))
     const port = [], sp = []
@@ -542,7 +551,7 @@ function AnalyticsCommon({ t, lang, ccy, rows, totalValue, totalPL, totalPlPct, 
     const out = [{ name: th ? "พอร์ตของคุณ" : "Your portfolio", color: "var(--ink)", fill: true, data: port }]
     if (sp.length >= 2) out.push({ name: th ? commonBench.labelTh : commonBench.labelEn, color: commonBench.color || "var(--accent)", data: sp })
     return out
-  }, [dataState, windowSnaps, spxData, th, labelFor, commonBenchKey])
+  }, [dataState, windowSnaps, spxData, th, labelFor, commonBenchKey, chartPeriod, earliestHoldingDate])
 
   // ── Mode B: actual value (THB) — market value vs cost basis over time ──────
   const valueSeries = useMemo(() => {
@@ -620,7 +629,9 @@ function AnalyticsCommon({ t, lang, ccy, rows, totalValue, totalPL, totalPlPct, 
                 dataState === "live" && snapSeries
                   ? (chartMode === "value"
                       ? (th ? "มูลค่าพอร์ต & ต้นทุน (฿)" : "Portfolio value & cost basis")
-                      : (th ? `การเติบโต: พอร์ต vs. ${commonBench.labelTh} (ฐาน 100%)` : `Growth: Portfolio vs. ${commonBench.labelEn} (rebased)`))
+                      : (chartPeriod === "all"
+                          ? (th ? `การเติบโต: พอร์ต vs. ${commonBench.labelTh} (เทียบต้นทุน)` : `Growth: Portfolio vs. ${commonBench.labelEn} (vs. cost basis)`)
+                          : (th ? `การเติบโต: พอร์ต vs. ${commonBench.labelTh} (ฐาน 100%)` : `Growth: Portfolio vs. ${commonBench.labelEn} (rebased)`)))
                   : (th ? `มูลค่าพอร์ต vs. ${commonBench.labelTh}` : `Portfolio value vs. ${commonBench.labelEn}`)}</h3>
               <div className="muted" style={{ fontSize: 12, marginTop: 4 }}>
                 <span className="dot" style={{ background: "var(--ink)" }} /> {dataState === "live" && snapSeries && chartMode === "value" ? (th ? "มูลค่าตลาด" : "Market value") : (th ? "พอร์ตของคุณ" : "Your portfolio")}
@@ -687,7 +698,7 @@ function AnalyticsCommon({ t, lang, ccy, rows, totalValue, totalPL, totalPlPct, 
             series={dataState === "live" ? (snapSeries || liveSeries) : series}
             height={340}
             fmt={dataState === "live" && snapSeries && chartMode === "pct"
-              ? (v => (v >= 100 ? "+" : "") + (v - 100).toFixed(0) + "%")
+              ? (v => (v >= 100 ? "+" : "") + (v - 100).toFixed(1) + "%")
               : (v => FMT.money(v, ccy, { compact: true }))} />
         </div>
       )}
