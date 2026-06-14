@@ -546,14 +546,21 @@ function AnalyticsCommon({ t, lang, ccy, rows, totalValue, totalPL, totalPlPct, 
     }
     const w = snaps.filter(s => s.date >= from)
     const windowed = w.length >= 2 ? w : snaps
-    // Drop snapshots where day-over-day portfolio ratio jumps >50% — data artifact
-    // (even a crypto-heavy portfolio rarely moves ±50% in a single day)
+    // Drop data-artifact snapshots: day-over-day jump >50%, or isolated spike
+    // (point >15% above both neighbors — catches bad Yahoo Finance prices)
+    const wr = windowed.map(s => Number(s.total_cost) > 0 ? Number(s.total_value) / Number(s.total_cost) : null)
     return windowed.filter((s, i) => {
-      if (i === 0) return true
-      const prev = windowed[i - 1]
-      const pi = Number(prev.total_cost) > 0 ? Number(prev.total_value) / Number(prev.total_cost) : null
-      const ci = Number(s.total_cost) > 0 ? Number(s.total_value) / Number(s.total_cost) : null
-      return pi == null || ci == null || pi === 0 || Math.abs(ci / pi - 1) <= 0.50
+      const ci = wr[i]
+      if (ci == null) return true
+      if (i > 0) {
+        const pi = wr[i - 1]
+        if (pi != null && pi > 0 && Math.abs(ci / pi - 1) > 0.50) return false
+      }
+      if (i > 0 && i < windowed.length - 1) {
+        const pi = wr[i - 1], ni = wr[i + 1]
+        if (pi != null && ni != null && pi > 0 && ni > 0 && ci > pi * 1.15 && ci > ni * 1.15) return false
+      }
+      return true
     })
   }, [snaps, chartPeriod, periodDaysMap])
 
@@ -1982,13 +1989,20 @@ function AnalyticsGrowth({ t, lang, ccy, rows = [], fxRate = 36, totalValue, tot
     const fromTs = Date.now() - days * 86400000
     let w = snaps.filter(s => new Date(s.date).getTime() >= fromTs)
     if (w.length < 2) w = snaps
-    // Drop snapshots where day-over-day portfolio ratio jumps >50% — data artifact
+    // Drop data-artifact snapshots: day-over-day jump >50%, or isolated spike
+    const wr2 = w.map(s => Number(s.total_cost) > 0 ? Number(s.total_value) / Number(s.total_cost) : null)
     w = w.filter((s, i) => {
-      if (i === 0) return true
-      const prev = w[i - 1]
-      const pi = Number(prev.total_cost) > 0 ? Number(prev.total_value) / Number(prev.total_cost) : null
-      const ci = Number(s.total_cost) > 0 ? Number(s.total_value) / Number(s.total_cost) : null
-      return pi == null || ci == null || pi === 0 || Math.abs(ci / pi - 1) <= 0.50
+      const ci = wr2[i]
+      if (ci == null) return true
+      if (i > 0) {
+        const pi = wr2[i - 1]
+        if (pi != null && pi > 0 && Math.abs(ci / pi - 1) > 0.50) return false
+      }
+      if (i > 0 && i < w.length - 1) {
+        const pi = wr2[i - 1], ni = wr2[i + 1]
+        if (pi != null && ni != null && pi > 0 && ni > 0 && ci > pi * 1.15 && ci > ni * 1.15) return false
+      }
+      return true
     })
     if (w.length < 2) return null
     const locale = th ? "th-TH" : "en-US"
