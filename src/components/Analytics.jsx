@@ -563,7 +563,7 @@ function AnalyticsCommon({ t, lang, ccy, rows, totalValue, totalPL, totalPlPct, 
     // Drop data-artifact snapshots: day-over-day jump >50%, or isolated spike
     // (point >15% above both neighbors — catches bad Yahoo Finance prices)
     const wr = windowed.map(s => Number(s.total_cost) > 0 ? Number(s.total_value) / Number(s.total_cost) : null)
-    return windowed.filter((s, i) => {
+    const filtered = windowed.filter((s, i) => {
       const ci = wr[i]
       if (ci == null) return true
       if (i > 0) {
@@ -576,7 +576,16 @@ function AnalyticsCommon({ t, lang, ccy, rows, totalValue, totalPL, totalPlPct, 
       }
       return true
     })
-  }, [snaps, chartPeriod, periodDaysMap])
+    // Append today's live value as the last point when the snapshot series ends
+    // before today — so the chart's last point always matches the live KPI.
+    if (totalValue > 0 && totalCost > 0 && filtered.length) {
+      const today = new Date().toISOString().split("T")[0]
+      const last = filtered[filtered.length - 1]
+      if (last.date < today)
+        return [...filtered, { date: today, total_value: totalValue, total_cost: totalCost, _live: true }]
+    }
+    return filtered
+  }, [snaps, chartPeriod, periodDaysMap, totalValue, totalCost])
 
   const labelFor = useMemo(() => {
     const locale = th ? "th-TH" : "en-US"
