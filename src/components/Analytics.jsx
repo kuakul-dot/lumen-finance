@@ -576,13 +576,15 @@ function AnalyticsCommon({ t, lang, ccy, rows, totalValue, totalPL, totalPlPct, 
       }
       return true
     })
-    // Append today's live value as the last point when the snapshot series ends
-    // before today — so the chart's last point always matches the live KPI.
+    // Always make the last chart point the current live value so the tooltip
+    // matches the live portfolio KPI exactly — even if today's snapshot was
+    // already stored earlier (intraday prices would have moved since then).
     if (totalValue > 0 && totalCost > 0 && filtered.length) {
       const today = new Date().toISOString().split("T")[0]
       const last = filtered[filtered.length - 1]
-      if (last.date < today)
-        return [...filtered, { date: today, total_value: totalValue, total_cost: totalCost, _live: true }]
+      const livePoint = { date: today, total_value: totalValue, total_cost: totalCost, _live: true }
+      if (last.date < today)  return [...filtered, livePoint]
+      if (last.date === today) return [...filtered.slice(0, -1), livePoint]
     }
     return filtered
   }, [snaps, chartPeriod, periodDaysMap, totalValue, totalCost])
