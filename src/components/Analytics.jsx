@@ -26,6 +26,60 @@ export function AnalyticsPage({ t, lang, ccy, dataState, liveHoldings = [], pric
     return () => { cancelled = true }
   }, [dataState, portfolio?.id])
 
+  // ── Silent auto-rebuild when snapshots are stale ──────────────────────────────
+  // If the most recent snapshot is >5 days old (gap between last rebuild and
+  // today's live data), silently re-run the full backfill so the chart stays
+  // smooth and up-to-date without the user having to visit the Metrics tab.
+  const autoRebuildDoneRef = useRef(false)
+  useEffect(() => {
+    if (dataState !== "live" || !portfolio?.id || autoRebuildDoneRef.current) return
+    if (transactions.length === 0 || liveHoldings.length === 0) return
+    let cancelled = false
+    getSnapshots(portfolio.id).then(async snaps => {
+      if (cancelled || autoRebuildDoneRef.current) return
+      const lastDate = snaps[snaps.length - 1]?.date
+      const daysSinceLast = lastDate
+        ? Math.floor((Date.now() - new Date(lastDate + 'T12:00:00Z').getTime()) / 86400000)
+        : 999
+      if (daysSinceLast < 5) return   // fresh enough — skip
+      autoRebuildDoneRef.current = true
+      try {
+        const txs = transactions
+        const ccyByTicker = {}
+        for (const tx of txs) {
+          const tk = (tx.ticker || '').toUpperCase()
+          if (tk && !ccyByTicker[tk]) ccyByTicker[tk] = tx.currency || 'THB'
+        }
+        const tickers = Object.keys(ccyByTicker)
+        const spanDays = (Date.now() - new Date(txs[0].transacted_at)) / 86400000
+        const range = spanDays > 365 * 2 ? '5y' : spanDays > 365 ? '2y' : spanDays > 180 ? '1y'
+                    : spanDays > 90 ? '6mo' : spanDays > 30 ? '3mo' : '1mo'
+        const seriesByTicker = {}
+        await Promise.all(tickers.map(async tk => {
+          const region = ccyByTicker[tk] === 'USD' ? 'US' : 'TH'
+          const sym = toYahooSymbol(tk, region, 'Equity')
+          const h = await fetchHistory(sym, range).catch(() => ({ series: [] }))
+          seriesByTicker[tk] = (h?.series || []).map(p => ({ d: new Date(p.t * 1000).toISOString().split('T')[0], c: p.c }))
+        }))
+        const fxByDate = {}
+        if (Object.values(ccyByTicker).some(c => c === 'USD')) {
+          const fxH = await fetchHistory('USDTHB=X', range).catch(() => ({ series: [] }))
+          for (const p of (fxH?.series || []))
+            fxByDate[new Date(p.t * 1000).toISOString().split('T')[0]] = p.c
+        }
+        const series = buildSnapshotSeries(txs, seriesByTicker, ccyByTicker, fxRate, fxByDate)
+        if (series.length && !cancelled) {
+          await deleteAllSnapshots(portfolio.id)
+          await upsertSnapshots(portfolio.id, series)
+          if (!cancelled) bumpSnapsVersion()
+        }
+      } catch (err) {
+        console.warn('[Lumen] auto-rebuild:', err?.message)
+      }
+    }).catch(() => {})
+    return () => { cancelled = true }
+  }, [dataState, portfolio?.id, transactions, liveHoldings, fxRate, bumpSnapsVersion])
+
   // ── Proactively count pending (unsynced) dividends for the tab badge ─────────
   // Runs when transactions load. Reuses the same /api/dividends endpoint that the
   // full Sync uses, so results are consistent. Count resets to 0 after a sync
@@ -2366,13 +2420,18 @@ function AnalyticsMetrics({ t, lang, ccy, rows = [], totalValue = 0, totalPL = 0
     }
   }, [portfolio?.id, fxRate, th, onSnapsRebuild])
 
-  // Auto-trigger backfill once when the Metrics tab first opens with no snapshot data
+  // Auto-trigger backfill when Metrics tab opens and data is missing or stale (>5 days)
   const autoFilled = useRef(false)
   useEffect(() => {
-    if (!isLive || autoFilled.current || backfilling || snaps.length > 0) return
+    if (!isLive || autoFilled.current || backfilling) return
+    const lastDate = snaps[snaps.length - 1]?.date
+    const daysSinceLast = lastDate
+      ? Math.floor((Date.now() - new Date(lastDate + 'T12:00:00Z').getTime()) / 86400000)
+      : 999
+    if (snaps.length > 0 && daysSinceLast < 5) return
     autoFilled.current = true
     handleBackfill()
-  }, [isLive, snaps.length, backfilling, handleBackfill])
+  }, [isLive, snaps, backfilling, handleBackfill])
 
   // History-based metrics from the value/cost ratio index:
   // the ratio tracks market price performance; daily chain-linked returns
