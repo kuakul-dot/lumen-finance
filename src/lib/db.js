@@ -401,18 +401,25 @@ export function buildSnapshotSeries(transactions, seriesByTicker, ccyByTicker, f
   // Detect isolated spikes: price jumps >30% vs prev AND reverts >20% next day
   // while prev→next is <15% — clear artifact; replace with previous valid price.
   const cleanedSeries = {}
+  const priceFixes = {}
   for (const tk in seriesByTicker) {
     const s = seriesByTicker[tk]
     if (!s || s.length < 3) { cleanedSeries[tk] = s; continue }
     const arr = s.map(p => ({ ...p }))   // shallow copy — don't mutate original
+    let fixes = 0
     for (let i = 1; i < arr.length - 1; i++) {
       const prev = arr[i - 1].c, curr = arr[i].c, next = arr[i + 1].c
       if (prev <= 0 || curr <= 0 || next <= 0) continue
       const fwd = Math.abs(curr / prev - 1)
       const bk  = Math.abs(next / curr - 1)
       const thru = Math.abs(next / prev - 1)
-      if (fwd > 0.30 && bk > 0.20 && thru < 0.15) arr[i] = { ...arr[i], c: prev }
+      if (fwd > 0.30 && bk > 0.20 && thru < 0.15) {
+        console.warn(`[Lumen] snapshot: bad price for ${tk} on ${arr[i].d} (${curr.toFixed(2)} vs prev ${prev.toFixed(2)}, +${(fwd*100).toFixed(1)}%) — replaced`)
+        arr[i] = { ...arr[i], c: prev }
+        fixes++
+      }
     }
+    if (fixes) priceFixes[tk] = fixes
     cleanedSeries[tk] = arr
   }
 
@@ -465,10 +472,18 @@ export function buildSnapshotSeries(transactions, seriesByTicker, ccyByTicker, f
   // Deviation so the threshold adapts to actual portfolio volatility: genuine
   // multi-day market moves (crash, rally) shift the local median with them and
   // are preserved; single-day data artifacts stand out and are removed.
-  return hampelFilter(rows)
+  const filtered = hampelFilter(rows, 7, 3.0, true)
+  const ratios = filtered.map(r => r.total_value / r.total_cost)
+  const minR = Math.min(...ratios), maxR = Math.max(...ratios)
+  console.log(
+    `[Lumen] snapshot built: ${filtered.length} rows (${rows.length - filtered.length} removed by Hampel)` +
+    ` | ratio range ${(minR*100-100).toFixed(1)}% – ${(maxR*100-100).toFixed(1)}%` +
+    (Object.keys(priceFixes).length ? ` | price fixes: ${JSON.stringify(priceFixes)}` : '')
+  )
+  return filtered
 }
 
-function hampelFilter(rows, halfWindow = 7, nsigma = 3.0) {
+function hampelFilter(rows, halfWindow = 7, nsigma = 3.0, verbose = false) {
   if (rows.length < 3) return rows
   const ratios = rows.map(r => r.total_value / r.total_cost)
   return rows.filter((_, i) => {
@@ -479,7 +494,10 @@ function hampelFilter(rows, halfWindow = 7, nsigma = 3.0) {
     const med = sorted[Math.floor(sorted.length / 2)]
     const mad = sorted.map(v => Math.abs(v - med)).sort((a, b) => a - b)[Math.floor(sorted.length / 2)]
     const sigma = 1.4826 * mad   // consistent estimator of std deviation
-    return sigma < 1e-8 || Math.abs(ratios[i] - med) <= nsigma * sigma
+    const keep = sigma < 1e-8 || Math.abs(ratios[i] - med) <= nsigma * sigma
+    if (!keep && verbose)
+      console.warn(`[Lumen] snapshot: Hampel removed ${rows[i].date} ratio=${(ratios[i]*100-100).toFixed(2)}% (median=${(med*100-100).toFixed(2)}%, sigma=${(sigma*100).toFixed(3)}%)`)
+    return keep
   })
 }
 
