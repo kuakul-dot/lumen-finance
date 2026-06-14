@@ -2360,6 +2360,7 @@ function AnalyticsMetrics({ t, lang, ccy, rows = [], totalValue = 0, totalPL = 0
   const [snaps, setSnaps] = useState([])
   const [backfilling, setBackfilling] = useState(false)
   const [backfillMsg, setBackfillMsg] = useState(null)
+  const [showInspect, setShowInspect] = useState(false)
 
   // Load the daily value series (recorded by App once per day)
   useEffect(() => {
@@ -2714,6 +2715,85 @@ function AnalyticsMetrics({ t, lang, ccy, rows = [], totalValue = 0, totalPL = 0
               {backfillMsg}
             </div>
           )}
+
+          {snaps.length > 0 && (() => {
+            const ratios = snaps.map(s => Number(s.total_value) / Number(s.total_cost))
+            // Detect outliers using same Hampel logic as buildSnapshotSeries
+            const isOutlier = ratios.map((r, i) => {
+              const lo = Math.max(0, i - 7), hi = Math.min(ratios.length - 1, i + 7)
+              const win = ratios.slice(lo, hi + 1).sort((a, b) => a - b)
+              const med = win[Math.floor(win.length / 2)]
+              const mad = win.map(v => Math.abs(v - med)).sort((a, b) => a - b)[Math.floor(win.length / 2)]
+              const sigma = 1.4826 * mad
+              return sigma >= 1e-8 && Math.abs(r - med) > 3.0 * sigma
+            })
+            const outlierCount = isOutlier.filter(Boolean).length
+            const minR = Math.min(...ratios), maxR = Math.max(...ratios)
+            const first = snaps[0]?.date, last = snaps[snaps.length - 1]?.date
+            return (
+              <div style={{ marginBottom: 14 }}>
+                <button
+                  onClick={() => setShowInspect(v => !v)}
+                  style={{ background: "none", border: "none", padding: 0, cursor: "pointer",
+                           fontSize: 12, color: "var(--ink-3)", fontFamily: "inherit",
+                           display: "flex", alignItems: "center", gap: 6 }}
+                >
+                  <Icon name={showInspect ? "chevron-down" : "chevron-right"} size={12} />
+                  {th ? "ตรวจสอบข้อมูล Snapshot" : "Inspect snapshot data"}
+                  <span style={{ color: outlierCount > 0 ? "var(--loss)" : "var(--gain)", fontWeight: 600 }}>
+                    {outlierCount > 0 ? ` ⚠ ${outlierCount} outlier${outlierCount > 1 ? "s" : ""}` : " ✓ clean"}
+                  </span>
+                </button>
+                {showInspect && (
+                  <div style={{ marginTop: 10 }}>
+                    <div style={{ fontSize: 11, color: "var(--ink-3)", marginBottom: 8, display: "flex", gap: 24 }}>
+                      <span>{th ? "จำนวน" : "Count"}: <b>{snaps.length}</b></span>
+                      <span>{th ? "ช่วงวันที่" : "Range"}: <b>{first} → {last}</b></span>
+                      <span>{th ? "ช่วง ratio" : "Ratio range"}: <b>{((minR-1)*100).toFixed(1)}% → {((maxR-1)*100).toFixed(1)}%</b></span>
+                    </div>
+                    <div style={{ maxHeight: 260, overflowY: "auto", borderRadius: 8,
+                                  border: "1px solid var(--line)", fontSize: 11 }}>
+                      <table style={{ width: "100%", borderCollapse: "collapse" }}>
+                        <thead>
+                          <tr style={{ background: "var(--bg-2)", position: "sticky", top: 0 }}>
+                            <th style={{ padding: "6px 10px", textAlign: "left", color: "var(--ink-3)", fontWeight: 500 }}>Date</th>
+                            <th style={{ padding: "6px 10px", textAlign: "right", color: "var(--ink-3)", fontWeight: 500 }}>Value (฿)</th>
+                            <th style={{ padding: "6px 10px", textAlign: "right", color: "var(--ink-3)", fontWeight: 500 }}>Cost (฿)</th>
+                            <th style={{ padding: "6px 10px", textAlign: "right", color: "var(--ink-3)", fontWeight: 500 }}>Return</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {snaps.map((s, i) => {
+                            const ratio = ratios[i]
+                            const pct = ((ratio - 1) * 100).toFixed(2) + "%"
+                            const bad = isOutlier[i]
+                            return (
+                              <tr key={s.date} style={{ borderTop: "1px solid var(--line)",
+                                                        background: bad ? "rgba(var(--loss-rgb,220,50,50),0.08)" : "transparent" }}>
+                                <td style={{ padding: "4px 10px", color: bad ? "var(--loss)" : "var(--ink-2)", fontFamily: "var(--font-mono)" }}>
+                                  {bad ? "⚠ " : ""}{s.date}
+                                </td>
+                                <td style={{ padding: "4px 10px", textAlign: "right", fontFamily: "var(--font-mono)" }}>
+                                  {Number(s.total_value).toLocaleString("th-TH", { maximumFractionDigits: 0 })}
+                                </td>
+                                <td style={{ padding: "4px 10px", textAlign: "right", fontFamily: "var(--font-mono)", color: "var(--ink-3)" }}>
+                                  {Number(s.total_cost).toLocaleString("th-TH", { maximumFractionDigits: 0 })}
+                                </td>
+                                <td style={{ padding: "4px 10px", textAlign: "right", fontFamily: "var(--font-mono)",
+                                             color: bad ? "var(--loss)" : ratio >= 1 ? "var(--gain)" : "var(--loss)", fontWeight: bad ? 700 : 400 }}>
+                                  {ratio >= 1 ? "+" : ""}{pct}
+                                </td>
+                              </tr>
+                            )
+                          })}
+                        </tbody>
+                      </table>
+                    </div>
+                  </div>
+                )}
+              </div>
+            )
+          })()}
 
           {!histMetrics.ready ? (
             <div style={{ padding: "16px 0", color: "var(--ink-3)", fontSize: 13, display: "flex", alignItems: "center", gap: 8 }}>
