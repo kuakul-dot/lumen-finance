@@ -485,7 +485,8 @@ export function ToolsPage({ t, lang, ccy, dataState, liveHoldings = [], prices =
   // decimals; Thai SET stocks trade whole shares → floor to integer.
   // GoldTH is fractional because gold shops sell ½ บาท, สลึง (¼ บาท), etc.
   const sizeShares = (cash, priceTHB, region, cls) => {
-    if (priceTHB <= 0) return 0
+    if (!Number.isFinite(priceTHB) || priceTHB <= 0) return 0
+    if (!Number.isFinite(cash) || cash <= 0) return 0
     const raw = cash / priceTHB
     return (region === "US" || cls === "GoldTH") ? Math.floor(raw * 1e4) / 1e4 : Math.floor(raw)
   }
@@ -519,14 +520,16 @@ export function ToolsPage({ t, lang, ccy, dataState, liveHoldings = [], prices =
       // PASS 1A: sell excess above each holding's within-class target
       for (const c of rich) {
         if (remaining <= 0) break
+        const cValue = Number.isFinite(c.value) ? c.value : 0
         const holdingTargetTHB = (c.withinClassTarget / 100) * classTargetTHB
-        const maxSellTHB = Math.max(0, c.value - holdingTargetTHB)
+        const maxSellTHB = Math.max(0, cValue - holdingTargetTHB)
         if (maxSellTHB < c.price) continue  // less than 1 share of headroom → skip
         const wantedTHB = Math.min(remaining, maxSellTHB)
         const held = Math.max(0, Number(c.shares) || 0)
         const shares = Math.min(sizeShares(wantedTHB, c.price, c.region, c.cls), held)
-        if (shares <= 0) continue
+        if (!Number.isFinite(shares) || shares <= 0) continue
         const amount = shares * c.price
+        if (!Number.isFinite(amount)) continue
         soldShares[c.ticker] = (soldShares[c.ticker] || 0) + shares
         out.push({
           action: "Sell", ticker: c.ticker, name: c.name,
@@ -541,15 +544,17 @@ export function ToolsPage({ t, lang, ccy, dataState, liveHoldings = [], prices =
 
       // PASS 1B: residual proportional trim (class grew uniformly — no within-class drift)
       if (remaining > 1) {
-        const classTotal = rich.reduce((sum, c) => sum + c.value, 0)
+        const classTotal = rich.reduce((sum, c) => sum + (Number.isFinite(c.value) ? c.value : 0), 0)
         for (const c of rich) {
           if (remaining <= 0) break
+          const cValue = Number.isFinite(c.value) ? c.value : 0
           const heldAfter1A = Math.max(0, (Number(c.shares) || 0) - (soldShares[c.ticker] || 0))
           if (heldAfter1A <= 0) continue
-          const proportionalTHB = classTotal > 0 ? (c.value / classTotal) * remaining : 0
+          const proportionalTHB = classTotal > 0 ? (cValue / classTotal) * remaining : 0
           const shares = Math.min(sizeShares(Math.min(proportionalTHB, remaining), c.price, c.region, c.cls), heldAfter1A)
-          if (shares <= 0) continue
+          if (!Number.isFinite(shares) || shares <= 0) continue
           const amount = shares * c.price
+          if (!Number.isFinite(amount)) continue
           const existing = out.find(t => t.action === "Sell" && t.ticker === c.ticker && t.cls === s.name)
           if (existing) {
             existing.shares += shares
