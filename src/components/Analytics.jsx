@@ -785,6 +785,18 @@ function AnalyticsCommon({ t, lang, ccy, rows, totalValue, totalPL, totalPlPct, 
         </div>
       )}
 
+      {livePerformers.length >= 2 && totalCost > 0 && (
+        <div className="card" style={{ marginBottom: 16 }}>
+          <h3 className="section-title" style={{ marginBottom: 4 }}>
+            {th ? "Attribution — การมีส่วนร่วมต่อผลตอบแทน" : "Performance attribution"}
+          </h3>
+          <div className="muted" style={{ fontSize: 11, marginBottom: 16 }}>
+            {th ? "แต่ละหลักทรัพย์มีส่วนร่วมต่อผลตอบแทนรวมกี่ percentage point (pp)" : "Each holding's contribution to total portfolio return (percentage points)"}
+          </div>
+          <AttributionChart rows={livePerformers} totalCost={totalCost} totalPlPct={totalPlPct} ccy={ccy} th={th} />
+        </div>
+      )}
+
       {(() => {
         // Demo mode: keep old behavior (no positive/negative split)
         // Live mode: filter — Top = gainers only (plPct > 0), Under = losers only (plPct < 0)
@@ -850,6 +862,53 @@ function PerfRow({ r, ccy }) {
           {r.pl >= 0 ? "+" : ""}{FMT.money(r.pl, ccy, { compact: true })}
         </div>
         <Delta value={r.plPct} size={11} />
+      </div>
+    </div>
+  )
+}
+
+function AttributionChart({ rows, totalCost, totalPlPct, ccy, th }) {
+  const FMT = LUMEN_FMT
+  const attributed = useMemo(() => {
+    return [...rows]
+      .map(r => ({ ...r, contrib: totalCost > 0 ? (r.pl / totalCost) * 100 : 0 }))
+      .sort((a, b) => b.contrib - a.contrib)
+  }, [rows, totalCost])
+  const maxAbs = useMemo(() => Math.max(...attributed.map(r => Math.abs(r.contrib)), 0.01), [attributed])
+  return (
+    <div style={{ display: "grid", gap: 10 }}>
+      {attributed.map(r => {
+        const isPos = r.contrib >= 0
+        const barPct = Math.abs(r.contrib) / maxAbs * 50
+        return (
+          <div key={r.ticker} style={{ display: "grid", gridTemplateColumns: "28px 60px 1fr 68px 80px", gap: 10, alignItems: "center" }}>
+            <TickerLogo ticker={r.ticker} logoUrl={r.logo_url} region={r.region} cls={r.cls} size={24} />
+            <span style={{ fontWeight: 600, fontSize: 12, fontFamily: "var(--font-mono)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+              {r.ticker}
+            </span>
+            <div style={{ position: "relative", height: 8, background: "var(--bg-2)", borderRadius: 99 }}>
+              <div style={{
+                position: "absolute", top: 0, bottom: 0, borderRadius: 99,
+                background: isPos ? "var(--gain)" : "var(--loss)",
+                width: `${barPct}%`,
+                ...(isPos ? { left: "50%" } : { right: "50%" }),
+              }} />
+              <div style={{ position: "absolute", left: "50%", top: 0, bottom: 0, width: 1, background: "var(--line-2)" }} />
+            </div>
+            <div className="mono" style={{ fontSize: 12, textAlign: "right", fontWeight: 700, color: isPos ? "var(--gain)" : "var(--loss)" }}>
+              {isPos ? "+" : ""}{r.contrib.toFixed(2)}pp
+            </div>
+            <div className="mono" style={{ fontSize: 11, textAlign: "right", color: "var(--ink-3)" }}>
+              {r.pl >= 0 ? "+" : ""}{FMT.money(r.pl, ccy, { compact: true })}
+            </div>
+          </div>
+        )
+      })}
+      <div style={{ marginTop: 8, paddingTop: 12, borderTop: "1px solid var(--line)", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+        <span className="muted" style={{ fontSize: 12 }}>{th ? "ผลตอบแทนรวม" : "Total return"}</span>
+        <span className="mono" style={{ fontWeight: 700, fontSize: 14, color: totalPlPct >= 0 ? "var(--gain)" : "var(--loss)" }}>
+          {totalPlPct >= 0 ? "+" : ""}{totalPlPct.toFixed(2)}%
+        </span>
       </div>
     </div>
   )
