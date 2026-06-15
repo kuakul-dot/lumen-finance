@@ -505,18 +505,29 @@ export function ToolsPage({ t, lang, ccy, dataState, liveHoldings = [], prices =
       })
     }
 
-    // ── PASS 1: compute sells (unlimited by budget) ───────────────────────────
+    // ── PASS 1: compute sells (respects within-class targets) ────────────────
+    // 1A: trim only the portion above within-class target (most overweight first)
+    // 1B: if class is still overweight after 1A (all holdings grew proportionally),
+    //     do a proportional trim across all holdings to cover the residual
     const sellSuggestions = suggestions.filter(s => s.name !== "Cash" && s.delta < 0 && Math.abs(s.curPct - s.tgtPct) >= effectiveBand(s.tgtPct) && allowSales)
     sellSuggestions.forEach(s => {
       const rich = enrichCandidates(s.candidates || [], s).sort((a, b) => b.drift - a.drift)
       let remaining = Math.abs(s.delta)
+      const classTargetTHB = newTotal * s.tgt
+      const soldShares = {}  // ticker → shares already queued in 1A
+
+      // PASS 1A: sell excess above each holding's within-class target
       for (const c of rich) {
         if (remaining <= 0) break
-        const wanted = sizeShares(remaining, c.price, c.region, c.cls)
-        const held   = Math.max(0, Number(c.shares) || 0)
-        const shares = Math.min(wanted, held)
+        const holdingTargetTHB = (c.withinClassTarget / 100) * classTargetTHB
+        const maxSellTHB = Math.max(0, c.value - holdingTargetTHB)
+        if (maxSellTHB < c.price) continue  // less than 1 share of headroom → skip
+        const wantedTHB = Math.min(remaining, maxSellTHB)
+        const held = Math.max(0, Number(c.shares) || 0)
+        const shares = Math.min(sizeShares(wantedTHB, c.price, c.region, c.cls), held)
         if (shares <= 0) continue
         const amount = shares * c.price
+        soldShares[c.ticker] = (soldShares[c.ticker] || 0) + shares
         out.push({
           action: "Sell", ticker: c.ticker, name: c.name,
           shares, priceNative: c.priceNative, nativeCcy: c.nativeCcy,
@@ -526,6 +537,35 @@ export function ToolsPage({ t, lang, ccy, dataState, liveHoldings = [], prices =
           peers: rich.filter(x => x.ticker !== c.ticker).map(x => ({ ticker: x.ticker, withinClassPct: +x.withinClassPct.toFixed(1) })),
         })
         remaining -= amount
+      }
+
+      // PASS 1B: residual proportional trim (class grew uniformly — no within-class drift)
+      if (remaining > 1) {
+        const classTotal = rich.reduce((sum, c) => sum + c.value, 0)
+        for (const c of rich) {
+          if (remaining <= 0) break
+          const heldAfter1A = Math.max(0, (Number(c.shares) || 0) - (soldShares[c.ticker] || 0))
+          if (heldAfter1A <= 0) continue
+          const proportionalTHB = classTotal > 0 ? (c.value / classTotal) * remaining : 0
+          const shares = Math.min(sizeShares(Math.min(proportionalTHB, remaining), c.price, c.region, c.cls), heldAfter1A)
+          if (shares <= 0) continue
+          const amount = shares * c.price
+          const existing = out.find(t => t.action === "Sell" && t.ticker === c.ticker && t.cls === s.name)
+          if (existing) {
+            existing.shares += shares
+            existing.amount += amount
+          } else {
+            out.push({
+              action: "Sell", ticker: c.ticker, name: c.name,
+              shares, priceNative: c.priceNative, nativeCcy: c.nativeCcy,
+              amount, cls: s.name, region: c.region, logoUrl: c.logo_url, assetClass: c.cls,
+              withinClassPct: +c.withinClassPct.toFixed(1), withinClassTarget: +c.withinClassTarget.toFixed(1),
+              plPct: c.plPct != null ? +c.plPct.toFixed(1) : null,
+              peers: rich.filter(x => x.ticker !== c.ticker).map(x => ({ ticker: x.ticker, withinClassPct: +x.withinClassPct.toFixed(1) })),
+            })
+          }
+          remaining -= amount
+        }
       }
     })
 
