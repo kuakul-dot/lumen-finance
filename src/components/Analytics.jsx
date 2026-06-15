@@ -869,45 +869,141 @@ function PerfRow({ r, ccy }) {
 
 function AttributionChart({ rows, totalCost, totalPlPct, ccy, th }) {
   const FMT = LUMEN_FMT
-  const attributed = useMemo(() => {
-    return [...rows]
-      .map(r => ({ ...r, contrib: totalCost > 0 ? (r.pl / totalCost) * 100 : 0 }))
-      .sort((a, b) => b.contrib - a.contrib)
-  }, [rows, totalCost])
-  const maxAbs = useMemo(() => Math.max(...attributed.map(r => Math.abs(r.contrib)), 0.01), [attributed])
+  const [filter, setFilter]   = useState("all")
+  const [sortKey, setSortKey] = useState("contrib")
+  const [sortDir, setSortDir] = useState("desc")
+
+  const withContrib = useMemo(() =>
+    rows.map(r => ({ ...r, contrib: totalCost > 0 ? (r.pl / totalCost) * 100 : 0 }))
+  , [rows, totalCost])
+
+  // Build filter categories from actual holdings only
+  const categories = useMemo(() => {
+    const has = (cls)         => withContrib.some(r => r.cls === cls)
+    const hasRC = (cls, reg)  => withContrib.some(r => r.cls === cls && r.region === reg)
+    const cats = [{ key: "all", label: th ? "ทั้งหมด" : "All" }]
+    if (hasRC("Equity", "TH"))            cats.push({ key: "th_eq",  label: th ? "หุ้นไทย"   : "TH Equity" })
+    if (hasRC("Equity", "US"))            cats.push({ key: "us_eq",  label: th ? "หุ้น US"   : "US Equity" })
+    if (has("GoldTH") || has("Commodity"))cats.push({ key: "gold",   label: th ? "ทอง"       : "Gold"      })
+    if (has("Crypto"))                    cats.push({ key: "crypto", label: "Crypto"                         })
+    if (has("Bond"))                      cats.push({ key: "bond",   label: th ? "พันธบัตร"  : "Bond"      })
+    if (has("MutualFund"))                cats.push({ key: "mf",     label: th ? "กองทุน"    : "Fund"      })
+    return cats
+  }, [withContrib, th])
+
+  const filtered = useMemo(() => withContrib.filter(r => {
+    if (filter === "all")    return true
+    if (filter === "th_eq")  return r.cls === "Equity"   && r.region === "TH"
+    if (filter === "us_eq")  return r.cls === "Equity"   && r.region === "US"
+    if (filter === "gold")   return r.cls === "GoldTH"   || r.cls === "Commodity"
+    if (filter === "crypto") return r.cls === "Crypto"
+    if (filter === "bond")   return r.cls === "Bond"
+    if (filter === "mf")     return r.cls === "MutualFund"
+    return true
+  }), [withContrib, filter])
+
+  const sorted = useMemo(() =>
+    [...filtered].sort((a, b) => {
+      const av = a[sortKey] ?? 0, bv = b[sortKey] ?? 0
+      return sortDir === "desc" ? bv - av : av - bv
+    })
+  , [filtered, sortKey, sortDir])
+
+  const maxAbs = useMemo(() => Math.max(...sorted.map(r => Math.abs(r.contrib)), 0.01), [sorted])
+  const filteredContrib = filtered.reduce((s, r) => s + r.contrib, 0)
+  const isFiltered = filter !== "all"
+
+  const toggleSort = key => {
+    if (sortKey === key) setSortDir(d => d === "desc" ? "asc" : "desc")
+    else { setSortKey(key); setSortDir("desc") }
+  }
+
+  const SORT_OPTS = [
+    { key: "contrib", label: "pp"                        },
+    { key: "plPct",   label: "P/L%"                      },
+    { key: "value",   label: th ? "มูลค่า" : "Value"    },
+  ]
+
+  const chipStyle = active => ({
+    fontSize: 11, padding: "4px 10px", borderRadius: 99, cursor: "pointer",
+    border: active ? "1.5px solid var(--ink)" : "1px solid var(--line)",
+    background: active ? "var(--ink)" : "transparent",
+    color: active ? "var(--bg)" : "var(--ink-2)",
+    fontWeight: active ? 700 : 400,
+    fontFamily: "var(--font-mono)",
+  })
+
+  const sortBtnStyle = active => ({
+    padding: "4px 8px", borderRadius: 6, fontSize: 11, cursor: "pointer",
+    border: "1px solid var(--line)",
+    background: active ? "var(--ink)" : "var(--bg)",
+    color: active ? "var(--bg)" : "var(--ink-2)",
+    fontWeight: active ? 700 : 400,
+    display: "flex", alignItems: "center", gap: 3,
+  })
+
   return (
-    <div style={{ display: "grid", gap: 10 }}>
-      {attributed.map(r => {
-        const isPos = r.contrib >= 0
-        const barPct = Math.abs(r.contrib) / maxAbs * 50
-        return (
-          <div key={r.ticker} style={{ display: "grid", gridTemplateColumns: "28px 60px 1fr 68px 80px", gap: 10, alignItems: "center" }}>
-            <TickerLogo ticker={r.ticker} logoUrl={r.logo_url} region={r.region} cls={r.cls} size={24} />
-            <span style={{ fontWeight: 600, fontSize: 12, fontFamily: "var(--font-mono)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-              {r.ticker}
-            </span>
-            <div style={{ position: "relative", height: 8, background: "var(--bg-2)", borderRadius: 99 }}>
-              <div style={{
-                position: "absolute", top: 0, bottom: 0, borderRadius: 99,
-                background: isPos ? "var(--gain)" : "var(--loss)",
-                width: `${barPct}%`,
-                ...(isPos ? { left: "50%" } : { right: "50%" }),
-              }} />
-              <div style={{ position: "absolute", left: "50%", top: 0, bottom: 0, width: 1, background: "var(--line-2)" }} />
+    <div>
+      {/* Controls */}
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 14, gap: 12, flexWrap: "wrap" }}>
+        <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
+          {categories.map(c => (
+            <button key={c.key} onClick={() => setFilter(c.key)} style={chipStyle(filter === c.key)}>
+              {c.label}
+            </button>
+          ))}
+        </div>
+        <div style={{ display: "flex", gap: 4, alignItems: "center" }}>
+          <span className="muted" style={{ fontSize: 11, marginRight: 2 }}>{th ? "เรียงตาม" : "Sort:"}</span>
+          {SORT_OPTS.map(o => (
+            <button key={o.key} onClick={() => toggleSort(o.key)} style={sortBtnStyle(sortKey === o.key)}>
+              {o.label}
+              {sortKey === o.key && <span style={{ fontSize: 9 }}>{sortDir === "desc" ? "↓" : "↑"}</span>}
+            </button>
+          ))}
+        </div>
+      </div>
+
+      {/* Rows */}
+      <div style={{ display: "grid", gap: 10 }}>
+        {sorted.map(r => {
+          const isPos = r.contrib >= 0
+          const barPct = Math.abs(r.contrib) / maxAbs * 50
+          return (
+            <div key={r.ticker} style={{ display: "grid", gridTemplateColumns: "28px 60px 1fr 68px 80px", gap: 10, alignItems: "center" }}>
+              <TickerLogo ticker={r.ticker} logoUrl={r.logo_url} region={r.region} cls={r.cls} size={24} />
+              <span style={{ fontWeight: 600, fontSize: 12, fontFamily: "var(--font-mono)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                {r.ticker}
+              </span>
+              <div style={{ position: "relative", height: 8, background: "var(--bg-2)", borderRadius: 99 }}>
+                <div style={{
+                  position: "absolute", top: 0, bottom: 0, borderRadius: 99,
+                  background: isPos ? "var(--gain)" : "var(--loss)",
+                  width: `${barPct}%`,
+                  ...(isPos ? { left: "50%" } : { right: "50%" }),
+                }} />
+                <div style={{ position: "absolute", left: "50%", top: 0, bottom: 0, width: 1, background: "var(--line-2)" }} />
+              </div>
+              <div className="mono" style={{ fontSize: 12, textAlign: "right", fontWeight: 700, color: isPos ? "var(--gain)" : "var(--loss)" }}>
+                {isPos ? "+" : ""}{r.contrib.toFixed(2)}pp
+              </div>
+              <div className="mono" style={{ fontSize: 11, textAlign: "right", color: "var(--ink-3)" }}>
+                {r.pl >= 0 ? "+" : ""}{FMT.money(r.pl, ccy, { compact: true })}
+              </div>
             </div>
-            <div className="mono" style={{ fontSize: 12, textAlign: "right", fontWeight: 700, color: isPos ? "var(--gain)" : "var(--loss)" }}>
-              {isPos ? "+" : ""}{r.contrib.toFixed(2)}pp
-            </div>
-            <div className="mono" style={{ fontSize: 11, textAlign: "right", color: "var(--ink-3)" }}>
-              {r.pl >= 0 ? "+" : ""}{FMT.money(r.pl, ccy, { compact: true })}
-            </div>
-          </div>
-        )
-      })}
+          )
+        })}
+      </div>
+
+      {/* Footer */}
       <div style={{ marginTop: 8, paddingTop: 12, borderTop: "1px solid var(--line)", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-        <span className="muted" style={{ fontSize: 12 }}>{th ? "ผลตอบแทนรวม" : "Total return"}</span>
-        <span className="mono" style={{ fontWeight: 700, fontSize: 14, color: totalPlPct >= 0 ? "var(--gain)" : "var(--loss)" }}>
-          {totalPlPct >= 0 ? "+" : ""}{totalPlPct.toFixed(2)}%
+        <span className="muted" style={{ fontSize: 12 }}>
+          {isFiltered ? (th ? "รวมกลุ่มนี้" : "Group total") : (th ? "ผลตอบแทนรวม" : "Total return")}
+        </span>
+        <span className="mono" style={{ fontWeight: 700, fontSize: 14, color: (isFiltered ? filteredContrib : totalPlPct) >= 0 ? "var(--gain)" : "var(--loss)" }}>
+          {isFiltered
+            ? (filteredContrib >= 0 ? "+" : "") + filteredContrib.toFixed(2) + "pp"
+            : (totalPlPct >= 0 ? "+" : "") + totalPlPct.toFixed(2) + "%"}
         </span>
       </div>
     </div>
