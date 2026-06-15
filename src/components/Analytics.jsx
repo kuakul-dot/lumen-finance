@@ -205,6 +205,7 @@ export function AnalyticsPage({ t, lang, ccy, dataState, liveHoldings = [], pric
     { id: "growth",          label: t.analytics.tabs.growth,          icon: "play" },
     { id: "metrics",         label: t.analytics.tabs.metrics,         icon: "info" },
     { id: "tax",             label: t.analytics.tabs.tax,             icon: "receipt" },
+    { id: "health",          label: t.analytics.tabs.health,          icon: "shield" },
   ]
 
   return (
@@ -254,6 +255,7 @@ export function AnalyticsPage({ t, lang, ccy, dataState, liveHoldings = [], pric
       {tab === "growth"          && <AnalyticsGrowth t={t} lang={lang} ccy={ccy} rows={rows} fxRate={fxRate} totalValue={totalValue} totalCost={totalCost} totalPL={totalPL} totalPlPct={totalPlPct} dataState={dataState} earliestHoldingDate={earliestHoldingDate} portfolio={portfolio} snapsVersion={snapsVersion} />}
       {tab === "metrics"         && <AnalyticsMetrics t={t} lang={lang} ccy={ccy} rows={rows} totalValue={totalValue} totalPL={totalPL} totalPlPct={totalPlPct} dataState={dataState} portfolio={portfolio} fxRate={fxRate} onSnapsRebuild={bumpSnapsVersion} />}
       {tab === "tax"             && <AnalyticsTax t={t} lang={lang} ccy={ccy} dataState={dataState} transactions={transactions} fxRate={fxRate} />}
+      {tab === "health"          && <AnalyticsHealth t={t} lang={lang} ccy={ccy} rows={rows} totalValue={totalValue} totalPL={totalPL} totalPlPct={totalPlPct} dataState={dataState} />}
     </div>
   )
 }
@@ -3387,6 +3389,295 @@ function AnalyticsTax({ t, lang, ccy, dataState, transactions = [], fxRate = 36 
           </div>
         )}
       </div>
+    </div>
+  )
+}
+
+/* ─── Health tab ─────────────────────────────────────────────────────────────── */
+const REBAL_TARGETS_KEY  = "lumen_rebalance_targets"
+const REBAL_TICKER_W_KEY = "lumen_rebalance_ticker_weights"
+const REBAL_MODE_KEY     = "lumen_rebalance_mode"
+const REBAL_BAND_KEY     = "lumen_rebalance_band"
+
+const RISK_BY_CLASS = { Cash: 0, Bond: 1, GoldTH: 2, MutualFund: 2.5, Equity: 3, Crypto: 5 }
+const LIQUID_CLASSES = new Set(['Cash', 'Bond', 'MutualFund'])
+
+function healthGrade(score) {
+  if (score >= 85) return 'A'
+  if (score >= 70) return 'B'
+  if (score >= 55) return 'C'
+  return 'D'
+}
+
+function ScoreRing({ score }) {
+  const r = 32, circ = 2 * Math.PI * r
+  const offset = circ * (1 - score / 100)
+  const color = score >= 70 ? 'var(--gain)' : score >= 50 ? 'oklch(0.65 0.15 60)' : 'var(--loss)'
+  return (
+    <div style={{ position: 'relative', width: 80, height: 80, flexShrink: 0 }}>
+      <svg width="80" height="80" viewBox="0 0 80 80" style={{ transform: 'rotate(-90deg)' }}>
+        <circle cx="40" cy="40" r={r} fill="none" stroke="var(--line)" strokeWidth="8" />
+        <circle cx="40" cy="40" r={r} fill="none" stroke={color} strokeWidth="8"
+          strokeDasharray={circ} strokeDashoffset={offset} strokeLinecap="round" />
+      </svg>
+      <div style={{ position: 'absolute', inset: 0, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center' }}>
+        <span style={{ fontSize: 22, fontWeight: 800, lineHeight: 1, color }}>{score}</span>
+        <span style={{ fontSize: 10, color: 'var(--ink-3)', marginTop: 1 }}>/100</span>
+      </div>
+    </div>
+  )
+}
+
+function MetricCard({ icon, name, grade, detail, barPct }) {
+  const gradeColor = grade === 'A' ? { bg: 'oklch(0.95 0.04 160)', txt: 'var(--gain)' }
+    : grade === 'B' ? { bg: 'oklch(0.96 0.06 80)', txt: 'oklch(0.55 0.15 60)' }
+    : { bg: 'oklch(0.96 0.04 25)', txt: 'var(--loss)' }
+  const barColor = grade === 'A' ? 'var(--gain)' : grade === 'B' ? 'oklch(0.65 0.15 60)' : 'var(--loss)'
+  return (
+    <div className="tbl-card" style={{ padding: '14px 14px 12px', borderRadius: 12 }}>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 8 }}>
+        <span style={{ fontSize: 18 }}>{icon}</span>
+        <span style={{ fontSize: 12, fontWeight: 800, padding: '2px 7px', borderRadius: 6, background: gradeColor.bg, color: gradeColor.txt }}>{grade}</span>
+      </div>
+      <div style={{ fontSize: 12, fontWeight: 600, marginBottom: 3 }}>{name}</div>
+      <div style={{ fontSize: 11, color: 'var(--ink-3)', lineHeight: 1.4 }}>{detail}</div>
+      <div style={{ height: 4, background: 'var(--line)', borderRadius: 99, marginTop: 10, overflow: 'hidden' }}>
+        <div style={{ width: `${barPct}%`, height: '100%', background: barColor, borderRadius: 99 }} />
+      </div>
+    </div>
+  )
+}
+
+function AnalyticsHealth({ t, lang, rows = [], totalPlPct = 0, dataState }) {
+  const th = lang === 'th'
+
+  const rebalState = useMemo(() => ({
+    targets: JSON.parse(localStorage.getItem(REBAL_TARGETS_KEY) || '{}'),
+    tickerW: JSON.parse(localStorage.getItem(REBAL_TICKER_W_KEY) || '{}'),
+    mode:    localStorage.getItem(REBAL_MODE_KEY) || 'class',
+    band:    parseFloat(localStorage.getItem(REBAL_BAND_KEY) || '5') || 5,
+  }), [])
+
+  // 1 — Diversification
+  const divScore = useMemo(() => {
+    const classes  = new Set(rows.map(r => r.cls || 'Equity'))
+    const regions  = new Set(rows.map(r => r.region || 'TH'))
+    const base = [0, 20, 45, 65, 80, 90][Math.min(classes.size, 5)]
+    const score = Math.min(100, base + (regions.size >= 2 ? 10 : 0))
+    return { score, nClasses: classes.size, nRegions: regions.size }
+  }, [rows])
+
+  // 2 — Concentration
+  const conScore = useMemo(() => {
+    const sorted     = [...rows].sort((a, b) => b.weight - a.weight)
+    const maxW       = sorted[0]?.weight || 0
+    const top3       = sorted.slice(0, 3).reduce((s, r) => s + r.weight, 0)
+    const score      = Math.round(Math.max(20, 100 - maxW * 1.8) - (top3 > 65 ? 10 : 0))
+    return { score: Math.min(100, score), maxW, top3, topTicker: sorted[0]?.ticker }
+  }, [rows])
+
+  // 3 — Rebalance
+  const rebalScore = useMemo(() => {
+    const { targets, tickerW, mode, band } = rebalState
+    const hasClass  = Object.keys(targets).length > 0
+    const hasTicker = Object.keys(tickerW).length > 0
+    if (!hasClass && !hasTicker) return { score: 75, hasTargets: false, outOfBand: 0, total: 0 }
+
+    const classTotals = {}
+    rows.forEach(r => { const c = r.cls || 'Equity'; classTotals[c] = (classTotals[c] || 0) + r.weight })
+
+    let outOfBand = 0, total = 0
+    if (mode !== 'ticker' && hasClass) {
+      for (const [cls, tgt] of Object.entries(targets)) {
+        total++; if (Math.abs((classTotals[cls] || 0) - tgt) > band) outOfBand++
+      }
+    }
+    if (mode !== 'class' && hasTicker) {
+      for (const r of rows) {
+        const tgt = tickerW[r.ticker]; if (tgt == null) continue
+        total++; if (Math.abs(r.weight - tgt) > band) outOfBand++
+      }
+    }
+    if (total === 0) return { score: 75, hasTargets: true, outOfBand: 0, total: 0 }
+    return { score: Math.round(((total - outOfBand) / total) * 100), hasTargets: true, outOfBand, total }
+  }, [rows, rebalState])
+
+  // 4 — Return
+  const retScore = useMemo(() => {
+    const pos   = rows.filter(r => r.pl >= 0).length
+    const posScore = rows.length > 0 ? (pos / rows.length) * 60 : 0
+    const plScore  = Math.min(40, Math.max(0, (totalPlPct || 0) * 0.8))
+    return { score: Math.round(posScore + plScore), pos, total: rows.length }
+  }, [rows, totalPlPct])
+
+  // 5 — Risk
+  const riskScore = useMemo(() => {
+    const totalW = rows.reduce((s, r) => s + r.weight, 0)
+    const wr = totalW > 0
+      ? rows.reduce((s, r) => s + (RISK_BY_CLASS[r.cls] ?? 3) * r.weight, 0) / totalW
+      : 0
+    const levels = [
+      { max: 1,   score: 70, en: 'Conservative',   th: 'อนุรักษ์' },
+      { max: 2,   score: 80, en: 'Moderate-Low',   th: 'ค่อนข้างอนุรักษ์' },
+      { max: 3,   score: 90, en: 'Moderate',        th: 'สมดุล' },
+      { max: 4,   score: 75, en: 'Moderate-High',  th: 'ค่อนข้างรุนแรง' },
+      { max: Infinity, score: 55, en: 'High Risk',  th: 'รุนแรง' },
+    ]
+    const lv = levels.find(l => wr < l.max)
+    return { score: lv.score, label: th ? lv.th : lv.en, wr }
+  }, [rows, th])
+
+  // 6 — Liquidity
+  const liqScore = useMemo(() => {
+    const liqW = rows.filter(r => LIQUID_CLASSES.has(r.cls)).reduce((s, r) => s + r.weight, 0)
+    const score = liqW >= 25 ? 100 : liqW >= 20 ? 85 : liqW >= 15 ? 70 : liqW >= 10 ? 55 : liqW >= 5 ? 35 : 20
+    return { score, liqW: Math.round(liqW * 10) / 10 }
+  }, [rows])
+
+  const composite = Math.round(
+    divScore.score * 0.20 + conScore.score * 0.20 + rebalScore.score * 0.15 +
+    retScore.score * 0.25 + riskScore.score * 0.10 + liqScore.score * 0.10
+  )
+
+  const overallLabel = composite >= 80 ? (th ? 'พอร์ตสุขภาพดีเยี่ยม' : 'Excellent portfolio health')
+    : composite >= 65 ? (th ? 'พอร์ตสุขภาพดี' : 'Good portfolio health')
+    : composite >= 50 ? (th ? 'พอร์ตควรปรับปรุง' : 'Portfolio needs attention')
+    : (th ? 'พอร์ตมีความเสี่ยงสูง' : 'Portfolio at risk')
+
+  const overallSub = (() => {
+    const weak = [
+      liqScore.score < 55 && (th ? 'สภาพคล่องต่ำ' : 'low liquidity'),
+      conScore.score < 55 && (th ? 'ความเข้มข้นสูง' : 'high concentration'),
+      divScore.score < 55 && (th ? 'กระจายน้อย' : 'low diversification'),
+      rebalScore.hasTargets && rebalScore.score < 60 && (th ? 'Rebalance ค้าง' : 'rebalancing needed'),
+    ].filter(Boolean)
+    return weak.length > 0
+      ? (th ? `ควรแก้ไข: ${weak.join(', ')}` : `Address: ${weak.join(', ')}`)
+      : (th ? 'ทุกมิติอยู่ในเกณฑ์ดี' : 'All metrics within healthy range')
+  })()
+
+  // Action items
+  const actions = useMemo(() => {
+    const items = []
+    if (liqScore.score < 70)
+      items.push({ sev: 'high', text: th
+        ? `เพิ่มเงินสด/พันธบัตร — สภาพคล่อง ${liqScore.liqW}% ควรมีอย่างน้อย 15%`
+        : `Increase cash or bonds — liquidity ${liqScore.liqW}%, target ≥15%` })
+    if (conScore.score < 65 && conScore.topTicker)
+      items.push({ sev: 'high', text: th
+        ? `ลดน้ำหนัก ${conScore.topTicker} — ถือ ${conScore.maxW.toFixed(1)}% ความเสี่ยงสูงหากราคาตก`
+        : `Reduce ${conScore.topTicker} — ${conScore.maxW.toFixed(1)}% is a large single-asset risk` })
+    if (rebalScore.hasTargets && rebalScore.outOfBand > 0)
+      items.push({ sev: 'med', text: th
+        ? `${rebalScore.outOfBand} รายการนอกกรอบเป้าหมาย — ควร Rebalance ตามแผน`
+        : `${rebalScore.outOfBand} item(s) outside target band — consider rebalancing` })
+    if (divScore.nRegions < 2)
+      items.push({ sev: 'med', text: th
+        ? 'ลงทุนในภูมิภาคเดียว — เพิ่มหุ้น/กองทุนต่างประเทศเพื่อลดความเสี่ยง'
+        : 'Single-region portfolio — add international assets to reduce country risk' })
+    if (retScore.score >= 75)
+      items.push({ sev: 'ok', text: th
+        ? `${retScore.pos}/${retScore.total} หลักทรัพย์กำไร — ผลตอบแทนรวม ${totalPlPct >= 0 ? '+' : ''}${totalPlPct.toFixed(1)}%`
+        : `${retScore.pos}/${retScore.total} holdings profitable — overall ${totalPlPct >= 0 ? '+' : ''}${totalPlPct.toFixed(1)}%` })
+    if (divScore.score >= 85)
+      items.push({ sev: 'ok', text: th
+        ? `กระจายครบ ${divScore.nClasses} ประเภทสินทรัพย์ · ${divScore.nRegions} ภูมิภาค`
+        : `Well diversified — ${divScore.nClasses} asset classes · ${divScore.nRegions} region(s)` })
+    return items
+  }, [liqScore, conScore, rebalScore, divScore, retScore, totalPlPct, th])
+
+  const metrics = [
+    {
+      icon: '🧩', score: divScore.score,
+      name: th ? 'การกระจายความเสี่ยง' : 'Diversification',
+      detail: th
+        ? `${divScore.nClasses} ประเภทสินทรัพย์ · ${divScore.nRegions} ภูมิภาค`
+        : `${divScore.nClasses} asset class${divScore.nClasses > 1 ? 'es' : ''} · ${divScore.nRegions} region(s)`,
+    },
+    {
+      icon: '⚖️', score: conScore.score,
+      name: th ? 'ความเข้มข้น' : 'Concentration',
+      detail: th
+        ? `${conScore.topTicker || '—'} ${conScore.maxW.toFixed(1)}% · Top-3 = ${conScore.top3.toFixed(0)}%`
+        : `${conScore.topTicker || '—'} ${conScore.maxW.toFixed(1)}% · top-3 = ${conScore.top3.toFixed(0)}%`,
+    },
+    {
+      icon: '🎯', score: rebalScore.score,
+      name: th ? 'Rebalance' : 'Rebalance',
+      detail: rebalScore.hasTargets
+        ? (th ? `${rebalScore.outOfBand}/${rebalScore.total} รายการนอกเป้า` : `${rebalScore.outOfBand}/${rebalScore.total} outside target`)
+        : (th ? 'ยังไม่ได้ตั้งเป้าหมาย' : 'No targets set yet'),
+    },
+    {
+      icon: '📈', score: retScore.score,
+      name: th ? 'ผลตอบแทน' : 'Return',
+      detail: th
+        ? `${retScore.pos}/${retScore.total} กำไร · รวม ${totalPlPct >= 0 ? '+' : ''}${totalPlPct.toFixed(1)}%`
+        : `${retScore.pos}/${retScore.total} in profit · ${totalPlPct >= 0 ? '+' : ''}${totalPlPct.toFixed(1)}% overall`,
+    },
+    {
+      icon: '🌡️', score: riskScore.score,
+      name: th ? 'ระดับความเสี่ยง' : 'Risk Level',
+      detail: riskScore.label,
+    },
+    {
+      icon: '💧', score: liqScore.score,
+      name: th ? 'สภาพคล่อง' : 'Liquidity',
+      detail: th
+        ? `พันธบัตร/เงินสด ${liqScore.liqW}% ${liqScore.liqW < 15 ? '· ต่ำกว่าเป้า 15%' : ''}`
+        : `Bonds/cash ${liqScore.liqW}% ${liqScore.liqW < 15 ? '· below 15% target' : ''}`,
+    },
+  ]
+
+  if (dataState !== 'live' && rows.length === 0) {
+    return (
+      <div className="shell-section" style={{ textAlign: 'center', padding: '60px 24px', color: 'var(--ink-3)' }}>
+        <div style={{ fontSize: 36, marginBottom: 12 }}>🛡️</div>
+        <div style={{ fontWeight: 600, marginBottom: 6 }}>{th ? 'ไม่มีข้อมูลพอร์ต' : 'No portfolio data'}</div>
+        <div style={{ fontSize: 13 }}>{th ? 'เพิ่มหลักทรัพย์ก่อนเพื่อดูสุขภาพพอร์ต' : 'Add holdings to see your portfolio health'}</div>
+      </div>
+    )
+  }
+
+  const sevDot = { high: 'var(--loss)', med: 'oklch(0.65 0.15 60)', ok: 'var(--gain)' }
+  const sevBg  = { high: 'oklch(0.96 0.04 25)', med: 'oklch(0.96 0.06 80)', ok: 'oklch(0.95 0.04 160)' }
+  const sevIcon = { high: '!', med: '↻', ok: '✓' }
+
+  return (
+    <div className="shell-section">
+      {/* Score card */}
+      <div className="tbl-card" style={{ padding: '20px', borderRadius: 16, marginBottom: 16, display: 'flex', alignItems: 'center', gap: 20 }}>
+        <ScoreRing score={composite} />
+        <div style={{ flex: 1, minWidth: 0 }}>
+          <div style={{ fontSize: 17, fontWeight: 700, marginBottom: 4 }}>{overallLabel}</div>
+          <div style={{ fontSize: 12, color: 'var(--ink-3)', lineHeight: 1.5 }}>{overallSub}</div>
+        </div>
+      </div>
+
+      {/* 6 metrics */}
+      <div className="label-up" style={{ marginBottom: 8 }}>{th ? '6 มิติสุขภาพ' : '6 health dimensions'}</div>
+      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8, marginBottom: 16 }}>
+        {metrics.map(m => (
+          <MetricCard key={m.name} icon={m.icon} name={m.name} grade={healthGrade(m.score)} detail={m.detail} barPct={m.score} />
+        ))}
+      </div>
+
+      {/* Action items */}
+      {actions.length > 0 && (
+        <>
+          <div className="label-up" style={{ marginBottom: 8 }}>{th ? 'สิ่งที่ควรทำ' : 'Recommended actions'}</div>
+          <div className="tbl-card" style={{ padding: '4px 16px', borderRadius: 12 }}>
+            {actions.map((a, i) => (
+              <div key={i} style={{ display: 'flex', alignItems: 'flex-start', gap: 10, padding: '10px 0', borderBottom: i < actions.length - 1 ? '1px solid var(--line)' : 'none' }}>
+                <div style={{ width: 22, height: 22, borderRadius: '50%', background: sevBg[a.sev], color: sevDot[a.sev], display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 11, fontWeight: 700, flexShrink: 0, marginTop: 1 }}>
+                  {sevIcon[a.sev]}
+                </div>
+                <div style={{ fontSize: 13, color: 'var(--ink-2)', lineHeight: 1.5 }}>{a.text}</div>
+              </div>
+            ))}
+          </div>
+        </>
+      )}
     </div>
   )
 }

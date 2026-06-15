@@ -729,6 +729,9 @@ hr.rule { border: 0; border-top: 1px solid var(--line); margin: 24px 0; }
   .watchlist-grid { grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); }
 }
 
+/* hidden by default, shown only on mobile via .show-mob inside media query below */
+.show-mob { display: none; }
+
 /* ─── Mobile responsive ─────────────────────────────────────────────────── */
 @media (max-width: 768px) {
   .shell, .shell-narrow { padding: 16px 16px 88px; }
@@ -756,9 +759,23 @@ hr.rule { border: 0; border-top: 1px solid var(--line); margin: 24px 0; }
      !important overrides the inline overflow:hidden (kept for desktop corners). */
   .tbl-card { overflow-x: auto !important; -webkit-overflow-scrolling: touch; }
   .tbl-card .table { min-width: 600px; }
+  .tbl-card .tbl-portfolio { min-width: 340px; }
 
-  /* Hide less-important table columns on mobile */
+  /* Hide less-important table columns on mobile (also catch hide-tab, which only fires ≥769px) */
   .hide-mob { display: none !important; }
+  .hide-tab { display: none !important; }
+  .show-mob { display: flex !important; }
+
+  /* Portfolio table: fill container, fixed layout prevents overflow */
+  .tbl-portfolio { width: 100%; table-layout: fixed; }
+  /* Reduce cell padding from global 16px to 8px so narrow columns have enough content room */
+  .tbl-portfolio thead th,
+  .tbl-portfolio tbody td { padding-left: 8px !important; padding-right: 8px !important; }
+  .tbl-portfolio .tbl-col-value   { width: 100px; padding-right: 4px !important; overflow: hidden; white-space: nowrap; }
+  .tbl-portfolio .tbl-col-pl      { width: 84px; padding-left: 6px !important; padding-right: 4px !important; border-left: 1px solid var(--line); }
+  .tbl-portfolio .tbl-col-actions { width: 24px; padding-left: 2px !important; padding-right: 8px !important; }
+  .tbl-portfolio .tbl-col-holding { overflow: hidden; min-width: 0; }
+  .tbl-portfolio .tbl-col-holding .holding-sub { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
   /* Cards */
   .card { border-radius: 10px; }

@@ -672,7 +672,7 @@ function LivePortfolioPage({ t, lang, ccy, portfolio, liveHoldings, prices = {},
                   <SortHeader id="value"     label={t.portfolio.value} sortKey={sortKey} sortDir={sortDir} onSort={setSort} align="right" className="tbl-col-value" />
                   <th className="num hide-tab">{th ? "30 วัน" : "30d"}</th>
                   <SortHeader id="pl"     label={t.portfolio.pl} sortKey={sortKey} sortDir={sortDir} onSort={setSort} align="right" className="tbl-col-pl" />
-                  <SortHeader id="weight" label={t.portfolio.weight} sortKey={sortKey} sortDir={sortDir} onSort={setSort} align="right" className="tbl-col-weight" />
+                  <SortHeader id="weight" label={t.portfolio.weight} sortKey={sortKey} sortDir={sortDir} onSort={setSort} align="right" className="tbl-col-weight hide-mob" />
                   <th className="tbl-col-actions"></th>
                 </tr>
               </thead>
@@ -746,13 +746,27 @@ function LivePortfolioPage({ t, lang, ccy, portfolio, liveHoldings, prices = {},
                         : <span className="muted" style={{ fontSize: 12 }}>—</span>}</td>
                       <td className="num tbl-col-pl">
                         <div style={{ display: "flex", flexDirection: "column", alignItems: "flex-end", gap: 1 }}>
-                          <span style={{ color: r.pl >= 0 ? "var(--gain)" : "var(--loss)", fontWeight: 500 }}>
+                          <span style={{ color: r.pl >= 0 ? "var(--gain)" : "var(--loss)", fontWeight: 500, whiteSpace: "nowrap" }}>
                             {r.pl >= 0 ? "+" : ""}{LUMEN_FMT.money(r.pl, ccy, { compact: true })}
                           </span>
                           <Delta value={r.plPct} size={11} />
                         </div>
+                        <div className="show-mob" style={{ alignItems: "center", gap: 4, justifyContent: "flex-end", marginTop: 3 }}>
+                          <span style={{ fontSize: 10, color: "var(--ink-3)" }}>{r.weight.toFixed(1)}%</span>
+                          {(() => {
+                            const tgt = getViewTargetPct(r)
+                            if (!tgt) return null
+                            const band = rebalState?.band ?? 5
+                            const diff = r.weight - tgt
+                            const action = diff > band ? 'sell' : diff < -band ? 'buy' : 'hold'
+                            const color = action === 'sell' ? 'var(--loss)' : action === 'buy' ? 'var(--gain)' : 'oklch(0.55 0.10 60)'
+                            const bg    = action === 'sell' ? 'oklch(0.95 0.03 25)' : action === 'buy' ? 'oklch(0.95 0.03 160)' : 'oklch(0.96 0.04 85)'
+                            const label = action === 'sell' ? (th ? 'ขาย' : 'Trim') : action === 'buy' ? (th ? 'ซื้อ' : 'Buy') : (th ? 'ถือ' : 'Hold')
+                            return <span style={{ fontSize: 9, fontWeight: 700, padding: '1px 5px', borderRadius: 99, background: bg, color }}>{label}</span>
+                          })()}
+                        </div>
                       </td>
-                      <td className="num tbl-col-weight">
+                      <td className="num tbl-col-weight hide-mob">
                         {(() => {
                           const tgt  = getViewTargetPct(r)
                           const band = rebalState?.band ?? 5
@@ -3860,17 +3874,17 @@ function DemoPortfolioPage({ t, lang, ccy, setRoute }) {
       </section>
 
       <section className="card tbl-card" style={{ padding: 0, overflow: "hidden" }}>
-        <table className="table">
+        <table className="table tbl-portfolio">
           <thead>
             <tr>
-              <SortHeader id="ticker" label={t.portfolio.holding} sortKey={sortKey} sortDir={sortDir} onSort={setSort} />
-              <SortHeader id="shares" label={t.portfolio.shares} sortKey={sortKey} sortDir={sortDir} onSort={setSort} align="right" />
-              <SortHeader id="cost" label={t.portfolio.cost} sortKey={sortKey} sortDir={sortDir} onSort={setSort} align="right" />
-              <SortHeader id="value" label={t.portfolio.value} sortKey={sortKey} sortDir={sortDir} onSort={setSort} align="right" />
-              <th className="num">{th ? "30 วัน" : "30d"}</th>
-              <SortHeader id="pl" label={t.portfolio.pl} sortKey={sortKey} sortDir={sortDir} onSort={setSort} align="right" />
-              <SortHeader id="weight" label={t.portfolio.weight} sortKey={sortKey} sortDir={sortDir} onSort={setSort} align="right" />
-              <th></th>
+              <SortHeader id="ticker" label={t.portfolio.holding} sortKey={sortKey} sortDir={sortDir} onSort={setSort} className="tbl-col-holding" />
+              <SortHeader id="shares" label={t.portfolio.shares} sortKey={sortKey} sortDir={sortDir} onSort={setSort} align="right" className="hide-tab" />
+              <SortHeader id="cost" label={t.portfolio.cost} sortKey={sortKey} sortDir={sortDir} onSort={setSort} align="right" className="hide-tab" />
+              <SortHeader id="value" label={t.portfolio.value} sortKey={sortKey} sortDir={sortDir} onSort={setSort} align="right" className="tbl-col-value" />
+              <th className="num hide-tab">{th ? "30 วัน" : "30d"}</th>
+              <SortHeader id="pl" label={t.portfolio.pl} sortKey={sortKey} sortDir={sortDir} onSort={setSort} align="right" className="tbl-col-pl" />
+              <SortHeader id="weight" label={t.portfolio.weight} sortKey={sortKey} sortDir={sortDir} onSort={setSort} align="right" className="hide-mob" />
+              <th className="tbl-col-actions"></th>
             </tr>
           </thead>
           <tbody>
@@ -3879,30 +3893,44 @@ function DemoPortfolioPage({ t, lang, ccy, setRoute }) {
                 Math.sin(i / 2 + r.ticker.length) + Math.cos(i / 3 + r.ticker.length * 1.3) + (i / 20) * (r.plPct / 50))
               return (
                 <tr key={r.ticker}>
-                  <td>
+                  <td className="tbl-col-holding">
                     <div className="ticker">
                       <div className="ticker-mark" style={{ background: classBg(r.cls), color: classFg(r.cls) }}>
                         {r.ticker.slice(0, 2)}
                       </div>
                       <div>
                         <div style={{ fontWeight: 500 }}>{r.ticker}</div>
-                        <div className="muted" style={{ fontSize: 11 }}>{r.name}</div>
+                        <div className="muted holding-sub" style={{ fontSize: 11 }}>{r.name}</div>
                       </div>
                     </div>
                   </td>
-                  <td className="num">{r.shares.toLocaleString(undefined, { maximumFractionDigits: 4 })}</td>
-                  <td className="num">{LUMEN_FMT.money(r.cost, ccy, { compact: true })}</td>
-                  <td className="num" style={{ fontWeight: 500 }}>{LUMEN_FMT.money(r.value, ccy, { compact: true })}</td>
-                  <td className="num"><Sparkline data={sparkData} stroke={r.plPct > 0 ? "var(--gain)" : "var(--loss)"} fill={r.plPct > 0 ? "var(--gain)" : "var(--loss)"} /></td>
-                  <td className="num">
+                  <td className="num hide-tab">{r.shares.toLocaleString(undefined, { maximumFractionDigits: 4 })}</td>
+                  <td className="num hide-tab">{LUMEN_FMT.money(r.cost, ccy, { compact: true })}</td>
+                  <td className="num tbl-col-value" style={{ fontWeight: 500 }}>{LUMEN_FMT.money(r.value, ccy, { compact: true })}</td>
+                  <td className="num hide-tab"><Sparkline data={sparkData} stroke={r.plPct > 0 ? "var(--gain)" : "var(--loss)"} fill={r.plPct > 0 ? "var(--gain)" : "var(--loss)"} /></td>
+                  <td className="num tbl-col-pl">
                     <div style={{ display: "flex", flexDirection: "column", alignItems: "flex-end", gap: 1 }}>
-                      <span style={{ color: r.pl >= 0 ? "var(--gain)" : "var(--loss)" }}>
+                      <span style={{ color: r.pl >= 0 ? "var(--gain)" : "var(--loss)", whiteSpace: "nowrap" }}>
                         {r.pl >= 0 ? "+" : ""}{LUMEN_FMT.money(r.pl, ccy, { compact: true })}
                       </span>
                       <Delta value={r.plPct} size={11} />
                     </div>
+                    <div className="show-mob" style={{ alignItems: "center", gap: 4, justifyContent: "flex-end", marginTop: 3 }}>
+                      <span style={{ fontSize: 10, color: "var(--ink-3)" }}>{r.weight.toFixed(1)}%</span>
+                      {(() => {
+                        const tgt = getTargetPct(r)
+                        if (!tgt) return null
+                        const band = rebalState?.band ?? 5
+                        const diff = r.weight - tgt
+                        const action = diff > band ? 'sell' : diff < -band ? 'buy' : 'hold'
+                        const color = action === 'sell' ? 'var(--loss)' : action === 'buy' ? 'var(--gain)' : 'oklch(0.55 0.10 60)'
+                        const bg    = action === 'sell' ? 'oklch(0.95 0.03 25)' : action === 'buy' ? 'oklch(0.95 0.03 160)' : 'oklch(0.96 0.04 85)'
+                        const label = action === 'sell' ? (th ? 'ขาย' : 'Trim') : action === 'buy' ? (th ? 'ซื้อ' : 'Buy') : (th ? 'ถือ' : 'Hold')
+                        return <span style={{ fontSize: 9, fontWeight: 700, padding: '1px 5px', borderRadius: 99, background: bg, color }}>{label}</span>
+                      })()}
+                    </div>
                   </td>
-                  <td className="num">
+                  <td className="num hide-mob">
                     {(() => {
                       const tgt  = getTargetPct(r)
                       const band = rebalState?.band ?? 5
@@ -3930,22 +3958,22 @@ function DemoPortfolioPage({ t, lang, ccy, setRoute }) {
                       )
                     })()}
                   </td>
-                  <td style={{ color: "var(--ink-4)", width: 24 }}><Icon name="chevron" size={14} /></td>
+                  <td className="tbl-col-actions" style={{ color: "var(--ink-4)" }}><Icon name="chevron" size={14} /></td>
                 </tr>
               )
             })}
             <tr style={{ background: "var(--bg)", fontWeight: 500 }}>
               <td style={{ paddingTop: 18, paddingBottom: 18 }}><span className="label-up">{t.portfolio.total}</span></td>
-              <td></td>
-              <td className="num">{LUMEN_FMT.money(rows.reduce((a, b) => a + b.cost, 0), ccy, { compact: true })}</td>
+              <td className="hide-tab"></td>
+              <td className="num hide-tab">{LUMEN_FMT.money(rows.reduce((a, b) => a + b.cost, 0), ccy, { compact: true })}</td>
               <td className="num" style={{ fontWeight: 600 }}>{LUMEN_FMT.money(value, ccy, { compact: true })}</td>
-              <td></td>
+              <td className="hide-tab"></td>
               <td className="num">
                 <span style={{ color: pl >= 0 ? "var(--gain)" : "var(--loss)" }}>
                   {pl >= 0 ? "+" : ""}{LUMEN_FMT.money(pl, ccy, { compact: true })}
                 </span>
               </td>
-              <td className="num">100.0%</td>
+              <td className="num hide-mob">100.0%</td>
               <td></td>
             </tr>
           </tbody>
