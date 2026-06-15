@@ -15,6 +15,7 @@ import { getOrCreatePortfolio, getPortfolios, addPortfolio, updatePortfolio, del
 import { fetchPrices, fetchFxRate, clearPriceCache } from './lib/prices'
 import { loadAlerts, checkAndFireAlerts, getActiveCount, setAlertsUserId, clearAlertsUserId, initAlertsFromSupabase, subscribeAlertsRealtime, unsubscribeAlertsRealtime } from './lib/alerts'
 import { AlertsModal, AlertsPage } from './components/AlertsModal'
+import { ErrorBoundary } from './components/ErrorBoundary'
 
 const TWEAK_DEFAULTS = {
   accent:  "oklch(0.55 0.06 175)",
@@ -579,7 +580,9 @@ export default function App() {
         />
       )}
 
-      {page}
+      <ErrorBoundary key={route} lang={lang}>
+        {page}
+      </ErrorBoundary>
 
       {route !== "onboarding" && (
         <BottomNav route={route} setRoute={setRoute} lang={lang} alertCount={alertCount} />
