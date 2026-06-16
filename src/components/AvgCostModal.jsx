@@ -14,12 +14,26 @@ function classKey(cls, region) {
   return 'Cash'
 }
 
-function loadRebalTarget(cls, region) {
+// Returns { pct, label } where:
+//   hybrid mode + ticker weight set → class% × tickerWeight% (effective per-stock target)
+//   class mode                      → class% with class name label (informational)
+function loadRebalTarget(ticker, cls, region) {
   try {
-    const targets = JSON.parse(localStorage.getItem('lumen_rebalance_targets') || '{}')
-    const key = classKey(cls, region)
-    const v = targets[key]
-    return v != null ? +(v * 100).toFixed(1) : null
+    const targets     = JSON.parse(localStorage.getItem('lumen_rebalance_targets') || '{}')
+    const tickerW     = JSON.parse(localStorage.getItem('lumen_rebalance_ticker_weights') || '{}')
+    const mode        = localStorage.getItem('lumen_rebalance_mode') || 'class'
+    const key         = classKey(cls, region)
+    const classFrac   = targets[key]
+    if (classFrac == null) return null
+
+    if (mode === 'hybrid' && tickerW[ticker] != null) {
+      // effective target = classTarget × (tickerWeight / 100)
+      const effective = classFrac * (tickerW[ticker] / 100) * 100
+      return { pct: +effective.toFixed(1), label: `${key} × ${tickerW[ticker]}%` }
+    }
+
+    // class mode: return class-level target with a clear label
+    return { pct: +(classFrac * 100).toFixed(1), label: key }
   } catch { return null }
 }
 
@@ -52,9 +66,9 @@ export function AvgCostModal({ lang, holding, onClose, onCommit, totalPortfolio 
   const [price,    setPrice]    = useState(live ? String(+live.toFixed(2)) : '')
   const [fee,      setFee]      = useState(holding.region === 'TH' ? '0.157' : '0')
   // target mode — pre-fill % from saved rebalance targets
-  const rebalPct = useMemo(() => loadRebalTarget(holding.cls, holding.region), [holding.cls, holding.region])
+  const rebalTarget = useMemo(() => loadRebalTarget(holding.ticker, holding.cls, holding.region), [holding.ticker, holding.cls, holding.region])
   const [tgtType,  setTgtType]  = useState('%')
-  const [tgtInput, setTgtInput] = useState(() => rebalPct != null ? String(rebalPct) : '')
+  const [tgtInput, setTgtInput] = useState(() => rebalTarget != null ? String(rebalTarget.pct) : '')
 
   const q = parseFloat(qty)   || 0
   const p = parseFloat(price) || 0
@@ -321,10 +335,11 @@ export function AvgCostModal({ lang, holding, onClose, onCommit, totalPortfolio 
                   {tgtType === '%'
                     ? (th ? 'Target สัดส่วน (%)' : 'Target weight (%)')
                     : (th ? `Target มูลค่า (${ccy === 'USD' ? '$' : '฿'})` : `Target value (${ccy === 'USD' ? '$' : '฿'})`)}
-                  {tgtType === '%' && rebalPct != null && (
+                  {tgtType === '%' && rebalTarget != null && (
                     <span style={{ fontSize: 10, background: 'oklch(0.55 0.18 290)', color: '#fff',
-                                   padding: '1px 5px', borderRadius: 4, fontWeight: 600 }}>
-                      {th ? 'จาก Tool' : 'from Tool'}
+                                   padding: '1px 5px', borderRadius: 4, fontWeight: 600 }}
+                          title={rebalTarget.label}>
+                      {rebalTarget.label}
                     </span>
                   )}
                 </div>
