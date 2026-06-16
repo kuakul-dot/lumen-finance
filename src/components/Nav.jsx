@@ -541,6 +541,7 @@ export function Icon({ name, size = 18 }) {
     case "chart":    return (<svg {...props}><line x1="3" y1="20" x2="21" y2="20"/><rect x="5" y="11" width="3" height="8"/><rect x="11" y="6" width="3" height="13"/><rect x="17" y="13" width="3" height="6"/></svg>)
     case "trash":    return (<svg {...props}><path d="M3 6h18"/><path d="M19 6l-1 14H6L5 6"/><path d="M8 6V4h8v2"/></svg>)
     case "calc":     return (<svg {...props}><rect x="5" y="2" width="14" height="20" rx="2"/><path d="M9 7h6"/><circle cx="9" cy="12" r="0.8" fill="currentColor" stroke="none"/><circle cx="12" cy="12" r="0.8" fill="currentColor" stroke="none"/><circle cx="15" cy="12" r="0.8" fill="currentColor" stroke="none"/><circle cx="9" cy="17" r="0.8" fill="currentColor" stroke="none"/><circle cx="12" cy="17" r="0.8" fill="currentColor" stroke="none"/><circle cx="15" cy="17" r="0.8" fill="currentColor" stroke="none"/></svg>)
+    case "download": return (<svg {...props}><path d="M12 3v12"/><path d="m7 10 5 5 5-5"/><path d="M5 21h14"/></svg>)
     default: return null
   }
 }

@@ -12,6 +12,7 @@ import { SRPanel } from './SRPanel'
 import { AlertsModal } from './AlertsModal'
 import { CalcInput } from './CalcInput'
 import { AvgCostModal } from './AvgCostModal'
+import { exportPortfolioExcel } from '../lib/exportExcel'
 
 // Per-share avg cost formatted in the same currency as the live price (nativeCcy).
 // Uses r.cost (per-share in THB) — always correct even after groupByTicker merges
@@ -150,6 +151,7 @@ function LivePortfolioPage({ t, lang, ccy, portfolio, liveHoldings, prices = {},
   const [showRealized, setShowRealized] = useState(false)
   const [splitModal, setSplitModal] = useState(null)   // null | 'loading' | suggestion[]
   const [splitApplying, setSplitApplying] = useState(false)
+  const [exporting, setExporting] = useState(false)
   // ── AI per-holding analysis (optional — hides when /api/analyze 503s) ──
   const ai = useAiAnalysis()
   const [aiAvailable, setAiAvailable] = useState(false)
@@ -463,6 +465,25 @@ function LivePortfolioPage({ t, lang, ccy, portfolio, liveHoldings, prices = {},
     })
   }
 
+  const handleExport = async () => {
+    if (!portfolio?.id || exporting) return
+    setExporting(true)
+    try {
+      await exportPortfolioExcel({
+        rows,
+        portfolioId: portfolio.id,
+        fxRate,
+        lang,
+        portfolioName: portfolio.name || 'Portfolio',
+      })
+    } catch (err) {
+      console.error('[Lumen] export:', err)
+      alert(th ? `Export ล้มเหลว: ${err?.message}` : `Export failed: ${err?.message}`)
+    } finally {
+      setExporting(false)
+    }
+  }
+
   const handleCheckSplits = async () => {
     if (!portfolio?.id) return
     setSplitModal('loading')
@@ -548,6 +569,12 @@ function LivePortfolioPage({ t, lang, ccy, portfolio, liveHoldings, prices = {},
                     title={th ? "สร้าง holdings ใหม่จากประวัติธุรกรรมทั้งหมด" : "Rebuild all holdings from transaction history"}>
               <Icon name="filter" size={14} /> {syncing ? (th ? "กำลังซิงค์…" : "Syncing…") : (th ? "ตรวจสอบ & ซิงค์" : "Reconcile")}
             </button>
+            {dataState === "live" && (
+              <button className="btn btn-sm btn-outline" onClick={handleExport} disabled={exporting}
+                      title={th ? "Export หลักทรัพย์, ธุรกรรม, กำไร/ขาดทุน, ปันผล เป็น Excel" : "Export holdings, transactions, realized P&L and dividends to Excel"}>
+                <Icon name="download" size={14} /> {exporting ? (th ? "กำลัง Export…" : "Exporting…") : (th ? "Export Excel" : "Export Excel")}
+              </button>
+            )}
             <button className="btn btn-sm" onClick={() => setShowAdd(true)}>
               <Icon name="plus" size={14} /> {t.common.addInvestment}
             </button>
