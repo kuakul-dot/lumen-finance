@@ -320,8 +320,10 @@ function AnalyticsCommon({ t, lang, ccy, rows, totalValue, totalPL, totalPlPct, 
   const [chartPeriod, setChartPeriod] = useState(defaultPeriod)
   useEffect(() => { setChartPeriod(defaultPeriod) }, [defaultPeriod])
   const [chartMode, setChartMode] = useState("pct")   // "pct" = growth %, "value" = THB value
-  const [commonBenchKey, setCommonBenchKey] = useState("sp500")
-  const commonBench = BENCHMARKS[commonBenchKey] ?? BENCHMARKS.sp500
+  const [activeBenchKeys, setActiveBenchKeys] = useState(['sp500', 'set'])
+  const toggleBench = useCallback((k) => {
+    setActiveBenchKeys(prev => prev.includes(k) ? prev.filter(x => x !== k) : [...prev, k])
+  }, [])
 
   // Which buttons are usable in live mode? (need enough history)
   const periodDaysMap = useMemo(() => {
@@ -331,20 +333,24 @@ function AnalyticsCommon({ t, lang, ccy, rows, totalValue, totalPL, totalPlPct, 
   }, [daysSinceFirst])
   const isPeriodEnabled = (k) => dataState !== "live" || periodDaysMap[k] <= daysSinceFirst + 7  // small tolerance
 
-  // Benchmark historical close prices — fetched when benchmark or time-range changes.
-  const [spxData, setSpxData] = useState(null)  // { series, currency }
+  // Fetch history for all active benchmarks when they change or the time-range changes.
+  const [benchData, setBenchData] = useState({})
   useEffect(() => {
     if (dataState !== "live") return
-    const sym = commonBench?.symbol
-    if (!sym) { setSpxData(null); return }
-    const range = daysSinceFirst >= 365 * 2 ? "5y"
-                : daysSinceFirst >= 365     ? "2y"
-                : daysSinceFirst >= 180     ? "1y"
-                : daysSinceFirst >= 90      ? "6mo" : "3mo"
+    const range = daysSinceFirst >= 365*2 ? "5y" : daysSinceFirst >= 365 ? "2y" : daysSinceFirst >= 180 ? "1y" : daysSinceFirst >= 90 ? "6mo" : "3mo"
+    const keys = activeBenchKeys.filter(k => BENCHMARKS[k]?.symbol)
+    if (!keys.length) { setBenchData({}); return }
     let cancelled = false
-    fetchHistory(sym, range).then(d => { if (!cancelled) setSpxData(d) }).catch(() => {})
+    Promise.all(keys.map(k => fetchHistory(BENCHMARKS[k].symbol, range).then(d => [k, d]).catch(() => [k, { series: [] }])))
+      .then(results => {
+        if (!cancelled) {
+          const map = {}
+          results.forEach(([k, d]) => { map[k] = d })
+          setBenchData(map)
+        }
+      })
     return () => { cancelled = true }
-  }, [dataState, daysSinceFirst, commonBench?.symbol])
+  }, [dataState, daysSinceFirst, activeBenchKeys])
 
   // Daily portfolio value/cost snapshots — power the accurate, contribution-
   // neutral growth comparison against S&P 500.
@@ -472,35 +478,40 @@ function AnalyticsCommon({ t, lang, ccy, rows, totalValue, totalPL, totalPlPct, 
       }
     }
 
-    // ── S&P 500 slice ──────────────────────────────────────────────────────────
-    const spxAll = spxData?.series || []
-    const spxSlice = spxAll.filter(p => p.t >= cutoffSec)
-    const hasSpx = spxSlice.length >= 2
-    const spxSorted = [...spxSlice].sort((a, b) => a.t - b.t)
+    // ── Primary benchmark slice (used as x-axis anchor for synthetic fallback) ──
+    const primaryKey = activeBenchKeys.find(k => BENCHMARKS[k]?.symbol) || null
+    const primarySlice = primaryKey ? ((benchData[primaryKey]?.series || []).filter(p => p.t >= cutoffSec)) : []
+    const hasSpx = primarySlice.length >= 2
 
     // ── Build final series ────────────────────────────────────────────────────
     if (realPortfolioPoints) {
-      // Real portfolio line
       const portfolioSeries = {
         name: th ? "พอร์ตของคุณ" : "Your portfolio",
         color: "var(--ink)", fill: true,
         data: realPortfolioPoints.map((p, i) => ({ x: i, y: p.y, label: p.label })),
       }
-      if (!hasSpx) return [portfolioSeries]
-
-      // Align benchmark to same timestamps as portfolio — rebase so both start at same value
       const firstPortVal = realPortfolioPoints[0].y
       const firstPortTs  = realPortfolioPoints[0].ts
-      const spxAtStart   = getPriceAt(spxSorted, firstPortTs) || spxSorted[0]?.c || 1
-      const sp500Series = {
-        name: th ? commonBench.labelTh : commonBench.labelEn,
-        color: commonBench.color || "var(--accent)",
-        data: realPortfolioPoints.map((p, i) => {
-          const spxPrice = getPriceAt(spxSorted, p.ts)
-          return { x: i, y: spxPrice != null ? firstPortVal * (spxPrice / spxAtStart) : firstPortVal, label: p.label }
-        }),
-      }
-      return [portfolioSeries, sp500Series]
+
+      // Build one series per active benchmark — all rebased to portfolio's first point
+      const benchSeries = activeBenchKeys.filter(k => BENCHMARKS[k]?.symbol).map(k => {
+        const bSlice = (benchData[k]?.series || []).filter(p => p.t >= cutoffSec)
+        if (bSlice.length < 2) return null
+        const bSorted = [...bSlice].sort((a, b) => a.t - b.t)
+        const bAtStart = getPriceAt(bSorted, firstPortTs) || bSorted[0]?.c
+        if (!bAtStart) return null
+        const bench = BENCHMARKS[k]
+        return {
+          name: th ? bench.labelTh : bench.labelEn,
+          color: bench.color || "var(--accent)",
+          data: realPortfolioPoints.map((p, i) => {
+            const bPrice = getPriceAt(bSorted, p.ts)
+            return { x: i, y: bPrice != null ? firstPortVal * (bPrice / bAtStart) : firstPortVal, label: p.label }
+          }),
+        }
+      }).filter(Boolean)
+
+      return [portfolioSeries, ...benchSeries]
     }
 
     // ── Synthetic fallback (while history loads) ──────────────────────────────
@@ -527,13 +538,14 @@ function AnalyticsCommon({ t, lang, ccy, rows, totalValue, totalPL, totalPlPct, 
     }
 
     const targetPts = Math.max(8, Math.min(60, Math.round(totalDays / 7)))
-    const stride = Math.max(1, Math.floor(spxSlice.length / targetPts))
-    let sampled = spxSlice.filter((_, i) => i % stride === 0)
-    if (sampled.length === 0 || sampled[sampled.length - 1] !== spxSlice[spxSlice.length - 1]) {
-      sampled = [...sampled, spxSlice[spxSlice.length - 1]]
+    const stride = Math.max(1, Math.floor(primarySlice.length / targetPts))
+    let sampled = primarySlice.filter((_, i) => i % stride === 0)
+    if (sampled.length === 0 || sampled[sampled.length - 1] !== primarySlice[primarySlice.length - 1]) {
+      sampled = [...sampled, primarySlice[primarySlice.length - 1]]
     }
     const N = sampled.length
     const baseClose = sampled[0].c
+    const primaryBench = primaryKey ? BENCHMARKS[primaryKey] : BENCHMARKS.sp500
     return [
       {
         name: th ? "พอร์ตของคุณ" : "Your portfolio",
@@ -544,12 +556,12 @@ function AnalyticsCommon({ t, lang, ccy, rows, totalValue, totalPL, totalPlPct, 
         })
       },
       {
-        name: th ? commonBench.labelTh : commonBench.labelEn,
-        color: commonBench.color || "var(--accent)",
+        name: th ? primaryBench.labelTh : primaryBench.labelEn,
+        color: primaryBench.color || "var(--accent)",
         data: sampled.map((p, i) => ({ x: i, y: totalCost * (p.c / baseClose), label: mkLabel(new Date(p.t * 1000)) }))
       }
     ]
-  }, [dataState, totalCost, totalValue, th, chartPeriod, periodDaysMap, daysSinceFirst, spxData, liveHoldings, holdingHistories, purchaseSecByTicker, fxRate, commonBenchKey])
+  }, [dataState, totalCost, totalValue, th, chartPeriod, periodDaysMap, daysSinceFirst, benchData, liveHoldings, holdingHistories, purchaseSecByTicker, fxRate, activeBenchKeys])
 
   // Snapshots sliced to the selected period (shared by both chart modes)
   const windowSnaps = useMemo(() => {
@@ -610,34 +622,38 @@ function AnalyticsCommon({ t, lang, ccy, rows, totalValue, totalPL, totalPlPct, 
     const base = chartPeriod === "all" ? 1 : (indexOf(win.find(s => indexOf(s) != null)) ?? 1)
     if (base === 0) return null
 
-    const spxSorted = [...(spxData?.series || [])].sort((a, b) => a.t - b.t)
-    const spxOnOrBefore = dateStr => {
-      const sec = new Date(dateStr + "T23:59:59Z").getTime() / 1000
-      let best = null
-      for (const p of spxSorted) { if (p.t <= sec) best = p.c; else break }
-      return best
-    }
-    // For "All" use the first investment date as SPX baseline so the comparison
-    // covers the same time horizon as the portfolio's cost history.
-    const spxBaseDate = chartPeriod === "all" && earliestHoldingDate
-      ? earliestHoldingDate.toISOString().slice(0, 10)
-      : win[0].date
-    const spxBase = spxSorted.length ? spxOnOrBefore(spxBaseDate) : null
-
-    const port = [], sp = []
-    win.forEach((s, i) => {
+    // Build portfolio series
+    const port = []
+    win.forEach(s => {
       const gi = indexOf(s)
-      const label = labelFor(new Date(s.date))
-      port.push({ x: port.length, y: 100 * (gi != null ? gi : base) / base, label })
-      if (spxBase) {
-        const c = spxOnOrBefore(s.date)
-        sp.push({ x: sp.length, y: c ? 100 * c / spxBase : 100, label })
-      }
+      port.push({ x: port.length, y: 100 * (gi != null ? gi : base) / base, label: labelFor(new Date(s.date)) })
     })
     const out = [{ name: th ? "พอร์ตของคุณ" : "Your portfolio", color: "var(--ink)", fill: true, data: port }]
-    if (sp.length >= 2) out.push({ name: th ? commonBench.labelTh : commonBench.labelEn, color: commonBench.color || "var(--accent)", data: sp })
+
+    // Build one series per active benchmark — each rebased to its own start price
+    const baseDate = chartPeriod === "all" && earliestHoldingDate
+      ? earliestHoldingDate.toISOString().slice(0, 10)
+      : win[0].date
+    activeBenchKeys.filter(k => BENCHMARKS[k]?.symbol).forEach(k => {
+      const bSorted = [...(benchData[k]?.series || [])].sort((a, b) => a.t - b.t)
+      const bOnOrBefore = dateStr => {
+        const sec = new Date(dateStr + "T23:59:59Z").getTime() / 1000
+        let best = null
+        for (const p of bSorted) { if (p.t <= sec) best = p.c; else break }
+        return best
+      }
+      const bBase = bSorted.length ? bOnOrBefore(baseDate) : null
+      if (!bBase) return
+      const bPts = win.map((s, i) => {
+        const c = bOnOrBefore(s.date)
+        return { x: i, y: c ? 100 * c / bBase : 100, label: labelFor(new Date(s.date)) }
+      })
+      if (bPts.length < 2) return
+      const bench = BENCHMARKS[k]
+      out.push({ name: th ? bench.labelTh : bench.labelEn, color: bench.color, data: bPts })
+    })
     return out
-  }, [dataState, windowSnaps, spxData, th, labelFor, commonBenchKey, chartPeriod, earliestHoldingDate])
+  }, [dataState, windowSnaps, benchData, th, labelFor, activeBenchKeys, chartPeriod, earliestHoldingDate])
 
   // ── Mode B: actual value (THB) — market value vs cost basis over time ──────
   const valueSeries = useMemo(() => {
@@ -714,9 +730,9 @@ function AnalyticsCommon({ t, lang, ccy, rows, totalValue, totalPL, totalPlPct, 
                   ? (chartMode === "value"
                       ? (th ? "มูลค่าพอร์ต & ต้นทุน (฿)" : "Portfolio value & cost basis")
                       : (chartPeriod === "all"
-                          ? (th ? `การเติบโต: พอร์ต vs. ${commonBench.labelTh} (เทียบต้นทุน)` : `Growth: Portfolio vs. ${commonBench.labelEn} (vs. cost basis)`)
-                          : (th ? `การเติบโต: พอร์ต vs. ${commonBench.labelTh} (ฐาน 100%)` : `Growth: Portfolio vs. ${commonBench.labelEn} (rebased)`)))
-                  : (th ? `มูลค่าพอร์ต vs. ${commonBench.labelTh}` : `Portfolio value vs. ${commonBench.labelEn}`)}</h3>
+                          ? (th ? "การเติบโต: พอร์ต vs. Benchmarks (เทียบต้นทุน)" : "Growth: Portfolio vs. Benchmarks (vs. cost basis)")
+                          : (th ? "การเติบโต: พอร์ต vs. Benchmarks (ฐาน 100%)" : "Growth: Portfolio vs. Benchmarks (rebased)")))
+                  : (th ? "มูลค่าพอร์ต vs. Benchmarks" : "Portfolio value vs. Benchmarks")}</h3>
               <div className="muted" style={{ fontSize: 12, marginTop: 4 }}>
                 <span className="dot" style={{ background: "var(--ink)" }} /> {dataState === "live" && snapSeries && chartMode === "value" ? (th ? "มูลค่าตลาด" : "Market value") : (th ? "พอร์ตของคุณ" : "Your portfolio")}
                 {dataState === "live" && chartMode !== "value" && (
@@ -726,10 +742,25 @@ function AnalyticsCommon({ t, lang, ccy, rows, totalValue, totalPL, totalPlPct, 
                       : (th ? "(กำลังโหลดข้อมูล…)" : "(loading real prices…)")}
                   </span>
                 )}
-                {commonBenchKey !== "none" && (
+                {dataState === "live" && chartMode === "value" && (
                   <span style={{ marginLeft: 12 }}>
-                    <span className="dot" style={{ background: commonBench.color || "var(--accent)" }} />
-                    {" "}{dataState === "live" && snapSeries && chartMode === "value" ? (th ? "ต้นทุน" : "Cost basis") : (th ? commonBench.labelTh : commonBench.labelEn)}
+                    <span className="dot" style={{ background: "var(--accent)" }} />
+                    {" "}{th ? "ต้นทุน" : "Cost basis"}
+                  </span>
+                )}
+                {dataState === "live" && chartMode === "pct" && activeBenchKeys.filter(k => BENCHMARKS[k]?.symbol).map(k => {
+                  const bench = BENCHMARKS[k]
+                  return (
+                    <span key={k} style={{ marginLeft: 12 }}>
+                      <span className="dot" style={{ background: bench.color }} />
+                      {" "}{th ? bench.labelTh : bench.labelEn}
+                    </span>
+                  )
+                })}
+                {dataState !== "live" && (
+                  <span style={{ marginLeft: 12 }}>
+                    <span className="dot" style={{ background: "var(--accent)" }} />
+                    {" "}S&P 500
                   </span>
                 )}
                 {dataState === "live" && earliestHoldingDate && (
@@ -742,22 +773,24 @@ function AnalyticsCommon({ t, lang, ccy, rows, totalValue, totalPL, totalPlPct, 
               </div>
             </div>
             <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap", justifyContent: "flex-end" }}>
-              {/* Benchmark picker — only in % growth mode */}
+              {/* Benchmark toggle buttons — only in % growth mode */}
               {dataState === "live" && chartMode === "pct" && (
-                <div style={{ display: "flex", flexDirection: "column", alignItems: "flex-end", gap: 3 }}>
-                  <select value={commonBenchKey} onChange={e => setCommonBenchKey(e.target.value)}
-                    style={{ padding: "5px 10px", borderRadius: 8, fontSize: 11, border: "1.5px solid var(--line)",
-                             background: "var(--bg)", color: "var(--ink)", cursor: "pointer", outline: "none",
-                             fontFamily: "var(--font-mono)" }}>
-                    {Object.entries(BENCHMARKS).map(([k, b]) => (
-                      <option key={k} value={k}>{k === 'none' ? (th ? 'เทียบกับ…' : 'vs…') : (th ? b.labelTh : b.labelEn)}</option>
-                    ))}
-                  </select>
-                  {commonBenchKey !== "none" && spxData?.series?.length === 0 && (
-                    <span style={{ fontSize: 10, color: "var(--loss)" }}>
-                      {th ? "⚠ ไม่พบข้อมูล" : "⚠ no data"}
-                    </span>
-                  )}
+                <div style={{ display: "flex", gap: 4, alignItems: "center", flexWrap: "wrap" }}>
+                  {Object.entries(BENCHMARKS).filter(([k]) => k !== 'none').map(([k, b]) => {
+                    const isOn = activeBenchKeys.includes(k)
+                    const noData = isOn && (benchData[k]?.series?.length || 0) === 0
+                    const col = b.color || "var(--accent)"
+                    return (
+                      <button key={k} onClick={() => toggleBench(k)}
+                        style={{ padding: "4px 10px", borderRadius: 8, fontSize: 11, cursor: "pointer",
+                                 border: `1.5px solid ${isOn ? col : "var(--line)"}`,
+                                 background: isOn ? col + "22" : "transparent",
+                                 color: isOn ? col : "var(--ink-4)",
+                                 fontFamily: "var(--font-mono)", transition: "all 0.15s" }}>
+                        {th ? b.labelTh : b.labelEn}{noData ? " ⚠" : ""}
+                      </button>
+                    )
+                  })}
                 </div>
               )}
               <div className="segmented">
