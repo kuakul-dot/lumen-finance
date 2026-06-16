@@ -2,8 +2,26 @@
 // (realized P/L), or reaching a Target weight / value.
 // Opened from a holdings row, prefilled with the position.
 // "Commit" hands the numbers to the real Buy (add lot) / Sell flows.
-import { useState } from 'react'
+import { useState, useMemo } from 'react'
 import { TickerLogo } from './Nav'
+
+// Map holding cls+region → rebalance target key (same logic as Tools.jsx CLASS_OF)
+function classKey(cls, region) {
+  if (cls === 'Equity' || cls === 'ETF') return region === 'TH' ? 'TH Equity' : 'US Equity'
+  if (cls === 'Bond' || cls === 'MutualFund') return 'Bonds'
+  if (cls === 'Commodity' || cls === 'GoldTH') return 'Gold'
+  if (cls === 'Crypto') return 'Crypto'
+  return 'Cash'
+}
+
+function loadRebalTarget(cls, region) {
+  try {
+    const targets = JSON.parse(localStorage.getItem('lumen_rebalance_targets') || '{}')
+    const key = classKey(cls, region)
+    const v = targets[key]
+    return v != null ? +(v * 100).toFixed(1) : null
+  } catch { return null }
+}
 
 function fmtP(n, ccy) {
   if (n == null || isNaN(n)) return '—'
@@ -33,9 +51,10 @@ export function AvgCostModal({ lang, holding, onClose, onCommit, totalPortfolio 
   const [budget,   setBudget]   = useState('')
   const [price,    setPrice]    = useState(live ? String(+live.toFixed(2)) : '')
   const [fee,      setFee]      = useState(holding.region === 'TH' ? '0.157' : '0')
-  // target mode
-  const [tgtType,  setTgtType]  = useState('%')   // '%' or '฿'
-  const [tgtInput, setTgtInput] = useState('')
+  // target mode — pre-fill % from saved rebalance targets
+  const rebalPct = useMemo(() => loadRebalTarget(holding.cls, holding.region), [holding.cls, holding.region])
+  const [tgtType,  setTgtType]  = useState('%')
+  const [tgtInput, setTgtInput] = useState(() => rebalPct != null ? String(rebalPct) : '')
 
   const q = parseFloat(qty)   || 0
   const p = parseFloat(price) || 0
@@ -298,10 +317,16 @@ export function AvgCostModal({ lang, holding, onClose, onCommit, totalPortfolio 
             {/* Inputs */}
             <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
               <div>
-                <div style={{ fontSize: 11, color: 'var(--ink-3)', marginBottom: 4 }}>
+                <div style={{ fontSize: 11, color: 'var(--ink-3)', marginBottom: 4, display: 'flex', alignItems: 'center', gap: 5 }}>
                   {tgtType === '%'
                     ? (th ? 'Target สัดส่วน (%)' : 'Target weight (%)')
                     : (th ? `Target มูลค่า (${ccy === 'USD' ? '$' : '฿'})` : `Target value (${ccy === 'USD' ? '$' : '฿'})`)}
+                  {tgtType === '%' && rebalPct != null && (
+                    <span style={{ fontSize: 10, background: 'oklch(0.55 0.18 290)', color: '#fff',
+                                   padding: '1px 5px', borderRadius: 4, fontWeight: 600 }}>
+                      {th ? 'จาก Tool' : 'from Tool'}
+                    </span>
+                  )}
                 </div>
                 <input type="number" inputMode="decimal" min="0" autoFocus
                   value={tgtInput} onChange={e => setTgtInput(e.target.value)}
