@@ -917,9 +917,16 @@ function LivePortfolioPage({ t, lang, ccy, portfolio, liveHoldings, prices = {},
 
           <div style={{ display: "flex", justifyContent: "space-between", marginTop: 12, color: "var(--ink-4)", fontSize: 12 }}>
             <span>{th ? `แสดง ${grouped.length} จาก ${allGrouped.length} ตำแหน่ง` : `Showing ${grouped.length} of ${allGrouped.length} positions`}</span>
-            <span>{hasLivePrices
-              ? (th ? "ราคาตลาดจาก Yahoo Finance · อัปเดตทุก 15 นาที" : "Market prices from Yahoo Finance · 15 min delay")
-              : (th ? "กำลังโหลดราคาตลาด…" : "Fetching live market prices…")}</span>
+            <span style={{ display: "flex", alignItems: "center", gap: 6 }}>
+              {hasLivePrices
+                ? (prices._stale
+                    ? <span style={{ color: "oklch(0.65 0.15 60)", fontWeight: 600 }}>
+                        ⚠ {th ? `ราคาล่าช้า ${prices._staleMinutes} นาที` : `Prices ${prices._staleMinutes}m old`}
+                        {prices._staleMinutes >= 60 && (th ? " — กรุณารีเฟรช" : " — please refresh")}
+                      </span>
+                    : (th ? "ราคาตลาดจาก Yahoo Finance · อัปเดตทุก 5 นาที" : "Market prices from Yahoo Finance · 5 min cache"))
+                : (th ? "กำลังโหลดราคาตลาด…" : "Fetching live market prices…")}
+            </span>
           </div>
         </>
       )}
