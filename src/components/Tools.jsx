@@ -1747,7 +1747,7 @@ export function ToolsPage({ t, lang, ccy, dataState, liveHoldings = [], prices =
         )
       })()}
       {calcHolding && (
-        <AvgCostModal lang={lang} holding={calcHolding} onClose={() => setCalcHolding(null)} />
+        <AvgCostModal lang={lang} holding={calcHolding} totalPortfolio={total} fxRate={fxRate} onClose={() => setCalcHolding(null)} />
       )}
       {ai.open && (
         <AiAnalysisModal th={th}

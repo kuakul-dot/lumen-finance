@@ -937,6 +937,8 @@ function LivePortfolioPage({ t, lang, ccy, portfolio, liveHoldings, prices = {},
         <AvgCostModal
           lang={lang}
           holding={calcHolding}
+          totalPortfolio={totalValue}
+          fxRate={fxRate}
           onClose={() => setCalcHolding(null)}
           onCommit={(mode, { qty, price }) => {
             const h = calcHolding
