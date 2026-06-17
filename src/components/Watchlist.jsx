@@ -6,6 +6,7 @@ import { fetchHistory, fetchPrices, toYahooSymbol } from '../lib/prices'
 import { getWatchlist, addWatchlistItem, updateWatchlistNote, removeWatchlistItem, migrateLocalWatchlist } from '../lib/watchlistDb'
 import { loadAlerts } from '../lib/alerts'
 import { AlertsModal } from './AlertsModal'
+import { fetchNews, timeAgo } from '../lib/news'
 
 const WATCHLIST_KEY = 'lumen_watchlist_v1'
 
@@ -1347,6 +1348,159 @@ function EmptyState({ th, onAdd }) {
   )
 }
 
+// ── News tab ──────────────────────────────────────────────────────────────────
+function NewsTab({ items, lang }) {
+  const th = lang === 'th'
+  const [news,        setNews]        = useState([])
+  const [loading,     setLoading]     = useState(false)
+  const [error,       setError]       = useState(null)
+  const [refreshedAt, setRefreshedAt] = useState(null)
+  const [activeTicker, setActiveTicker] = useState(null)
+
+  const yahooSymbols = useMemo(
+    () => items.map(i => toYahooSymbol(i.symbol, i.region || 'US', i.cls || 'Equity')),
+    [items]
+  )
+
+  const load = useCallback(async (force = false) => {
+    if (loading || !yahooSymbols.length) return
+    setLoading(true)
+    setError(null)
+    try {
+      const data = await fetchNews(yahooSymbols, { force })
+      setNews(data)
+      setRefreshedAt(Date.now())
+    } catch (e) {
+      setError(th ? `โหลดข่าวไม่ได้: ${e.message}` : `Failed to load news: ${e.message}`)
+    } finally {
+      setLoading(false)
+    }
+  }, [yahooSymbols, loading, th])
+
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  useEffect(() => { if (yahooSymbols.length) load() }, [yahooSymbols.join(',')])
+
+  const tickers   = useMemo(() => [...new Set(news.map(n => n.ticker))], [news])
+  const displayed = activeTicker ? news.filter(n => n.ticker === activeTicker) : news
+
+  const shortTicker = sym => sym.replace(/\.BK$/, '').replace(/-USD$/, '')
+
+  if (!yahooSymbols.length) {
+    return (
+      <div style={{ textAlign: 'center', padding: '60px 24px', color: 'var(--ink-3)', fontSize: 14 }}>
+        {th ? 'เพิ่มหุ้นใน Watchlist ก่อนเพื่อดูข่าว' : 'Add stocks to your watchlist to see news'}
+      </div>
+    )
+  }
+
+  return (
+    <div>
+      {/* Filter chips */}
+      <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 16, flexWrap: 'wrap' }}>
+        <button onClick={() => setActiveTicker(null)} style={{
+          padding: '4px 12px', borderRadius: 999, fontSize: 12, fontWeight: 600,
+          border: '1px solid var(--line)',
+          background: activeTicker == null ? 'var(--ink)' : 'transparent',
+          color:      activeTicker == null ? 'var(--bg)'  : 'var(--ink-2)',
+          cursor: 'pointer',
+        }}>{th ? 'ทั้งหมด' : 'All'}</button>
+
+        {tickers.map(sym => (
+          <button key={sym} onClick={() => setActiveTicker(p => p === sym ? null : sym)} style={{
+            padding: '4px 12px', borderRadius: 999, fontSize: 12, fontWeight: 600,
+            border: '1px solid var(--line)',
+            background: activeTicker === sym ? 'var(--ink)' : 'transparent',
+            color:      activeTicker === sym ? 'var(--bg)'  : 'var(--ink-2)',
+            cursor: 'pointer', fontFamily: 'var(--font-mono)',
+          }}>{shortTicker(sym)}</button>
+        ))}
+
+        <div style={{ flex: 1 }} />
+
+        {refreshedAt && (
+          <span style={{ fontSize: 11, color: 'var(--ink-3)' }}>
+            {timeAgo(new Date(refreshedAt).toISOString(), lang)}
+          </span>
+        )}
+        <button onClick={() => load(true)} disabled={loading} title={th ? 'รีเฟรช' : 'Refresh'} style={{
+          padding: '4px 8px', borderRadius: 6, fontSize: 12,
+          border: '1px solid var(--line)', background: 'transparent', color: 'var(--ink-2)',
+          cursor: loading ? 'default' : 'pointer', opacity: loading ? 0.4 : 1,
+        }}><Icon name="refresh" size={13} /></button>
+      </div>
+
+      {/* States */}
+      {loading && !news.length && (
+        <div style={{ textAlign: 'center', padding: '52px 24px', color: 'var(--ink-3)', fontSize: 14 }}>
+          {th ? 'กำลังโหลดข่าว…' : 'Loading news…'}
+        </div>
+      )}
+      {error && (
+        <div style={{ padding: '12px 14px', borderRadius: 8, background: 'var(--bg-2)', color: 'var(--ink-3)', fontSize: 13, marginBottom: 12 }}>
+          {error}
+        </div>
+      )}
+      {!loading && !error && news.length > 0 && displayed.length === 0 && (
+        <div style={{ textAlign: 'center', padding: '48px 24px', color: 'var(--ink-3)', fontSize: 14 }}>
+          {th ? 'ไม่พบข่าวสำหรับหุ้นนี้' : 'No news found for this ticker'}
+        </div>
+      )}
+
+      {/* News list */}
+      <div>
+        {displayed.map((item, i) => (
+          <div key={i}
+            onClick={() => item.link && window.open(item.link, '_blank', 'noopener,noreferrer')}
+            style={{
+              display: 'grid', gridTemplateColumns: '1fr auto',
+              gap: 12, padding: '13px 0',
+              borderBottom: '1px solid var(--line)',
+              cursor: item.link ? 'pointer' : 'default',
+            }}>
+            <div>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 5, flexWrap: 'wrap' }}>
+                <span style={{
+                  fontSize: 10, fontWeight: 700, padding: '1px 6px', borderRadius: 4,
+                  background: 'var(--bg-2)', border: '1px solid var(--line)',
+                  color: 'var(--ink-2)', fontFamily: 'var(--font-mono)',
+                }}>{shortTicker(item.ticker)}</span>
+                <span style={{ fontSize: 11, color: 'var(--ink-3)' }}>{item.source}</span>
+                {item.pubDate && (
+                  <>
+                    <span style={{ fontSize: 11, color: 'var(--ink-4)' }}>·</span>
+                    <span style={{ fontSize: 11, color: 'var(--ink-3)' }}>{timeAgo(item.pubDate, lang)}</span>
+                  </>
+                )}
+              </div>
+              <div style={{ fontSize: 13, fontWeight: 600, color: 'var(--ink)', lineHeight: 1.45, marginBottom: 3 }}>
+                {item.title}
+              </div>
+              {item.description && (
+                <div style={{ fontSize: 12, color: 'var(--ink-3)', lineHeight: 1.5 }}>
+                  {item.description.slice(0, 160)}{item.description.length > 160 ? '…' : ''}
+                </div>
+              )}
+            </div>
+            {item.thumbnail && (
+              <img src={item.thumbnail} alt=""
+                style={{ width: 68, height: 54, objectFit: 'cover', borderRadius: 6, flexShrink: 0, alignSelf: 'start' }}
+                onError={e => { e.target.style.display = 'none' }} />
+            )}
+          </div>
+        ))}
+      </div>
+
+      {news.length > 0 && (
+        <p style={{ fontSize: 11, color: 'var(--ink-4)', marginTop: 20, lineHeight: 1.6 }}>
+          {th
+            ? 'ข่าวจาก Yahoo Finance · Google News · cache 15 นาที'
+            : 'News via Yahoo Finance · Google News · cached 15 min'}
+        </p>
+      )}
+    </div>
+  )
+}
+
 // ── Main page ─────────────────────────────────────────────────────────────────
 export function WatchlistPage({ lang, ccy, fxRate = 36, session }) {
   const th     = lang === 'th'
@@ -1365,6 +1519,7 @@ export function WatchlistPage({ lang, ccy, fxRate = 36, session }) {
   const [alertPrefill,   setAlertPrefill]   = useState(null) // null | { ticker, name, region, cls, yahooSym, livePrice, currency }
   const [filterRegion,   setFilterRegion]   = useState('all') // 'all' | 'US' | 'TH' | 'Crypto'
   const [sortBy,         setSortBy]         = useState('default')
+  const [pageTab,        setPageTab]        = useState('list') // 'list' | 'news'
 
   // Existing alerts (localStorage cache, kept fresh by lumen-alerts-changed)
   const [alerts, setAlerts] = useState([])
@@ -1562,10 +1717,24 @@ export function WatchlistPage({ lang, ccy, fxRate = 36, session }) {
         }
       />
 
+      {/* Tab switcher */}
+      {!loadingList && (
+        <div className="segmented" style={{ marginBottom: 20 }}>
+          <button className={pageTab === 'list' ? 'on' : ''} onClick={() => setPageTab('list')}>
+            {th ? 'รายการ' : 'Watchlist'}
+          </button>
+          <button className={pageTab === 'news' ? 'on' : ''} onClick={() => setPageTab('news')}>
+            {th ? 'ข่าว' : 'News'}
+          </button>
+        </div>
+      )}
+
       {loadingList ? (
         <div style={{ textAlign: 'center', padding: '72px 24px', color: 'var(--ink-3)', fontSize: 14 }}>
           {th ? '⏳ กำลังโหลดรายการ…' : '⏳ Loading watchlist…'}
         </div>
+      ) : pageTab === 'news' ? (
+        <NewsTab items={items} lang={lang} />
       ) : items.length === 0 ? (
         <EmptyState th={th} onAdd={() => setShowAdd(true)} />
       ) : (
