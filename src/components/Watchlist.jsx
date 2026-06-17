@@ -1349,7 +1349,7 @@ function EmptyState({ th, onAdd }) {
 }
 
 // ── News tab ──────────────────────────────────────────────────────────────────
-function NewsTab({ items, lang }) {
+function NewsTab({ items, holdings = [], lang }) {
   const th = lang === 'th'
   const [news,        setNews]        = useState([])
   const [loading,     setLoading]     = useState(false)
@@ -1357,10 +1357,11 @@ function NewsTab({ items, lang }) {
   const [refreshedAt, setRefreshedAt] = useState(null)
   const [activeTicker, setActiveTicker] = useState(null)
 
-  const yahooSymbols = useMemo(
-    () => items.map(i => toYahooSymbol(i.symbol, i.region || 'US', i.cls || 'Equity')),
-    [items]
-  )
+  const yahooSymbols = useMemo(() => {
+    const watchSyms  = items.map(i => toYahooSymbol(i.symbol, i.region || 'US', i.cls || 'Equity'))
+    const holdSyms   = holdings.map(h => toYahooSymbol(h.ticker, h.region || 'TH', h.asset_class || 'Equity'))
+    return [...new Set([...watchSyms, ...holdSyms])]
+  }, [items, holdings])
 
   const load = useCallback(async (force = false) => {
     if (loading || !yahooSymbols.length) return
@@ -1388,7 +1389,7 @@ function NewsTab({ items, lang }) {
   if (!yahooSymbols.length) {
     return (
       <div style={{ textAlign: 'center', padding: '60px 24px', color: 'var(--ink-3)', fontSize: 14 }}>
-        {th ? 'เพิ่มหุ้นใน Watchlist ก่อนเพื่อดูข่าว' : 'Add stocks to your watchlist to see news'}
+        {th ? 'เพิ่มหุ้นใน Portfolio หรือ Watchlist เพื่อดูข่าว' : 'Add holdings or watchlist stocks to see news'}
       </div>
     )
   }
@@ -1502,7 +1503,7 @@ function NewsTab({ items, lang }) {
 }
 
 // ── Main page ─────────────────────────────────────────────────────────────────
-export function WatchlistPage({ lang, ccy, fxRate = 36, session }) {
+export function WatchlistPage({ lang, ccy, fxRate = 36, session, liveHoldings = [] }) {
   const th     = lang === 'th'
   const userId = session?.user?.id || null
 
@@ -1734,7 +1735,7 @@ export function WatchlistPage({ lang, ccy, fxRate = 36, session }) {
           {th ? '⏳ กำลังโหลดรายการ…' : '⏳ Loading watchlist…'}
         </div>
       ) : pageTab === 'news' ? (
-        <NewsTab items={items} lang={lang} />
+        <NewsTab items={items} holdings={liveHoldings} lang={lang} />
       ) : items.length === 0 ? (
         <EmptyState th={th} onAdd={() => setShowAdd(true)} />
       ) : (

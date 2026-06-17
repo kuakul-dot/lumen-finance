@@ -545,7 +545,7 @@ export default function App() {
       />
     )
   } else if (route === "watchlist") {
-    page = <WatchlistPage lang={lang} ccy={ccy} fxRate={fxRate} session={session} />
+    page = <WatchlistPage lang={lang} ccy={ccy} fxRate={fxRate} session={session} liveHoldings={liveHoldings} />
   } else if (route === "dca") {
     page = <DCAPage lang={lang} ccy={ccy} fxRate={fxRate} />
   } else if (route === "alerts") {
