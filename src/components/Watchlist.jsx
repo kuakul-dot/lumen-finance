@@ -1380,6 +1380,138 @@ const DISPLAY_NAMES = {
 }
 const displayTicker = sym => DISPLAY_NAMES[sym] || sym.replace(/\.BK$/, '').replace(/-USD$/, '')
 
+// ── News article modal (bottom-sheet reader) ──────────────────────────────────
+function NewsArticleModal({ item, chipColor, lang, onClose }) {
+  const th = lang === 'th'
+  const [translating, setTranslating] = useState(false)
+  const [translated,  setTranslated]  = useState(null) // { title, description } | null
+  const [showTx,      setShowTx]      = useState(false)
+
+  useEffect(() => {
+    const handler = e => { if (e.key === 'Escape') onClose() }
+    window.addEventListener('keydown', handler)
+    return () => window.removeEventListener('keydown', handler)
+  }, [onClose])
+
+  const handleTranslate = async () => {
+    if (translated) { setShowTx(v => !v); return }
+    setTranslating(true)
+    try {
+      const tl = 'th'
+      const parts = [item.title, item.description].filter(Boolean)
+      const results = await Promise.all(
+        parts.map(t => fetch(`/api/translate?text=${encodeURIComponent(t)}&tl=${tl}`).then(r => r.json()))
+      )
+      setTranslated({
+        title:       results[0]?.translated || item.title,
+        description: results[1]?.translated || item.description || '',
+      })
+      setShowTx(true)
+    } catch (e) {
+      console.error('[translate]', e)
+    } finally { setTranslating(false) }
+  }
+
+  const title = showTx && translated ? translated.title       : item.title
+  const desc  = showTx && translated ? translated.description : item.description
+  const { bg, border, color } = chipColor
+
+  return (
+    <div
+      onClick={onClose}
+      style={{
+        position: 'fixed', inset: 0, zIndex: 1000,
+        background: 'rgba(0,0,0,0.45)', backdropFilter: 'blur(3px)',
+        display: 'flex', alignItems: 'flex-end', justifyContent: 'center',
+      }}
+    >
+      <div
+        onClick={e => e.stopPropagation()}
+        style={{
+          background: 'var(--bg)', borderRadius: '18px 18px 0 0',
+          width: '100%', maxWidth: 640, maxHeight: '88vh',
+          display: 'flex', flexDirection: 'column',
+          boxShadow: '0 -8px 40px rgba(0,0,0,0.2)',
+        }}
+      >
+        {/* Drag handle */}
+        <div style={{ display: 'flex', justifyContent: 'center', paddingTop: 10, paddingBottom: 2 }}>
+          <div style={{ width: 36, height: 4, borderRadius: 99, background: 'var(--line)' }} />
+        </div>
+
+        {/* Header */}
+        <div style={{ display: 'flex', alignItems: 'center', padding: '8px 18px 12px', gap: 8 }}>
+          <span style={{
+            fontSize: 10, fontWeight: 700, padding: '2px 7px', borderRadius: 4,
+            background: bg, border: `1px solid ${border}`, color,
+            fontFamily: 'var(--font-mono)', flexShrink: 0,
+          }}>{displayTicker(item.ticker)}</span>
+          <span style={{ fontSize: 12, color: 'var(--ink-3)', flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+            {item.source}{item.pubDate ? ` · ${timeAgo(item.pubDate, lang)}` : ''}
+          </span>
+          <button onClick={onClose} style={{
+            width: 28, height: 28, borderRadius: 99, border: 'none', flexShrink: 0,
+            background: 'var(--bg-2)', color: 'var(--ink-3)', cursor: 'pointer',
+            fontSize: 14, display: 'flex', alignItems: 'center', justifyContent: 'center',
+          }}>✕</button>
+        </div>
+
+        {/* Scrollable body */}
+        <div style={{ flex: 1, overflowY: 'auto', padding: '0 18px 8px' }}>
+          {item.thumbnail && (
+            <img src={item.thumbnail} alt=""
+              style={{ width: '100%', height: 180, objectFit: 'cover', borderRadius: 12, marginBottom: 16, display: 'block' }}
+              onError={e => { e.target.style.display = 'none' }} />
+          )}
+          <h2 style={{ fontSize: 16, fontWeight: 700, lineHeight: 1.5, color: 'var(--ink)', margin: '0 0 12px' }}>
+            {title}
+          </h2>
+          {desc ? (
+            <p style={{ fontSize: 14, color: 'var(--ink-2)', lineHeight: 1.8, margin: 0 }}>{desc}</p>
+          ) : (
+            <p style={{ fontSize: 13, color: 'var(--ink-3)', margin: 0 }}>
+              {th ? 'ไม่มีเนื้อหาเพิ่มเติม' : 'No preview available.'}
+            </p>
+          )}
+        </div>
+
+        {/* Action buttons */}
+        <div style={{ padding: '14px 18px 28px', display: 'flex', gap: 8 }}>
+          <button
+            onClick={handleTranslate}
+            disabled={translating}
+            style={{
+              flex: 1, padding: '11px 8px', borderRadius: 12, fontSize: 13, fontWeight: 600,
+              border: `1px solid ${showTx ? border : 'var(--line)'}`,
+              background: showTx ? bg : 'transparent',
+              color: showTx ? color : 'var(--ink-2)',
+              cursor: translating ? 'default' : 'pointer',
+              opacity: translating ? 0.6 : 1,
+            }}
+          >
+            {translating
+              ? (th ? 'กำลังแปล…' : 'Translating…')
+              : showTx
+                ? (th ? 'ต้นฉบับ' : 'Original')
+                : (th ? 'แปลเป็นไทย' : 'Translate TH')}
+          </button>
+          {item.link && (
+            <button
+              onClick={() => window.open(item.link, '_blank', 'noopener,noreferrer')}
+              style={{
+                flex: 1, padding: '11px 8px', borderRadius: 12, fontSize: 13, fontWeight: 600,
+                border: 'none', background: 'var(--accent, #2d7ac9)', color: '#fff', cursor: 'pointer',
+              }}
+            >
+              {th ? 'อ่านต้นฉบับ →' : 'Full article →'}
+            </button>
+          )}
+        </div>
+      </div>
+    </div>
+  )
+}
+
 // ── News tab ──────────────────────────────────────────────────────────────────
 function NewsTab({ items, holdings = [], lang }) {
   const th = lang === 'th'
@@ -1389,6 +1521,7 @@ function NewsTab({ items, holdings = [], lang }) {
   const [macroNews,     setMacroNews]     = useState([])
   const [events,        setEvents]        = useState([])
   const [activeTicker,  setActiveTicker]  = useState(null)
+  const [modalItem,     setModalItem]     = useState(null)
   const [tickerLoading, setTickerLoading] = useState(false)
   const [marketLoading, setMarketLoading] = useState(false)
   const [macroLoading,  setMacroLoading]  = useState(false)
@@ -1583,12 +1716,12 @@ function NewsTab({ items, holdings = [], lang }) {
           const { bg, border, color } = getChipColor(item.ticker)
           return (
             <div key={i}
-              onClick={() => item.link && window.open(item.link, '_blank', 'noopener,noreferrer')}
+              onClick={() => setModalItem(item)}
               style={{
                 display: 'grid', gridTemplateColumns: '1fr auto',
                 gap: 12, padding: '14px 0',
                 borderBottom: '1px solid var(--line)',
-                cursor: item.link ? 'pointer' : 'default',
+                cursor: 'pointer',
               }}>
               <div>
                 <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 5, flexWrap: 'wrap' }}>
@@ -1610,7 +1743,7 @@ function NewsTab({ items, holdings = [], lang }) {
                 </div>
                 {item.description && (
                   <div style={{ fontSize: 12, color: 'var(--ink-3)', lineHeight: 1.5 }}>
-                    {item.description.slice(0, 160)}{item.description.length > 160 ? '…' : ''}
+                    {item.description.slice(0, 140)}{item.description.length > 140 ? '…' : ''}
                   </div>
                 )}
               </div>
@@ -1630,6 +1763,16 @@ function NewsTab({ items, holdings = [], lang }) {
             ? 'ข่าวจาก Yahoo Finance · Google News · cache 15 นาที'
             : 'News via Yahoo Finance · Google News · cached 15 min'}
         </p>
+      )}
+
+      {/* ── Article reader modal ─────────────────────────────────────────── */}
+      {modalItem && (
+        <NewsArticleModal
+          item={modalItem}
+          chipColor={getChipColor(modalItem.ticker)}
+          lang={lang}
+          onClose={() => setModalItem(null)}
+        />
       )}
     </div>
   )
