@@ -1,6 +1,7 @@
 import { useState, useEffect, useRef, useMemo, useCallback } from 'react'
 import { toYahooSymbol } from '../lib/prices'
 import { timeAgo } from '../lib/news'
+import { TickerLogo } from './Nav'
 
 const PALETTE = [
   { bg: 'rgba(56,138,230,0.13)',  border: 'rgba(56,138,230,0.32)',  color: '#2d7ac9' },
@@ -372,16 +373,31 @@ function NewsSection({ newsItems, loading, lang }) {
   )
 }
 
-export function StockDigest({ items, prices, lang }) {
+export function StockDigest({ items, prices, lang, liveHoldings = [] }) {
   const th = lang === 'th'
 
-  const yahooItems = useMemo(() =>
-    items.map((item, i) => ({
+  const yahooItems = useMemo(() => {
+    // Convert portfolio holdings to same shape as watchlist items
+    const holdingItems = liveHoldings.map(h => ({
+      symbol: h.ticker,
+      region: h.region || 'US',
+      cls: h.asset_class || 'Equity',
+      name: h.name || h.ticker,
+    }))
+    // Merge watchlist first, then portfolio — dedup by Yahoo symbol
+    const all = [...items, ...holdingItems]
+    const seen = new Set()
+    const deduped = []
+    for (const item of all) {
+      const sym = toYahooSymbol(item.symbol, item.region || 'US', item.cls || 'Equity')
+      if (!seen.has(sym)) { seen.add(sym); deduped.push(item) }
+    }
+    return deduped.map((item, i) => ({
       ...item,
       yahooSym: toYahooSymbol(item.symbol, item.region || 'US', item.cls || 'Equity'),
       paletteColor: PALETTE[i % PALETTE.length],
-    })),
-  [items])
+    }))
+  }, [items, liveHoldings])
 
   const [activeSym, setActiveSym] = useState(() => yahooItems[0]?.yahooSym || null)
   const [analystData, setAnalystData] = useState(null)
@@ -492,9 +508,7 @@ export function StockDigest({ items, prices, lang }) {
       <div style={{ ...CARD, padding: '12px 16px' }}>
         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-            <div style={{ width: 38, height: 38, borderRadius: 9, background: accent.bg, border: `0.5px solid ${accent.border}`, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 12, fontWeight: 600, color: accent.color, fontFamily: 'var(--font-mono)', flexShrink: 0 }}>
-              {(activeItem?.symbol || '').slice(0, 2)}
-            </div>
+            <TickerLogo ticker={activeItem?.symbol} region={activeItem?.region} cls={activeItem?.cls} size={38} />
             <div>
               <div style={{ fontSize: 15, fontWeight: 500 }}>
                 {loading ? <Shimmer h={15} w={160} /> : (analystData?.name || activeItem?.name || activeItem?.symbol || '')}

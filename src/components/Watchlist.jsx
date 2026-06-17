@@ -1874,7 +1874,7 @@ export function WatchlistPage({ lang, ccy, fxRate = 36, session, liveHoldings = 
           {th ? '⏳ กำลังโหลดรายการ…' : '⏳ Loading watchlist…'}
         </div>
       ) : pageTab === 'digest' ? (
-        <StockDigest items={items} prices={prices} lang={lang} />
+        <StockDigest items={items} prices={prices} lang={lang} liveHoldings={liveHoldings} />
       ) : pageTab === 'news' ? (
         <NewsTab items={items} holdings={liveHoldings} lang={lang} />
       ) : items.length === 0 ? (
