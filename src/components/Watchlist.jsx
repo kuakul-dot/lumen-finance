@@ -7,6 +7,7 @@ import { getWatchlist, addWatchlistItem, updateWatchlistNote, removeWatchlistIte
 import { loadAlerts } from '../lib/alerts'
 import { AlertsModal } from './AlertsModal'
 import { fetchNews, timeAgo } from '../lib/news'
+import { fetchEvents, fmtEventDate } from '../lib/events'
 
 const WATCHLIST_KEY = 'lumen_watchlist_v1'
 
@@ -1348,31 +1349,55 @@ function EmptyState({ th, onAdd }) {
   )
 }
 
+// ── Ticker color palette (cycles for >6 tickers) ─────────────────────────────
+const CHIP_PALETTE = [
+  { bg: 'rgba(56,138,230,0.13)',  border: 'rgba(56,138,230,0.32)',  color: '#2d7ac9' },  // blue
+  { bg: 'rgba(124,95,240,0.13)', border: 'rgba(124,95,240,0.32)', color: '#7048e8' },  // purple
+  { bg: 'rgba(22,163,117,0.13)', border: 'rgba(22,163,117,0.32)', color: '#14977a' },  // teal
+  { bg: 'rgba(211,122,15,0.13)', border: 'rgba(211,122,15,0.32)', color: '#c07010' },  // amber
+  { bg: 'rgba(220,80,40,0.13)',  border: 'rgba(220,80,40,0.32)',  color: '#c04820' },  // coral
+  { bg: 'rgba(100,160,35,0.13)', border: 'rgba(100,160,35,0.32)', color: '#4d8a1a' },  // green
+]
+
 // ── News tab ──────────────────────────────────────────────────────────────────
 function NewsTab({ items, holdings = [], lang }) {
   const th = lang === 'th'
-  const [news,        setNews]        = useState([])
-  const [loading,     setLoading]     = useState(false)
-  const [error,       setError]       = useState(null)
-  const [refreshedAt, setRefreshedAt] = useState(null)
+  const [news,         setNews]         = useState([])
+  const [events,       setEvents]       = useState([])
+  const [loading,      setLoading]      = useState(false)
+  const [error,        setError]        = useState(null)
+  const [refreshedAt,  setRefreshedAt]  = useState(null)
   const [activeTicker, setActiveTicker] = useState(null)
 
   const yahooSymbols = useMemo(() => {
-    const watchSyms  = items.map(i => toYahooSymbol(i.symbol, i.region || 'US', i.cls || 'Equity'))
-    const holdSyms   = holdings.map(h => toYahooSymbol(h.ticker, h.region || 'TH', h.asset_class || 'Equity'))
+    const watchSyms = items.map(i => toYahooSymbol(i.symbol, i.region || 'US', i.cls || 'Equity'))
+    const holdSyms  = holdings.map(h => toYahooSymbol(h.ticker, h.region || 'TH', h.asset_class || 'Equity'))
     return [...new Set([...watchSyms, ...holdSyms])]
   }, [items, holdings])
+
+  // Stable color per yahoo symbol — computed once when tickers are known
+  const colorMap = useMemo(() => {
+    const allSyms = [...new Set([...yahooSymbols])]
+    const map = {}
+    allSyms.forEach((sym, i) => { map[sym] = CHIP_PALETTE[i % CHIP_PALETTE.length] })
+    return map
+  }, [yahooSymbols])
+
+  const chipColor = sym => colorMap[sym] || CHIP_PALETTE[0]
 
   const load = useCallback(async (force = false) => {
     if (loading || !yahooSymbols.length) return
     setLoading(true)
     setError(null)
     try {
-      const data = await fetchNews(yahooSymbols, { force })
-      setNews(data)
+      const [newsData, eventsData] = await Promise.allSettled([
+        fetchNews(yahooSymbols, { force }),
+        fetchEvents(yahooSymbols, { force }),
+      ])
+      if (newsData.status === 'fulfilled')   setNews(newsData.value)
+      else setError(th ? `โหลดข่าวไม่ได้: ${newsData.reason?.message}` : `Failed to load news: ${newsData.reason?.message}`)
+      if (eventsData.status === 'fulfilled') setEvents(eventsData.value)
       setRefreshedAt(Date.now())
-    } catch (e) {
-      setError(th ? `โหลดข่าวไม่ได้: ${e.message}` : `Failed to load news: ${e.message}`)
     } finally {
       setLoading(false)
     }
@@ -1383,7 +1408,6 @@ function NewsTab({ items, holdings = [], lang }) {
 
   const tickers   = useMemo(() => [...new Set(news.map(n => n.ticker))], [news])
   const displayed = activeTicker ? news.filter(n => n.ticker === activeTicker) : news
-
   const shortTicker = sym => sym.replace(/\.BK$/, '').replace(/-USD$/, '')
 
   if (!yahooSymbols.length) {
@@ -1396,8 +1420,44 @@ function NewsTab({ items, holdings = [], lang }) {
 
   return (
     <div>
-      {/* Filter chips */}
-      <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 16, flexWrap: 'wrap' }}>
+
+      {/* ── Event Calendar strip ─────────────────────────────────────────── */}
+      {events.length > 0 && (
+        <div style={{ marginBottom: 20 }}>
+          <div style={{ fontSize: 10, fontWeight: 700, letterSpacing: '0.08em', color: 'var(--ink-3)', marginBottom: 8 }}>
+            {th ? 'กำหนดการ' : 'UPCOMING'}
+          </div>
+          <div style={{ display: 'flex', gap: 8, overflowX: 'auto', WebkitOverflowScrolling: 'touch', paddingBottom: 4 }}>
+            {events.map((ev, i) => {
+              const { bg, border, color } = chipColor(ev.symbol)
+              const isEarnings = ev.type === 'earnings'
+              return (
+                <div key={i} style={{
+                  flexShrink: 0, padding: '8px 12px', borderRadius: 10,
+                  border: `1px solid ${border}`, background: bg, minWidth: 88,
+                }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 5, marginBottom: 4 }}>
+                    <span style={{
+                      fontSize: 9, fontWeight: 700, padding: '1px 5px', borderRadius: 3,
+                      background: isEarnings ? 'rgba(124,95,240,0.15)' : 'rgba(22,163,117,0.15)',
+                      color: isEarnings ? '#7048e8' : '#14977a',
+                    }}>{isEarnings ? (th ? 'งบ' : 'EPS') : 'XD'}</span>
+                    <span style={{ fontSize: 11, fontWeight: 700, color, fontFamily: 'var(--font-mono)' }}>
+                      {shortTicker(ev.symbol)}
+                    </span>
+                  </div>
+                  <div style={{ fontSize: 12, fontWeight: 600, color: 'var(--ink)' }}>
+                    {fmtEventDate(ev.date, lang)}
+                  </div>
+                </div>
+              )
+            })}
+          </div>
+        </div>
+      )}
+
+      {/* ── Filter chips ─────────────────────────────────────────────────── */}
+      <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 14, flexWrap: 'wrap' }}>
         <button onClick={() => setActiveTicker(null)} style={{
           padding: '4px 12px', borderRadius: 999, fontSize: 12, fontWeight: 600,
           border: '1px solid var(--line)',
@@ -1406,18 +1466,21 @@ function NewsTab({ items, holdings = [], lang }) {
           cursor: 'pointer',
         }}>{th ? 'ทั้งหมด' : 'All'}</button>
 
-        {tickers.map(sym => (
-          <button key={sym} onClick={() => setActiveTicker(p => p === sym ? null : sym)} style={{
-            padding: '4px 12px', borderRadius: 999, fontSize: 12, fontWeight: 600,
-            border: '1px solid var(--line)',
-            background: activeTicker === sym ? 'var(--ink)' : 'transparent',
-            color:      activeTicker === sym ? 'var(--bg)'  : 'var(--ink-2)',
-            cursor: 'pointer', fontFamily: 'var(--font-mono)',
-          }}>{shortTicker(sym)}</button>
-        ))}
+        {tickers.map(sym => {
+          const { bg, border, color } = chipColor(sym)
+          const active = activeTicker === sym
+          return (
+            <button key={sym} onClick={() => setActiveTicker(p => p === sym ? null : sym)} style={{
+              padding: '4px 12px', borderRadius: 999, fontSize: 12, fontWeight: 600,
+              border: `1px solid ${active ? border : 'var(--line)'}`,
+              background: active ? bg : 'transparent',
+              color: active ? color : 'var(--ink-2)',
+              cursor: 'pointer', fontFamily: 'var(--font-mono)',
+            }}>{shortTicker(sym)}</button>
+          )
+        })}
 
         <div style={{ flex: 1 }} />
-
         {refreshedAt && (
           <span style={{ fontSize: 11, color: 'var(--ink-3)' }}>
             {timeAgo(new Date(refreshedAt).toISOString(), lang)}
@@ -1430,7 +1493,7 @@ function NewsTab({ items, holdings = [], lang }) {
         }}><Icon name="refresh" size={13} /></button>
       </div>
 
-      {/* States */}
+      {/* ── States ───────────────────────────────────────────────────────── */}
       {loading && !news.length && (
         <div style={{ textAlign: 'center', padding: '52px 24px', color: 'var(--ink-3)', fontSize: 14 }}>
           {th ? 'กำลังโหลดข่าว…' : 'Loading news…'}
@@ -1447,48 +1510,51 @@ function NewsTab({ items, holdings = [], lang }) {
         </div>
       )}
 
-      {/* News list */}
+      {/* ── News list ────────────────────────────────────────────────────── */}
       <div>
-        {displayed.map((item, i) => (
-          <div key={i}
-            onClick={() => item.link && window.open(item.link, '_blank', 'noopener,noreferrer')}
-            style={{
-              display: 'grid', gridTemplateColumns: '1fr auto',
-              gap: 12, padding: '13px 0',
-              borderBottom: '1px solid var(--line)',
-              cursor: item.link ? 'pointer' : 'default',
-            }}>
-            <div>
-              <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 5, flexWrap: 'wrap' }}>
-                <span style={{
-                  fontSize: 10, fontWeight: 700, padding: '1px 6px', borderRadius: 4,
-                  background: 'var(--bg-2)', border: '1px solid var(--line)',
-                  color: 'var(--ink-2)', fontFamily: 'var(--font-mono)',
-                }}>{shortTicker(item.ticker)}</span>
-                <span style={{ fontSize: 11, color: 'var(--ink-3)' }}>{item.source}</span>
-                {item.pubDate && (
-                  <>
-                    <span style={{ fontSize: 11, color: 'var(--ink-4)' }}>·</span>
-                    <span style={{ fontSize: 11, color: 'var(--ink-3)' }}>{timeAgo(item.pubDate, lang)}</span>
-                  </>
+        {displayed.map((item, i) => {
+          const { bg, border, color } = chipColor(item.ticker)
+          return (
+            <div key={i}
+              onClick={() => item.link && window.open(item.link, '_blank', 'noopener,noreferrer')}
+              style={{
+                display: 'grid', gridTemplateColumns: '1fr auto',
+                gap: 12, padding: '14px 0',
+                borderBottom: '1px solid var(--line)',
+                cursor: item.link ? 'pointer' : 'default',
+              }}>
+              <div>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 5, flexWrap: 'wrap' }}>
+                  <span style={{
+                    fontSize: 10, fontWeight: 700, padding: '2px 7px', borderRadius: 4,
+                    background: bg, border: `1px solid ${border}`, color,
+                    fontFamily: 'var(--font-mono)',
+                  }}>{shortTicker(item.ticker)}</span>
+                  <span style={{ fontSize: 11, color: 'var(--ink-3)' }}>{item.source}</span>
+                  {item.pubDate && (
+                    <>
+                      <span style={{ fontSize: 11, color: 'var(--ink-4)' }}>·</span>
+                      <span style={{ fontSize: 11, color: 'var(--ink-3)' }}>{timeAgo(item.pubDate, lang)}</span>
+                    </>
+                  )}
+                </div>
+                <div style={{ fontSize: 13, fontWeight: 600, color: 'var(--ink)', lineHeight: 1.45, marginBottom: 3 }}>
+                  {item.title}
+                </div>
+                {item.description && (
+                  <div style={{ fontSize: 12, color: 'var(--ink-3)', lineHeight: 1.5 }}>
+                    {item.description.slice(0, 160)}{item.description.length > 160 ? '…' : ''}
+                  </div>
                 )}
               </div>
-              <div style={{ fontSize: 13, fontWeight: 600, color: 'var(--ink)', lineHeight: 1.45, marginBottom: 3 }}>
-                {item.title}
-              </div>
-              {item.description && (
-                <div style={{ fontSize: 12, color: 'var(--ink-3)', lineHeight: 1.5 }}>
-                  {item.description.slice(0, 160)}{item.description.length > 160 ? '…' : ''}
-                </div>
+              {item.thumbnail && (
+                <img src={item.thumbnail} alt=""
+                  style={{ width: 68, height: 54, objectFit: 'cover', borderRadius: 6, flexShrink: 0, alignSelf: 'start' }}
+                  onError={e => { e.target.style.display = 'none' }} />
               )}
             </div>
-            {item.thumbnail && (
-              <img src={item.thumbnail} alt=""
-                style={{ width: 68, height: 54, objectFit: 'cover', borderRadius: 6, flexShrink: 0, alignSelf: 'start' }}
-                onError={e => { e.target.style.display = 'none' }} />
-            )}
-          </div>
-        ))}
+          )
+        })}
       </div>
 
       {news.length > 0 && (
