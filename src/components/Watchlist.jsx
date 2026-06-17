@@ -8,6 +8,7 @@ import { loadAlerts } from '../lib/alerts'
 import { AlertsModal } from './AlertsModal'
 import { fetchNews, fetchMarketNews, fetchMacroNews, timeAgo } from '../lib/news'
 import { fetchEvents, fmtEventDate } from '../lib/events'
+import { StockDigest } from './StockDigest'
 
 const WATCHLIST_KEY = 'lumen_watchlist_v1'
 
@@ -2059,6 +2060,9 @@ export function WatchlistPage({ lang, ccy, fxRate = 36, session, liveHoldings = 
           <button className={pageTab === 'news' ? 'on' : ''} onClick={() => setPageTab('news')}>
             {th ? 'ข่าว' : 'News'}
           </button>
+          <button className={pageTab === 'digest' ? 'on' : ''} onClick={() => setPageTab('digest')}>
+            {th ? 'วิเคราะห์' : 'Digest'}
+          </button>
         </div>
       )}
 
@@ -2066,6 +2070,8 @@ export function WatchlistPage({ lang, ccy, fxRate = 36, session, liveHoldings = 
         <div style={{ textAlign: 'center', padding: '72px 24px', color: 'var(--ink-3)', fontSize: 14 }}>
           {th ? '⏳ กำลังโหลดรายการ…' : '⏳ Loading watchlist…'}
         </div>
+      ) : pageTab === 'digest' ? (
+        <StockDigest items={items} prices={prices} lang={lang} />
       ) : pageTab === 'news' ? (
         <NewsTab items={items} holdings={liveHoldings} lang={lang} />
       ) : items.length === 0 ? (
