@@ -55,6 +55,33 @@ async function fetchGoogle(sym) {
   })
 }
 
+async function fetchGoogleQuery(query, label) {
+  const url = `https://news.google.com/rss/search?q=${encodeURIComponent(query)}&hl=en&gl=TH&ceid=TH:en`
+  const r = await fetch(url, {
+    headers: { 'User-Agent': UA, Accept: 'text/xml,*/*', Referer: 'https://news.google.com/' },
+    signal: AbortSignal.timeout(7000),
+  })
+  if (!r.ok) throw new Error(`Google ${r.status}`)
+  const raw = parseRSS(await r.text(), 'Google News')
+  return raw.slice(0, 15).map(item => {
+    const srcM = / - ([^-\n]{3,40})$/.exec(item.title)
+    return { ...item, ticker: label, source: srcM ? srcM[1].trim() : 'Google News' }
+  })
+}
+
+const MARKET_SYMS = ['^GSPC', 'GC=F', 'CL=F', 'USDTHB=X']
+const MARKET_QUERIES = [
+  { q: 'SET index Thailand stock market', label: 'SET' },
+  { q: 'Federal Reserve FOMC interest rate decision', label: 'FED' },
+  { q: 'Bank of Thailand BOT interest rate monetary', label: 'BOT' },
+]
+const MACRO_QUERIES = [
+  { q: 'Thailand GDP economic growth outlook', label: 'TH-GDP' },
+  { q: 'Thailand CPI inflation consumer price index', label: 'CPI' },
+  { q: 'US economy GDP jobs unemployment Fed', label: 'US-ECON' },
+  { q: 'Thailand industry sector market outlook', label: 'Sector' },
+]
+
 export default async function handler(req) {
   if (req.method === 'OPTIONS') {
     return new Response(null, {
@@ -63,21 +90,31 @@ export default async function handler(req) {
   }
 
   const { searchParams } = new URL(req.url)
-  const syms = (searchParams.get('symbols') || '')
-    .split(',').map(s => s.trim()).filter(Boolean).slice(0, 12)
+  const preset = searchParams.get('preset') // 'market' | 'macro' | null
   const maxPer = Math.min(parseInt(searchParams.get('count') || '8', 10), 15)
 
-  if (!syms.length) {
-    return new Response(JSON.stringify([]), {
-      headers: { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' },
+  let tasks = []
+  if (preset === 'market') {
+    tasks = [
+      ...MARKET_SYMS.map(sym => fetchYahoo(sym)),
+      ...MARKET_QUERIES.map(({ q, label }) => fetchGoogleQuery(q, label)),
+    ]
+  } else if (preset === 'macro') {
+    tasks = MACRO_QUERIES.map(({ q, label }) => fetchGoogleQuery(q, label))
+  } else {
+    const syms = (searchParams.get('symbols') || '')
+      .split(',').map(s => s.trim()).filter(Boolean).slice(0, 12)
+    if (!syms.length) {
+      return new Response(JSON.stringify([]), {
+        headers: { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' },
+      })
+    }
+    tasks = syms.flatMap(sym => {
+      const arr = [fetchYahoo(sym)]
+      if (sym.endsWith('.BK') || sym.endsWith('-USD')) arr.push(fetchGoogle(sym))
+      return arr
     })
   }
-
-  const tasks = syms.flatMap(sym => {
-    const arr = [fetchYahoo(sym)]
-    if (sym.endsWith('.BK') || sym.endsWith('-USD')) arr.push(fetchGoogle(sym))
-    return arr
-  })
   const settled = await Promise.allSettled(tasks)
 
   const all = []

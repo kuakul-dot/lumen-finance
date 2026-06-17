@@ -1,6 +1,28 @@
 const CACHE_KEY = 'lumen_events_v1'
 const TTL = 60 * 60 * 1000
 
+// Central bank meeting dates — approximate, updated annually via code
+const STATIC_CB_EVENTS = [
+  // FOMC 2026 (Federal Reserve)
+  { symbol: 'FOMC', type: 'fomc', date: '2026-07-29' },
+  { symbol: 'FOMC', type: 'fomc', date: '2026-09-15' },
+  { symbol: 'FOMC', type: 'fomc', date: '2026-10-27' },
+  { symbol: 'FOMC', type: 'fomc', date: '2026-12-08' },
+  // กนง 2026 (Bank of Thailand MPC)
+  { symbol: 'กนง', type: 'gnb', date: '2026-06-25' },
+  { symbol: 'กนง', type: 'gnb', date: '2026-08-27' },
+  { symbol: 'กนง', type: 'gnb', date: '2026-10-29' },
+  { symbol: 'กนง', type: 'gnb', date: '2026-12-17' },
+]
+
+function getUpcomingStatic() {
+  const now = Date.now()
+  return STATIC_CB_EVENTS.filter(ev => {
+    const ms = new Date(ev.date + 'T00:00:00').getTime()
+    return ms >= now - 86400000 && ms <= now + 90 * 86400000
+  })
+}
+
 function loadCache(key) {
   try {
     const c = JSON.parse(localStorage.getItem(CACHE_KEY) || 'null')
@@ -13,7 +35,9 @@ function saveCache(key, items) {
 }
 
 export async function fetchEvents(yahooSymbols, { force = false } = {}) {
-  if (!yahooSymbols?.length) return []
+  const staticEvs = getUpcomingStatic()
+  if (!yahooSymbols?.length) return staticEvs
+
   const cacheKey = [...yahooSymbols].sort().join(',')
   if (!force) {
     const cached = loadCache(cacheKey)
@@ -21,9 +45,12 @@ export async function fetchEvents(yahooSymbols, { force = false } = {}) {
   }
   const r = await fetch(`/api/events?symbols=${encodeURIComponent(yahooSymbols.join(','))}`)
   if (!r.ok) throw new Error(`events ${r.status}`)
-  const items = await r.json()
-  saveCache(cacheKey, items)
-  return items
+  const apiItems = await r.json()
+
+  const merged = [...apiItems, ...staticEvs]
+  merged.sort((a, b) => new Date(a.date) - new Date(b.date))
+  saveCache(cacheKey, merged)
+  return merged
 }
 
 export function fmtEventDate(iso, lang = 'en') {

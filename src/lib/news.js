@@ -1,28 +1,61 @@
-const CACHE_KEY = 'lumen_news_v1'
+const CACHE_KEY        = 'lumen_news_v1'
+const MARKET_CACHE_KEY = 'lumen_market_news_v1'
+const MACRO_CACHE_KEY  = 'lumen_macro_news_v1'
 const TTL = 15 * 60 * 1000
 
-function loadCache(key) {
+function loadCache(storageKey, subKey) {
   try {
-    const c = JSON.parse(localStorage.getItem(CACHE_KEY) || 'null')
-    return c?.key === key && Date.now() - c.ts < TTL ? c.items : null
+    const c = JSON.parse(localStorage.getItem(storageKey) || 'null')
+    if (!c) return null
+    if (subKey !== undefined && c.key !== subKey) return null
+    return Date.now() - c.ts < TTL ? c.items : null
   } catch { return null }
 }
 
-function saveCache(key, items) {
-  try { localStorage.setItem(CACHE_KEY, JSON.stringify({ key, ts: Date.now(), items })) } catch {}
+function saveCache(storageKey, items, subKey) {
+  try {
+    const obj = subKey !== undefined
+      ? { key: subKey, ts: Date.now(), items }
+      : { ts: Date.now(), items }
+    localStorage.setItem(storageKey, JSON.stringify(obj))
+  } catch {}
 }
 
 export async function fetchNews(yahooSymbols, { force = false } = {}) {
   if (!yahooSymbols?.length) return []
   const cacheKey = [...yahooSymbols].sort().join(',')
   if (!force) {
-    const cached = loadCache(cacheKey)
+    const cached = loadCache(CACHE_KEY, cacheKey)
     if (cached) return cached
   }
   const r = await fetch(`/api/news?symbols=${encodeURIComponent(yahooSymbols.join(','))}&count=8`)
   if (!r.ok) throw new Error(`news ${r.status}`)
   const items = await r.json()
-  saveCache(cacheKey, items)
+  saveCache(CACHE_KEY, items, cacheKey)
+  return items
+}
+
+export async function fetchMarketNews({ force = false } = {}) {
+  if (!force) {
+    const cached = loadCache(MARKET_CACHE_KEY)
+    if (cached) return cached
+  }
+  const r = await fetch('/api/news?preset=market&count=6')
+  if (!r.ok) throw new Error(`market news ${r.status}`)
+  const items = await r.json()
+  saveCache(MARKET_CACHE_KEY, items)
+  return items
+}
+
+export async function fetchMacroNews({ force = false } = {}) {
+  if (!force) {
+    const cached = loadCache(MACRO_CACHE_KEY)
+    if (cached) return cached
+  }
+  const r = await fetch('/api/news?preset=macro&count=6')
+  if (!r.ok) throw new Error(`macro news ${r.status}`)
+  const items = await r.json()
+  saveCache(MACRO_CACHE_KEY, items)
   return items
 }
 

@@ -6,7 +6,7 @@ import { fetchHistory, fetchPrices, toYahooSymbol } from '../lib/prices'
 import { getWatchlist, addWatchlistItem, updateWatchlistNote, removeWatchlistItem, migrateLocalWatchlist } from '../lib/watchlistDb'
 import { loadAlerts } from '../lib/alerts'
 import { AlertsModal } from './AlertsModal'
-import { fetchNews, timeAgo } from '../lib/news'
+import { fetchNews, fetchMarketNews, fetchMacroNews, timeAgo } from '../lib/news'
 import { fetchEvents, fmtEventDate } from '../lib/events'
 
 const WATCHLIST_KEY = 'lumen_watchlist_v1'
@@ -1359,15 +1359,42 @@ const CHIP_PALETTE = [
   { bg: 'rgba(100,160,35,0.13)', border: 'rgba(100,160,35,0.32)', color: '#4d8a1a' },  // green
 ]
 
+// Fixed colors for market/macro/CB symbols (not user-portfolio tickers)
+const FIXED_CHIP_COLORS = {
+  '^GSPC':    { bg: 'rgba(56,138,230,0.13)',  border: 'rgba(56,138,230,0.32)',  color: '#2d7ac9' },
+  'GC=F':     { bg: 'rgba(211,122,15,0.13)',  border: 'rgba(211,122,15,0.32)',  color: '#c07010' },
+  'CL=F':     { bg: 'rgba(220,80,40,0.13)',   border: 'rgba(220,80,40,0.32)',   color: '#c04820' },
+  'USDTHB=X': { bg: 'rgba(22,163,117,0.13)',  border: 'rgba(22,163,117,0.32)',  color: '#14977a' },
+  'SET':      { bg: 'rgba(100,160,35,0.13)',  border: 'rgba(100,160,35,0.32)',  color: '#4d8a1a' },
+  'FED':      { bg: 'rgba(211,122,15,0.13)',  border: 'rgba(211,122,15,0.32)',  color: '#c07010' },
+  'BOT':      { bg: 'rgba(56,138,230,0.13)',  border: 'rgba(56,138,230,0.32)',  color: '#2d7ac9' },
+  'TH-GDP':   { bg: 'rgba(22,163,117,0.13)',  border: 'rgba(22,163,117,0.32)',  color: '#14977a' },
+  'CPI':      { bg: 'rgba(211,122,15,0.13)',  border: 'rgba(211,122,15,0.32)',  color: '#c07010' },
+  'US-ECON':  { bg: 'rgba(56,138,230,0.13)',  border: 'rgba(56,138,230,0.32)',  color: '#2d7ac9' },
+  'Sector':   { bg: 'rgba(100,160,35,0.13)',  border: 'rgba(100,160,35,0.32)',  color: '#4d8a1a' },
+}
+
+const DISPLAY_NAMES = {
+  '^GSPC': 'S&P500', 'GC=F': 'Gold', 'CL=F': 'Oil', 'USDTHB=X': 'USD/THB',
+  'TH-GDP': 'TH-GDP', 'US-ECON': 'US Econ', 'Sector': 'Sector',
+}
+const displayTicker = sym => DISPLAY_NAMES[sym] || sym.replace(/\.BK$/, '').replace(/-USD$/, '')
+
 // ── News tab ──────────────────────────────────────────────────────────────────
 function NewsTab({ items, holdings = [], lang }) {
   const th = lang === 'th'
-  const [news,         setNews]         = useState([])
-  const [events,       setEvents]       = useState([])
-  const [loading,      setLoading]      = useState(false)
-  const [error,        setError]        = useState(null)
-  const [refreshedAt,  setRefreshedAt]  = useState(null)
-  const [activeTicker, setActiveTicker] = useState(null)
+  const [newsSubTab,    setNewsSubTab]    = useState('ticker')
+  const [tickerNews,    setTickerNews]    = useState([])
+  const [marketNews,    setMarketNews]    = useState([])
+  const [macroNews,     setMacroNews]     = useState([])
+  const [events,        setEvents]        = useState([])
+  const [activeTicker,  setActiveTicker]  = useState(null)
+  const [tickerLoading, setTickerLoading] = useState(false)
+  const [marketLoading, setMarketLoading] = useState(false)
+  const [macroLoading,  setMacroLoading]  = useState(false)
+  const [tickerError,   setTickerError]   = useState(null)
+  const [refreshedAt,   setRefreshedAt]   = useState(null)
+  const loadedRef = useRef({ market: false, macro: false })
 
   const yahooSymbols = useMemo(() => {
     const watchSyms = items.map(i => toYahooSymbol(i.symbol, i.region || 'US', i.cls || 'Equity'))
@@ -1375,40 +1402,64 @@ function NewsTab({ items, holdings = [], lang }) {
     return [...new Set([...watchSyms, ...holdSyms])]
   }, [items, holdings])
 
-  // Stable color per yahoo symbol — computed once when tickers are known
   const colorMap = useMemo(() => {
-    const allSyms = [...new Set([...yahooSymbols])]
     const map = {}
-    allSyms.forEach((sym, i) => { map[sym] = CHIP_PALETTE[i % CHIP_PALETTE.length] })
+    yahooSymbols.forEach((sym, i) => { map[sym] = CHIP_PALETTE[i % CHIP_PALETTE.length] })
     return map
   }, [yahooSymbols])
 
-  const chipColor = sym => colorMap[sym] || CHIP_PALETTE[0]
+  const getChipColor = sym => colorMap[sym] || FIXED_CHIP_COLORS[sym] || CHIP_PALETTE[0]
 
-  const load = useCallback(async (force = false) => {
-    if (loading || !yahooSymbols.length) return
-    setLoading(true)
-    setError(null)
+  // ── Loaders ──────────────────────────────────────────────────────────────────
+  const loadTicker = useCallback(async (force = false) => {
+    if (!yahooSymbols.length) return
+    setTickerLoading(true)
+    setTickerError(null)
     try {
       const [newsData, eventsData] = await Promise.allSettled([
         fetchNews(yahooSymbols, { force }),
         fetchEvents(yahooSymbols, { force }),
       ])
-      if (newsData.status === 'fulfilled')   setNews(newsData.value)
-      else setError(th ? `โหลดข่าวไม่ได้: ${newsData.reason?.message}` : `Failed to load news: ${newsData.reason?.message}`)
+      if (newsData.status === 'fulfilled')   setTickerNews(newsData.value)
+      else setTickerError(th ? 'โหลดข่าวไม่ได้' : 'Failed to load news')
       if (eventsData.status === 'fulfilled') setEvents(eventsData.value)
       setRefreshedAt(Date.now())
-    } finally {
-      setLoading(false)
-    }
-  }, [yahooSymbols, loading, th])
+    } finally { setTickerLoading(false) }
+  }, [yahooSymbols, th])
 
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  useEffect(() => { if (yahooSymbols.length) load() }, [yahooSymbols.join(',')])
+  useEffect(() => { if (yahooSymbols.length) loadTicker() }, [yahooSymbols.join(',')])
 
-  const tickers   = useMemo(() => [...new Set(news.map(n => n.ticker))], [news])
-  const displayed = activeTicker ? news.filter(n => n.ticker === activeTicker) : news
-  const shortTicker = sym => sym.replace(/\.BK$/, '').replace(/-USD$/, '')
+  // Lazy-load market/macro on first tab visit
+  useEffect(() => {
+    if (newsSubTab === 'market' && !loadedRef.current.market) {
+      loadedRef.current.market = true
+      setMarketLoading(true)
+      fetchMarketNews().then(setMarketNews).catch(console.error).finally(() => setMarketLoading(false))
+    }
+    if (newsSubTab === 'macro' && !loadedRef.current.macro) {
+      loadedRef.current.macro = true
+      setMacroLoading(true)
+      fetchMacroNews().then(setMacroNews).catch(console.error).finally(() => setMacroLoading(false))
+    }
+  }, [newsSubTab])
+
+  const handleRefresh = () => {
+    if (newsSubTab === 'ticker') { loadTicker(true); return }
+    if (newsSubTab === 'market') {
+      setMarketLoading(true)
+      fetchMarketNews({ force: true }).then(setMarketNews).catch(console.error).finally(() => setMarketLoading(false))
+    } else {
+      setMacroLoading(true)
+      fetchMacroNews({ force: true }).then(setMacroNews).catch(console.error).finally(() => setMacroLoading(false))
+    }
+  }
+
+  // ── Derived ───────────────────────────────────────────────────────────────────
+  const tickers        = useMemo(() => [...new Set(tickerNews.map(n => n.ticker))], [tickerNews])
+  const displayedTicker = activeTicker ? tickerNews.filter(n => n.ticker === activeTicker) : tickerNews
+  const currentNews    = newsSubTab === 'ticker' ? displayedTicker : newsSubTab === 'market' ? marketNews : macroNews
+  const currentLoading = newsSubTab === 'ticker' ? tickerLoading   : newsSubTab === 'market' ? marketLoading : macroLoading
 
   if (!yahooSymbols.length) {
     return (
@@ -1421,7 +1472,24 @@ function NewsTab({ items, holdings = [], lang }) {
   return (
     <div>
 
-      {/* ── Event Calendar strip ─────────────────────────────────────────── */}
+      {/* ── Sub-tab switcher ─────────────────────────────────────────────── */}
+      <div style={{ display: 'flex', gap: 3, marginBottom: 18, padding: '3px', background: 'var(--bg-2)', borderRadius: 10, width: 'fit-content' }}>
+        {[
+          { key: 'ticker', label: 'Ticker' },
+          { key: 'market', label: th ? 'ตลาด'  : 'Market' },
+          { key: 'macro',  label: th ? 'มหภาค' : 'Macro'  },
+        ].map(({ key, label }) => (
+          <button key={key} onClick={() => setNewsSubTab(key)} style={{
+            padding: '5px 14px', borderRadius: 7, fontSize: 12, fontWeight: 600,
+            border: 'none', cursor: 'pointer', transition: 'all 0.15s',
+            background: newsSubTab === key ? 'var(--bg)'  : 'transparent',
+            color:      newsSubTab === key ? 'var(--ink)' : 'var(--ink-3)',
+            boxShadow:  newsSubTab === key ? '0 1px 3px rgba(0,0,0,0.1)' : 'none',
+          }}>{label}</button>
+        ))}
+      </div>
+
+      {/* ── Event Calendar strip (shared, all tabs) ───────────────────────── */}
       {events.length > 0 && (
         <div style={{ marginBottom: 20 }}>
           <div style={{ fontSize: 10, fontWeight: 700, letterSpacing: '0.08em', color: 'var(--ink-3)', marginBottom: 8 }}>
@@ -1429,26 +1497,25 @@ function NewsTab({ items, holdings = [], lang }) {
           </div>
           <div style={{ display: 'flex', gap: 8, overflowX: 'auto', WebkitOverflowScrolling: 'touch', paddingBottom: 4 }}>
             {events.map((ev, i) => {
-              const { bg, border, color } = chipColor(ev.symbol)
-              const isEarnings = ev.type === 'earnings'
+              const isFomc = ev.type === 'fomc'
+              const isGnb  = ev.type === 'gnb'
+              const isEarn = ev.type === 'earnings'
+              // Type badge style
+              const tbg = isFomc ? 'rgba(211,122,15,0.15)' : isGnb ? 'rgba(56,138,230,0.15)' : isEarn ? 'rgba(124,95,240,0.15)' : 'rgba(22,163,117,0.15)'
+              const tc  = isFomc ? '#c07010' : isGnb ? '#2d7ac9' : isEarn ? '#7048e8' : '#14977a'
+              const typeLabel = isFomc ? 'FOMC' : isGnb ? (th ? 'กนง' : 'BOT') : isEarn ? (th ? 'งบ' : 'EPS') : 'XD'
+              // Card colors
+              const cardC   = isFomc || isGnb ? tc : getChipColor(ev.symbol).color
+              const cardBg  = isFomc ? 'rgba(211,122,15,0.07)'  : isGnb ? 'rgba(56,138,230,0.07)'  : getChipColor(ev.symbol).bg
+              const cardBdr = isFomc ? 'rgba(211,122,15,0.28)'  : isGnb ? 'rgba(56,138,230,0.28)'  : getChipColor(ev.symbol).border
+              const symLabel = isFomc ? 'FED' : isGnb ? (th ? 'กนง' : 'BOT') : displayTicker(ev.symbol)
               return (
-                <div key={i} style={{
-                  flexShrink: 0, padding: '8px 12px', borderRadius: 10,
-                  border: `1px solid ${border}`, background: bg, minWidth: 88,
-                }}>
+                <div key={i} style={{ flexShrink: 0, padding: '8px 12px', borderRadius: 10, border: `1px solid ${cardBdr}`, background: cardBg, minWidth: 88 }}>
                   <div style={{ display: 'flex', alignItems: 'center', gap: 5, marginBottom: 4 }}>
-                    <span style={{
-                      fontSize: 9, fontWeight: 700, padding: '1px 5px', borderRadius: 3,
-                      background: isEarnings ? 'rgba(124,95,240,0.15)' : 'rgba(22,163,117,0.15)',
-                      color: isEarnings ? '#7048e8' : '#14977a',
-                    }}>{isEarnings ? (th ? 'งบ' : 'EPS') : 'XD'}</span>
-                    <span style={{ fontSize: 11, fontWeight: 700, color, fontFamily: 'var(--font-mono)' }}>
-                      {shortTicker(ev.symbol)}
-                    </span>
+                    <span style={{ fontSize: 9, fontWeight: 700, padding: '1px 5px', borderRadius: 3, background: tbg, color: tc }}>{typeLabel}</span>
+                    <span style={{ fontSize: 11, fontWeight: 700, color: cardC, fontFamily: 'var(--font-mono)' }}>{symLabel}</span>
                   </div>
-                  <div style={{ fontSize: 12, fontWeight: 600, color: 'var(--ink)' }}>
-                    {fmtEventDate(ev.date, lang)}
-                  </div>
+                  <div style={{ fontSize: 12, fontWeight: 600, color: 'var(--ink)' }}>{fmtEventDate(ev.date, lang)}</div>
                 </div>
               )
             })}
@@ -1456,64 +1523,64 @@ function NewsTab({ items, holdings = [], lang }) {
         </div>
       )}
 
-      {/* ── Filter chips ─────────────────────────────────────────────────── */}
+      {/* ── Toolbar: chips (ticker only) + refresh ────────────────────────── */}
       <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 14, flexWrap: 'wrap' }}>
-        <button onClick={() => setActiveTicker(null)} style={{
-          padding: '4px 12px', borderRadius: 999, fontSize: 12, fontWeight: 600,
-          border: '1px solid var(--line)',
-          background: activeTicker == null ? 'var(--ink)' : 'transparent',
-          color:      activeTicker == null ? 'var(--bg)'  : 'var(--ink-2)',
-          cursor: 'pointer',
-        }}>{th ? 'ทั้งหมด' : 'All'}</button>
-
-        {tickers.map(sym => {
-          const { bg, border, color } = chipColor(sym)
-          const active = activeTicker === sym
-          return (
-            <button key={sym} onClick={() => setActiveTicker(p => p === sym ? null : sym)} style={{
+        {newsSubTab === 'ticker' && (
+          <>
+            <button onClick={() => setActiveTicker(null)} style={{
               padding: '4px 12px', borderRadius: 999, fontSize: 12, fontWeight: 600,
-              border: `1px solid ${active ? border : 'var(--line)'}`,
-              background: active ? bg : 'transparent',
-              color: active ? color : 'var(--ink-2)',
-              cursor: 'pointer', fontFamily: 'var(--font-mono)',
-            }}>{shortTicker(sym)}</button>
-          )
-        })}
-
-        <div style={{ flex: 1 }} />
-        {refreshedAt && (
-          <span style={{ fontSize: 11, color: 'var(--ink-3)' }}>
-            {timeAgo(new Date(refreshedAt).toISOString(), lang)}
-          </span>
+              border: '1px solid var(--line)',
+              background: activeTicker == null ? 'var(--ink)' : 'transparent',
+              color:      activeTicker == null ? 'var(--bg)'  : 'var(--ink-2)',
+              cursor: 'pointer',
+            }}>{th ? 'ทั้งหมด' : 'All'}</button>
+            {tickers.map(sym => {
+              const { bg, border, color } = getChipColor(sym)
+              const active = activeTicker === sym
+              return (
+                <button key={sym} onClick={() => setActiveTicker(p => p === sym ? null : sym)} style={{
+                  padding: '4px 12px', borderRadius: 999, fontSize: 12, fontWeight: 600,
+                  border: `1px solid ${active ? border : 'var(--line)'}`,
+                  background: active ? bg : 'transparent',
+                  color: active ? color : 'var(--ink-2)',
+                  cursor: 'pointer', fontFamily: 'var(--font-mono)',
+                }}>{displayTicker(sym)}</button>
+              )
+            })}
+          </>
         )}
-        <button onClick={() => load(true)} disabled={loading} title={th ? 'รีเฟรช' : 'Refresh'} style={{
+        <div style={{ flex: 1 }} />
+        {newsSubTab === 'ticker' && refreshedAt && (
+          <span style={{ fontSize: 11, color: 'var(--ink-3)' }}>{timeAgo(new Date(refreshedAt).toISOString(), lang)}</span>
+        )}
+        <button onClick={handleRefresh} disabled={currentLoading} title={th ? 'รีเฟรช' : 'Refresh'} style={{
           padding: '4px 8px', borderRadius: 6, fontSize: 12,
           border: '1px solid var(--line)', background: 'transparent', color: 'var(--ink-2)',
-          cursor: loading ? 'default' : 'pointer', opacity: loading ? 0.4 : 1,
+          cursor: currentLoading ? 'default' : 'pointer', opacity: currentLoading ? 0.4 : 1,
         }}><Icon name="refresh" size={13} /></button>
       </div>
 
       {/* ── States ───────────────────────────────────────────────────────── */}
-      {loading && !news.length && (
+      {currentLoading && !currentNews.length && (
         <div style={{ textAlign: 'center', padding: '52px 24px', color: 'var(--ink-3)', fontSize: 14 }}>
           {th ? 'กำลังโหลดข่าว…' : 'Loading news…'}
         </div>
       )}
-      {error && (
+      {newsSubTab === 'ticker' && tickerError && (
         <div style={{ padding: '12px 14px', borderRadius: 8, background: 'var(--bg-2)', color: 'var(--ink-3)', fontSize: 13, marginBottom: 12 }}>
-          {error}
+          {tickerError}
         </div>
       )}
-      {!loading && !error && news.length > 0 && displayed.length === 0 && (
+      {!currentLoading && currentNews.length === 0 && !tickerError && (
         <div style={{ textAlign: 'center', padding: '48px 24px', color: 'var(--ink-3)', fontSize: 14 }}>
-          {th ? 'ไม่พบข่าวสำหรับหุ้นนี้' : 'No news found for this ticker'}
+          {th ? 'ไม่พบข่าว' : 'No news found'}
         </div>
       )}
 
       {/* ── News list ────────────────────────────────────────────────────── */}
       <div>
-        {displayed.map((item, i) => {
-          const { bg, border, color } = chipColor(item.ticker)
+        {currentNews.map((item, i) => {
+          const { bg, border, color } = getChipColor(item.ticker)
           return (
             <div key={i}
               onClick={() => item.link && window.open(item.link, '_blank', 'noopener,noreferrer')}
@@ -1529,7 +1596,7 @@ function NewsTab({ items, holdings = [], lang }) {
                     fontSize: 10, fontWeight: 700, padding: '2px 7px', borderRadius: 4,
                     background: bg, border: `1px solid ${border}`, color,
                     fontFamily: 'var(--font-mono)',
-                  }}>{shortTicker(item.ticker)}</span>
+                  }}>{displayTicker(item.ticker)}</span>
                   <span style={{ fontSize: 11, color: 'var(--ink-3)' }}>{item.source}</span>
                   {item.pubDate && (
                     <>
@@ -1557,7 +1624,7 @@ function NewsTab({ items, holdings = [], lang }) {
         })}
       </div>
 
-      {news.length > 0 && (
+      {currentNews.length > 0 && (
         <p style={{ fontSize: 11, color: 'var(--ink-4)', marginTop: 20, lineHeight: 1.6 }}>
           {th
             ? 'ข่าวจาก Yahoo Finance · Google News · cache 15 นาที'
