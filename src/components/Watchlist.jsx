@@ -1381,194 +1381,6 @@ const DISPLAY_NAMES = {
 }
 const displayTicker = sym => DISPLAY_NAMES[sym] || sym.replace(/\.BK$/, '').replace(/-USD$/, '')
 
-// ── News article modal (bottom-sheet reader + AI summary) ─────────────────────
-function NewsArticleModal({ item, chipColor, lang, onClose }) {
-  const th = lang === 'th'
-  const [summary,     setSummary]     = useState(null)   // string | null
-  const [sumLoading,  setSumLoading]  = useState(true)
-  const [translated,  setTranslated]  = useState(null)   // { title, description }
-  const [showTx,      setShowTx]      = useState(false)
-  const [translating, setTranslating] = useState(false)
-
-  // Auto-fetch AI summary on open
-  useEffect(() => {
-    const ctrl = new AbortController()
-    setSumLoading(true)
-    const p = new URLSearchParams({ title: item.title })
-    if (item.description) p.set('desc', item.description)
-    fetch(`/api/summarize?${p}`, { signal: ctrl.signal })
-      .then(r => r.json())
-      .then(d => { if (d.summary) setSummary(d.summary) })
-      .catch(e => { if (e.name !== 'AbortError') console.error('[summary]', e) })
-      .finally(() => setSumLoading(false))
-    return () => ctrl.abort()
-  }, [item.title, item.description])
-
-  // Escape to close
-  useEffect(() => {
-    const h = e => { if (e.key === 'Escape') onClose() }
-    window.addEventListener('keydown', h)
-    return () => window.removeEventListener('keydown', h)
-  }, [onClose])
-
-  const handleTranslate = async () => {
-    if (translated) { setShowTx(v => !v); return }
-    setTranslating(true)
-    try {
-      const parts = [item.title, item.description].filter(Boolean)
-      const res = await Promise.all(
-        parts.map(t => fetch(`/api/translate?text=${encodeURIComponent(t)}&tl=th`).then(r => r.json()))
-      )
-      setTranslated({ title: res[0]?.translated || item.title, description: res[1]?.translated || '' })
-      setShowTx(true)
-    } catch (e) { console.error('[translate]', e) }
-    finally { setTranslating(false) }
-  }
-
-  const title = showTx && translated ? translated.title       : item.title
-  const desc  = showTx && translated ? translated.description : item.description
-  const { bg, border, color } = chipColor
-
-  return (
-    <div
-      onClick={onClose}
-      style={{
-        position: 'fixed', inset: 0, zIndex: 1000,
-        background: 'rgba(0,0,0,0.5)', backdropFilter: 'blur(4px)',
-        display: 'flex', alignItems: 'flex-end', justifyContent: 'center',
-      }}
-    >
-      <div
-        className="sheet-up"
-        onClick={e => e.stopPropagation()}
-        style={{
-          background: 'var(--bg)', borderRadius: '20px 20px 0 0',
-          width: '100%', maxWidth: 660, maxHeight: '90vh',
-          display: 'flex', flexDirection: 'column',
-          boxShadow: '0 -12px 48px rgba(0,0,0,0.22)',
-        }}
-      >
-        {/* Drag handle */}
-        <div style={{ display: 'flex', justifyContent: 'center', padding: '12px 0 0' }}>
-          <div style={{ width: 40, height: 4, borderRadius: 99, background: 'var(--line)' }} />
-        </div>
-
-        {/* Header */}
-        <div style={{ display: 'flex', alignItems: 'center', padding: '10px 20px 14px', gap: 8 }}>
-          <span style={{
-            fontSize: 10, fontWeight: 700, padding: '2px 8px', borderRadius: 5,
-            background: bg, border: `1px solid ${border}`, color,
-            fontFamily: 'var(--font-mono)', flexShrink: 0,
-          }}>{displayTicker(item.ticker)}</span>
-          <span style={{ fontSize: 12, color: 'var(--ink-3)', flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-            {item.source}{item.pubDate ? ` · ${timeAgo(item.pubDate, lang)}` : ''}
-          </span>
-          <button onClick={onClose} style={{
-            width: 30, height: 30, borderRadius: 99, border: 'none', flexShrink: 0,
-            background: 'var(--bg-2)', color: 'var(--ink-3)', cursor: 'pointer', fontSize: 15,
-            display: 'flex', alignItems: 'center', justifyContent: 'center',
-          }}>✕</button>
-        </div>
-
-        {/* Scrollable body */}
-        <div style={{ flex: 1, overflowY: 'auto', padding: '0 20px 4px' }}>
-
-          {/* Thumbnail */}
-          {item.thumbnail && (
-            <img src={item.thumbnail} alt="" style={{
-              width: '100%', height: 190, objectFit: 'cover',
-              borderRadius: 14, marginBottom: 18, display: 'block',
-            }} onError={e => { e.target.style.display = 'none' }} />
-          )}
-
-          {/* ── AI Summary box ───────────────────────────────────────────── */}
-          <div style={{
-            background: bg, border: `1px solid ${border}`,
-            borderRadius: 14, padding: '13px 15px', marginBottom: 18,
-          }}>
-            <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 9 }}>
-              <span style={{ fontSize: 10, fontWeight: 800, letterSpacing: '0.06em', color }}>
-                {sumLoading ? (th ? 'กำลังสรุป' : 'SUMMARIZING') : (th ? 'สรุป' : 'SUMMARY')}
-              </span>
-              <span style={{
-                fontSize: 9, fontWeight: 700, padding: '1px 5px', borderRadius: 3,
-                background: border, color,
-              }}>AI</span>
-            </div>
-
-            {sumLoading ? (
-              /* Skeleton bars */
-              <div style={{ display: 'flex', flexDirection: 'column', gap: 7 }}>
-                {[100, 88, 70].map((w, i) => (
-                  <div key={i} className="shimmer" style={{
-                    height: 11, borderRadius: 6, background: border, width: `${w}%`,
-                  }} />
-                ))}
-              </div>
-            ) : summary ? (
-              <p style={{ fontSize: 13.5, lineHeight: 1.75, color: 'var(--ink)', margin: 0 }}>
-                {summary}
-              </p>
-            ) : (
-              <p style={{ fontSize: 12, color, margin: 0, opacity: 0.7 }}>
-                {th ? 'ไม่สามารถสรุปได้ในขณะนี้' : 'Summary unavailable'}
-              </p>
-            )}
-          </div>
-
-          {/* ── Title ───────────────────────────────────────────────────── */}
-          <h2 style={{ fontSize: 15, fontWeight: 700, lineHeight: 1.55, color: 'var(--ink)', margin: '0 0 10px' }}>
-            {title}
-          </h2>
-
-          {/* ── Description ─────────────────────────────────────────────── */}
-          {desc ? (
-            <p style={{ fontSize: 13, color: 'var(--ink-2)', lineHeight: 1.8, margin: '0 0 8px' }}>{desc}</p>
-          ) : (
-            <p style={{ fontSize: 12, color: 'var(--ink-3)', margin: '0 0 8px' }}>
-              {th ? 'ไม่มีเนื้อหาเพิ่มเติม' : 'No preview available.'}
-            </p>
-          )}
-        </div>
-
-        {/* ── Action buttons ─────────────────────────────────────────────── */}
-        <div style={{ padding: '14px 20px 30px', display: 'flex', gap: 8 }}>
-          <button
-            onClick={handleTranslate}
-            disabled={translating}
-            style={{
-              flex: 1, padding: '11px 8px', borderRadius: 12, fontSize: 13, fontWeight: 600,
-              border: `1px solid ${showTx ? border : 'var(--line)'}`,
-              background: showTx ? bg : 'transparent',
-              color: showTx ? color : 'var(--ink-2)',
-              cursor: translating ? 'default' : 'pointer',
-              opacity: translating ? 0.6 : 1,
-              transition: 'all 0.15s',
-            }}
-          >
-            {translating
-              ? (th ? 'กำลังแปล…' : 'Translating…')
-              : showTx
-                ? (th ? 'ต้นฉบับ' : 'Original')
-                : (th ? 'แปลเป็นไทย' : 'Translate TH')}
-          </button>
-          {item.link && (
-            <button
-              onClick={() => window.open(item.link, '_blank', 'noopener,noreferrer')}
-              style={{
-                flex: 1, padding: '11px 8px', borderRadius: 12, fontSize: 13, fontWeight: 600,
-                border: 'none', background: 'var(--accent, #2d7ac9)', color: '#fff', cursor: 'pointer',
-              }}
-            >
-              {th ? 'อ่านต้นฉบับ →' : 'Full article →'}
-            </button>
-          )}
-        </div>
-      </div>
-    </div>
-  )
-}
-
 // ── News tab ──────────────────────────────────────────────────────────────────
 function NewsTab({ items, holdings = [], lang }) {
   const th = lang === 'th'
@@ -1578,7 +1390,7 @@ function NewsTab({ items, holdings = [], lang }) {
   const [macroNews,     setMacroNews]     = useState([])
   const [events,        setEvents]        = useState([])
   const [activeTicker,  setActiveTicker]  = useState(null)
-  const [modalItem,     setModalItem]     = useState(null)
+
   const [tickerLoading, setTickerLoading] = useState(false)
   const [marketLoading, setMarketLoading] = useState(false)
   const [macroLoading,  setMacroLoading]  = useState(false)
@@ -1773,7 +1585,7 @@ function NewsTab({ items, holdings = [], lang }) {
           const { bg, border, color } = getChipColor(item.ticker)
           return (
             <div key={i}
-              onClick={() => setModalItem(item)}
+              onClick={() => item.link && window.open(item.link, '_blank', 'noopener,noreferrer')}
               style={{
                 display: 'grid', gridTemplateColumns: '1fr auto',
                 gap: 12, padding: '14px 0',
@@ -1822,15 +1634,6 @@ function NewsTab({ items, holdings = [], lang }) {
         </p>
       )}
 
-      {/* ── Article reader modal ─────────────────────────────────────────── */}
-      {modalItem && (
-        <NewsArticleModal
-          item={modalItem}
-          chipColor={getChipColor(modalItem.ticker)}
-          lang={lang}
-          onClose={() => setModalItem(null)}
-        />
-      )}
     </div>
   )
 }
