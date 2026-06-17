@@ -1380,36 +1380,48 @@ const DISPLAY_NAMES = {
 }
 const displayTicker = sym => DISPLAY_NAMES[sym] || sym.replace(/\.BK$/, '').replace(/-USD$/, '')
 
-// ── News article modal (bottom-sheet reader) ──────────────────────────────────
+// ── News article modal (bottom-sheet reader + AI summary) ─────────────────────
 function NewsArticleModal({ item, chipColor, lang, onClose }) {
   const th = lang === 'th'
-  const [translating, setTranslating] = useState(false)
-  const [translated,  setTranslated]  = useState(null) // { title, description } | null
+  const [summary,     setSummary]     = useState(null)   // string | null
+  const [sumLoading,  setSumLoading]  = useState(true)
+  const [translated,  setTranslated]  = useState(null)   // { title, description }
   const [showTx,      setShowTx]      = useState(false)
+  const [translating, setTranslating] = useState(false)
 
+  // Auto-fetch AI summary on open
   useEffect(() => {
-    const handler = e => { if (e.key === 'Escape') onClose() }
-    window.addEventListener('keydown', handler)
-    return () => window.removeEventListener('keydown', handler)
+    const ctrl = new AbortController()
+    setSumLoading(true)
+    const p = new URLSearchParams({ title: item.title })
+    if (item.description) p.set('desc', item.description)
+    fetch(`/api/summarize?${p}`, { signal: ctrl.signal })
+      .then(r => r.json())
+      .then(d => { if (d.summary) setSummary(d.summary) })
+      .catch(e => { if (e.name !== 'AbortError') console.error('[summary]', e) })
+      .finally(() => setSumLoading(false))
+    return () => ctrl.abort()
+  }, [item.title, item.description])
+
+  // Escape to close
+  useEffect(() => {
+    const h = e => { if (e.key === 'Escape') onClose() }
+    window.addEventListener('keydown', h)
+    return () => window.removeEventListener('keydown', h)
   }, [onClose])
 
   const handleTranslate = async () => {
     if (translated) { setShowTx(v => !v); return }
     setTranslating(true)
     try {
-      const tl = 'th'
       const parts = [item.title, item.description].filter(Boolean)
-      const results = await Promise.all(
-        parts.map(t => fetch(`/api/translate?text=${encodeURIComponent(t)}&tl=${tl}`).then(r => r.json()))
+      const res = await Promise.all(
+        parts.map(t => fetch(`/api/translate?text=${encodeURIComponent(t)}&tl=th`).then(r => r.json()))
       )
-      setTranslated({
-        title:       results[0]?.translated || item.title,
-        description: results[1]?.translated || item.description || '',
-      })
+      setTranslated({ title: res[0]?.translated || item.title, description: res[1]?.translated || '' })
       setShowTx(true)
-    } catch (e) {
-      console.error('[translate]', e)
-    } finally { setTranslating(false) }
+    } catch (e) { console.error('[translate]', e) }
+    finally { setTranslating(false) }
   }
 
   const title = showTx && translated ? translated.title       : item.title
@@ -1421,28 +1433,29 @@ function NewsArticleModal({ item, chipColor, lang, onClose }) {
       onClick={onClose}
       style={{
         position: 'fixed', inset: 0, zIndex: 1000,
-        background: 'rgba(0,0,0,0.45)', backdropFilter: 'blur(3px)',
+        background: 'rgba(0,0,0,0.5)', backdropFilter: 'blur(4px)',
         display: 'flex', alignItems: 'flex-end', justifyContent: 'center',
       }}
     >
       <div
+        className="sheet-up"
         onClick={e => e.stopPropagation()}
         style={{
-          background: 'var(--bg)', borderRadius: '18px 18px 0 0',
-          width: '100%', maxWidth: 640, maxHeight: '88vh',
+          background: 'var(--bg)', borderRadius: '20px 20px 0 0',
+          width: '100%', maxWidth: 660, maxHeight: '90vh',
           display: 'flex', flexDirection: 'column',
-          boxShadow: '0 -8px 40px rgba(0,0,0,0.2)',
+          boxShadow: '0 -12px 48px rgba(0,0,0,0.22)',
         }}
       >
         {/* Drag handle */}
-        <div style={{ display: 'flex', justifyContent: 'center', paddingTop: 10, paddingBottom: 2 }}>
-          <div style={{ width: 36, height: 4, borderRadius: 99, background: 'var(--line)' }} />
+        <div style={{ display: 'flex', justifyContent: 'center', padding: '12px 0 0' }}>
+          <div style={{ width: 40, height: 4, borderRadius: 99, background: 'var(--line)' }} />
         </div>
 
         {/* Header */}
-        <div style={{ display: 'flex', alignItems: 'center', padding: '8px 18px 12px', gap: 8 }}>
+        <div style={{ display: 'flex', alignItems: 'center', padding: '10px 20px 14px', gap: 8 }}>
           <span style={{
-            fontSize: 10, fontWeight: 700, padding: '2px 7px', borderRadius: 4,
+            fontSize: 10, fontWeight: 700, padding: '2px 8px', borderRadius: 5,
             background: bg, border: `1px solid ${border}`, color,
             fontFamily: 'var(--font-mono)', flexShrink: 0,
           }}>{displayTicker(item.ticker)}</span>
@@ -1450,33 +1463,75 @@ function NewsArticleModal({ item, chipColor, lang, onClose }) {
             {item.source}{item.pubDate ? ` · ${timeAgo(item.pubDate, lang)}` : ''}
           </span>
           <button onClick={onClose} style={{
-            width: 28, height: 28, borderRadius: 99, border: 'none', flexShrink: 0,
-            background: 'var(--bg-2)', color: 'var(--ink-3)', cursor: 'pointer',
-            fontSize: 14, display: 'flex', alignItems: 'center', justifyContent: 'center',
+            width: 30, height: 30, borderRadius: 99, border: 'none', flexShrink: 0,
+            background: 'var(--bg-2)', color: 'var(--ink-3)', cursor: 'pointer', fontSize: 15,
+            display: 'flex', alignItems: 'center', justifyContent: 'center',
           }}>✕</button>
         </div>
 
         {/* Scrollable body */}
-        <div style={{ flex: 1, overflowY: 'auto', padding: '0 18px 8px' }}>
+        <div style={{ flex: 1, overflowY: 'auto', padding: '0 20px 4px' }}>
+
+          {/* Thumbnail */}
           {item.thumbnail && (
-            <img src={item.thumbnail} alt=""
-              style={{ width: '100%', height: 180, objectFit: 'cover', borderRadius: 12, marginBottom: 16, display: 'block' }}
-              onError={e => { e.target.style.display = 'none' }} />
+            <img src={item.thumbnail} alt="" style={{
+              width: '100%', height: 190, objectFit: 'cover',
+              borderRadius: 14, marginBottom: 18, display: 'block',
+            }} onError={e => { e.target.style.display = 'none' }} />
           )}
-          <h2 style={{ fontSize: 16, fontWeight: 700, lineHeight: 1.5, color: 'var(--ink)', margin: '0 0 12px' }}>
+
+          {/* ── AI Summary box ───────────────────────────────────────────── */}
+          <div style={{
+            background: bg, border: `1px solid ${border}`,
+            borderRadius: 14, padding: '13px 15px', marginBottom: 18,
+          }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 9 }}>
+              <span style={{ fontSize: 10, fontWeight: 800, letterSpacing: '0.06em', color }}>
+                {sumLoading ? (th ? 'กำลังสรุป' : 'SUMMARIZING') : (th ? 'สรุป' : 'SUMMARY')}
+              </span>
+              <span style={{
+                fontSize: 9, fontWeight: 700, padding: '1px 5px', borderRadius: 3,
+                background: border, color,
+              }}>AI</span>
+            </div>
+
+            {sumLoading ? (
+              /* Skeleton bars */
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 7 }}>
+                {[100, 88, 70].map((w, i) => (
+                  <div key={i} className="shimmer" style={{
+                    height: 11, borderRadius: 6, background: border, width: `${w}%`,
+                  }} />
+                ))}
+              </div>
+            ) : summary ? (
+              <p style={{ fontSize: 13.5, lineHeight: 1.75, color: 'var(--ink)', margin: 0 }}>
+                {summary}
+              </p>
+            ) : (
+              <p style={{ fontSize: 12, color, margin: 0, opacity: 0.7 }}>
+                {th ? 'ไม่สามารถสรุปได้ในขณะนี้' : 'Summary unavailable'}
+              </p>
+            )}
+          </div>
+
+          {/* ── Title ───────────────────────────────────────────────────── */}
+          <h2 style={{ fontSize: 15, fontWeight: 700, lineHeight: 1.55, color: 'var(--ink)', margin: '0 0 10px' }}>
             {title}
           </h2>
+
+          {/* ── Description ─────────────────────────────────────────────── */}
           {desc ? (
-            <p style={{ fontSize: 14, color: 'var(--ink-2)', lineHeight: 1.8, margin: 0 }}>{desc}</p>
+            <p style={{ fontSize: 13, color: 'var(--ink-2)', lineHeight: 1.8, margin: '0 0 8px' }}>{desc}</p>
           ) : (
-            <p style={{ fontSize: 13, color: 'var(--ink-3)', margin: 0 }}>
+            <p style={{ fontSize: 12, color: 'var(--ink-3)', margin: '0 0 8px' }}>
               {th ? 'ไม่มีเนื้อหาเพิ่มเติม' : 'No preview available.'}
             </p>
           )}
         </div>
 
-        {/* Action buttons */}
-        <div style={{ padding: '14px 18px 28px', display: 'flex', gap: 8 }}>
+        {/* ── Action buttons ─────────────────────────────────────────────── */}
+        <div style={{ padding: '14px 20px 30px', display: 'flex', gap: 8 }}>
           <button
             onClick={handleTranslate}
             disabled={translating}
@@ -1487,6 +1542,7 @@ function NewsArticleModal({ item, chipColor, lang, onClose }) {
               color: showTx ? color : 'var(--ink-2)',
               cursor: translating ? 'default' : 'pointer',
               opacity: translating ? 0.6 : 1,
+              transition: 'all 0.15s',
             }}
           >
             {translating
