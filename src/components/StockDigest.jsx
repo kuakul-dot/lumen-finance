@@ -352,15 +352,24 @@ function QuarterlyCard({ data, aiSummary, aiLoading, accentColor, th, src }) {
   )
 }
 
-function NewsSection({ newsItems, loading, lang }) {
+function getSentiment(title) {
+  const t = (title || '').toLowerCase()
+  const b = ['profit', 'growth', 'beat', 'surge', 'record', 'strong', 'buy', 'upgrade', 'raise', 'outperform', 'rally', 'soar', 'jump', 'positive', 'deal', 'launch', 'tops', 'exceeds', 'rises', 'gains', 'bullish'].filter(w => t.includes(w)).length
+  const e = ['loss', 'decline', 'fall', 'miss', 'weak', 'sell', 'downgrade', 'cut', 'lower', 'crash', 'drop', 'tumble', 'slump', 'risk', 'warning', 'concern', 'lawsuit', 'fine', 'warn', 'fails', 'disappoints', 'bearish'].filter(w => t.includes(w)).length
+  return b > e ? 'bull' : e > b ? 'bear' : 'neutral'
+}
+
+function NewsSection({ newsItems, newsBrief, newsBriefLoading, loading, lang, accentColor }) {
   const th = lang === 'th'
+  const [filter, setFilter] = useState('all')
+  const [expanded, setExpanded] = useState(null)
+
   if (loading) return (
     <div style={CARD}>
       <div style={SEC}>{th ? 'ข่าวล่าสุด' : 'Recent News'}</div>
       {[0,1,2].map(i => (
         <div key={i} style={{ padding: '9px 0', borderBottom: i < 2 ? '0.5px solid var(--line)' : 'none' }}>
-          <Shimmer h={13} w="85%" r={4} />
-          <div style={{ marginTop: 5 }}><Shimmer h={10} w="40%" r={4} /></div>
+          <Shimmer h={13} w="85%" r={4} /><div style={{ marginTop: 5 }}><Shimmer h={10} w="40%" r={4} /></div>
         </div>
       ))}
     </div>
@@ -375,27 +384,160 @@ function NewsSection({ newsItems, loading, lang }) {
     </div>
   )
 
+  const withSent = newsItems.map(item => ({ ...item, sentiment: getSentiment(item.title) }))
+  const counts = { bull: 0, bear: 0, neutral: 0 }
+  withSent.forEach(i => counts[i.sentiment]++)
+  const filtered = filter === 'all' ? withSent : withSent.filter(i => i.sentiment === filter)
+
+  const now = Date.now()
+  const ONE_DAY = 86400000
+  const getGroup = pub => {
+    if (!pub) return th ? 'เก่ากว่า' : 'Older'
+    const diff = now - new Date(pub).getTime()
+    if (diff < ONE_DAY)     return th ? 'วันนี้' : 'Today'
+    if (diff < 2 * ONE_DAY) return th ? 'เมื่อวาน' : 'Yesterday'
+    if (diff < 7 * ONE_DAY) return th ? 'สัปดาห์นี้' : 'This week'
+    return th ? 'เก่ากว่า' : 'Older'
+  }
+  const ORDER = th ? ['วันนี้', 'เมื่อวาน', 'สัปดาห์นี้', 'เก่ากว่า'] : ['Today', 'Yesterday', 'This week', 'Older']
+  const groups = {}
+  for (const item of filtered) {
+    const g = getGroup(item.pubDate)
+    if (!groups[g]) groups[g] = []
+    groups[g].push(item)
+  }
+
+  const sentStyle = s => s === 'bull'
+    ? { bg: 'rgba(29,158,117,0.1)', color: '#085041', label: th ? 'เชิงบวก' : 'Bullish' }
+    : s === 'bear'
+    ? { bg: 'rgba(220,80,40,0.1)', color: '#993C1D', label: th ? 'เชิงลบ' : 'Bearish' }
+    : { bg: 'var(--bg-2)', color: 'var(--ink-3)', label: th ? 'กลาง' : 'Neutral' }
+
+  const FILTERS = [
+    { key: 'all',     label: th ? `ทั้งหมด (${newsItems.length})` : `All (${newsItems.length})` },
+    { key: 'bull',    label: `${th ? 'เชิงบวก' : 'Bullish'} (${counts.bull})` },
+    { key: 'bear',    label: `${th ? 'เชิงลบ' : 'Bearish'} (${counts.bear})` },
+    { key: 'neutral', label: `${th ? 'กลาง' : 'Neutral'} (${counts.neutral})` },
+  ]
+
   return (
-    <div style={CARD}>
-      <div style={SEC}>{th ? 'ข่าวล่าสุด' : 'Recent News'}</div>
-      {newsItems.slice(0, 5).map((item, i) => (
-        <a key={i} href={item.url} target="_blank" rel="noopener noreferrer"
-          style={{ display: 'flex', gap: 10, padding: '9px 0', borderBottom: i < Math.min(newsItems.length, 5) - 1 ? '0.5px solid var(--line)' : 'none', textDecoration: 'none', color: 'inherit' }}>
-          <div style={{ flex: 1, minWidth: 0 }}>
-            <div style={{ fontSize: 13, fontWeight: 500, lineHeight: 1.45, marginBottom: 3,
-              overflow: 'hidden', display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical' }}>
-              {item.title}
-            </div>
-            <div style={{ fontSize: 11, color: 'var(--ink-3)' }}>
-              {item.source}{item.published ? ` · ${timeAgo(item.published, lang)}` : ''}
-            </div>
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+
+      {/* AI News Brief */}
+      {(newsBriefLoading || newsBrief) && (
+        <div style={{ ...CARD, background: accentColor.bg, border: `0.5px solid ${accentColor.border}` }}>
+          <div style={{ fontSize: 10, fontWeight: 700, color: accentColor.color, letterSpacing: '.05em', marginBottom: 6 }}>
+            ✦ AI {th ? 'สรุปข่าว' : 'News Brief'}
           </div>
-          {item.image && (
-            <img src={item.image} alt="" style={{ width: 56, height: 42, borderRadius: 6, objectFit: 'cover', flexShrink: 0, background: 'var(--bg-2)' }}
-              onError={e => { e.target.style.display = 'none' }} />
-          )}
-        </a>
-      ))}
+          {newsBriefLoading
+            ? <div style={{ display: 'flex', flexDirection: 'column', gap: 5 }}><Shimmer h={12} w="90%" /><Shimmer h={12} w="70%" /></div>
+            : <div style={{ fontSize: 12.5, lineHeight: 1.7, color: accentColor.color }}>{newsBrief}</div>
+          }
+        </div>
+      )}
+
+      {/* Main news card */}
+      <div style={CARD}>
+        {/* Header */}
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 8 }}>
+          <div style={{ ...SEC, marginBottom: 0 }}>{th ? 'ข่าวล่าสุด' : 'Recent News'}</div>
+          <span style={{ fontSize: 11, color: 'var(--ink-3)' }}>{newsItems.length} {th ? 'บทความ' : 'articles'}</span>
+        </div>
+
+        {/* Sentiment filter chips */}
+        <div style={{ display: 'flex', gap: 5, marginBottom: 10, flexWrap: 'wrap' }}>
+          {FILTERS.map(f => {
+            const active = filter === f.key
+            return (
+              <button key={f.key} onClick={() => { setFilter(f.key); setExpanded(null) }}
+                style={{
+                  fontSize: 11, fontWeight: 500, padding: '3px 11px', borderRadius: 20, cursor: 'pointer',
+                  border: active
+                    ? `0.5px solid ${f.key === 'bull' ? 'rgba(29,158,117,0.4)' : f.key === 'bear' ? 'rgba(220,80,40,0.4)' : 'rgba(112,72,232,0.4)'}`
+                    : '0.5px solid var(--line)',
+                  background: active
+                    ? f.key === 'bull' ? 'rgba(29,158,117,0.1)' : f.key === 'bear' ? 'rgba(220,80,40,0.1)' : 'rgba(112,72,232,0.1)'
+                    : 'var(--bg-2)',
+                  color: active
+                    ? f.key === 'bull' ? '#085041' : f.key === 'bear' ? '#993C1D' : '#7048e8'
+                    : 'var(--ink-3)',
+                }}>
+                {f.label}
+              </button>
+            )
+          })}
+        </div>
+
+        {/* Grouped items */}
+        {filtered.length === 0
+          ? <div style={{ fontSize: 12, color: 'var(--ink-3)', padding: '12px 0', textAlign: 'center' }}>{th ? 'ไม่มีข่าวในหมวดนี้' : 'No news in this filter'}</div>
+          : ORDER.map(grp => {
+            const grpItems = groups[grp]
+            if (!grpItems?.length) return null
+            return (
+              <div key={grp}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 8, margin: '10px 0 6px' }}>
+                  <span style={{ fontSize: 10, fontWeight: 500, color: 'var(--ink-3)', letterSpacing: '.04em', textTransform: 'uppercase', whiteSpace: 'nowrap' }}>{grp}</span>
+                  <div style={{ flex: 1, height: '0.5px', background: 'var(--line)' }} />
+                </div>
+                {grpItems.map((item, idx) => {
+                  const key = `${grp}-${idx}`
+                  const isExp = expanded === key
+                  const ss = sentStyle(item.sentiment)
+                  const fresh = item.pubDate && (now - new Date(item.pubDate).getTime()) < 7200000
+                  const href = item.link || item.url || '#'
+                  const hasDesc = !!item.description
+                  const isLast = idx === grpItems.length - 1
+                  return (
+                    <div key={key}
+                      style={{ padding: '8px 0', borderBottom: isLast ? 'none' : '0.5px solid var(--line)', cursor: hasDesc ? 'pointer' : 'default' }}
+                      onClick={() => {
+                        if (hasDesc) setExpanded(isExp ? null : key)
+                        else window.open(href, '_blank', 'noopener,noreferrer')
+                      }}>
+                      <div style={{ display: 'flex', gap: 10 }}>
+                        {(item.thumbnail || item.image) && (
+                          <img src={item.thumbnail || item.image} alt=""
+                            style={{ width: 60, height: 45, borderRadius: 6, objectFit: 'cover', flexShrink: 0, background: 'var(--bg-2)' }}
+                            onError={e => { e.target.style.display = 'none' }} />
+                        )}
+                        <div style={{ flex: 1, minWidth: 0 }}>
+                          <div style={{ fontSize: 13, fontWeight: 500, lineHeight: 1.45, marginBottom: 4,
+                            overflow: 'hidden', display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical' }}>
+                            {item.title}
+                          </div>
+                          <div style={{ display: 'flex', alignItems: 'center', gap: 5, flexWrap: 'wrap' }}>
+                            <span style={{ fontSize: 11, color: 'var(--ink-3)' }}>
+                              {item.source}{item.pubDate ? ` · ${timeAgo(item.pubDate, lang)}` : ''}
+                            </span>
+                            <span style={{ fontSize: 10, fontWeight: 500, padding: '1px 6px', borderRadius: 10, background: ss.bg, color: ss.color }}>
+                              {ss.label}
+                            </span>
+                            {fresh && (
+                              <span style={{ fontSize: 9, fontWeight: 500, background: 'rgba(56,138,230,0.12)', color: '#2d7ac9', borderRadius: 4, padding: '1px 5px' }}>NEW</span>
+                            )}
+                          </div>
+                        </div>
+                      </div>
+                      {isExp && hasDesc && (
+                        <div style={{ marginTop: 8, fontSize: 12, lineHeight: 1.65, color: 'var(--ink-2)',
+                          borderLeft: `2px solid ${accentColor.border}`, paddingLeft: 10 }}>
+                          {item.description}
+                          <a href={href} target="_blank" rel="noopener noreferrer"
+                            onClick={e => e.stopPropagation()}
+                            style={{ display: 'inline-block', marginTop: 5, fontSize: 11, color: accentColor.color, textDecoration: 'none', fontWeight: 500 }}>
+                            {th ? 'อ่านเพิ่มเติม →' : 'Read more →'}
+                          </a>
+                        </div>
+                      )}
+                    </div>
+                  )
+                })}
+              </div>
+            )
+          })
+        }
+      </div>
     </div>
   )
 }
@@ -428,11 +570,13 @@ export function StockDigest({ items, prices, lang, liveHoldings = [] }) {
 
   const [activeSym, setActiveSym] = useState(() => yahooItems[0]?.yahooSym || null)
   const [analystData, setAnalystData] = useState(null)
-  const [newsItems,   setNewsItems]   = useState([])
-  const [loading,     setLoading]     = useState(false)
-  const [newsLoading, setNewsLoading] = useState(false)
-  const [aiSummary,   setAiSummary]   = useState(null)
-  const [aiLoading,   setAiLoading]   = useState(false)
+  const [newsItems,        setNewsItems]        = useState([])
+  const [loading,          setLoading]          = useState(false)
+  const [newsLoading,      setNewsLoading]      = useState(false)
+  const [aiSummary,        setAiSummary]        = useState(null)
+  const [aiLoading,        setAiLoading]        = useState(false)
+  const [newsBrief,        setNewsBrief]        = useState(null)
+  const [newsBriefLoading, setNewsBriefLoading] = useState(false)
   const cacheRef = useRef({})
 
   // Keep activeSym valid when items change
@@ -450,6 +594,7 @@ export function StockDigest({ items, prices, lang, liveHoldings = [] }) {
       setAnalystData(c.analyst)
       setNewsItems(c.news)
       setAiSummary(c.ai)
+      setNewsBrief(c.newsBrief ?? null)
       return
     }
 
@@ -459,10 +604,12 @@ export function StockDigest({ items, prices, lang, liveHoldings = [] }) {
     setNewsItems([])
     setAiSummary(null)
     setAiLoading(false)
+    setNewsBrief(null)
+    setNewsBriefLoading(false)
 
     const [ar, nr] = await Promise.allSettled([
       fetch(`/api/analyst?symbol=${encodeURIComponent(sym)}`).then(r => r.json()),
-      fetch(`/api/news?symbols=${encodeURIComponent(sym)}&count=5`).then(r => r.json()),
+      fetch(`/api/news?symbols=${encodeURIComponent(sym)}&count=10`).then(r => r.json()),
     ])
 
     const analyst = ar.status === 'fulfilled' ? ar.value : {}
@@ -475,7 +622,11 @@ export function StockDigest({ items, prices, lang, liveHoldings = [] }) {
     setLoading(false)
     setNewsLoading(false)
 
-    // AI summary for quarterly section
+    // Run both AI summaries in parallel
+    let aiResult = null
+    let newsBriefResult = null
+    const aiTasks = []
+
     if (analyst?.quarterly?.length) {
       const ccy = analyst.currency || 'THB'
       const activeItm = yahooItems.find(x => x.yahooSym === sym)
@@ -483,19 +634,33 @@ export function StockDigest({ items, prices, lang, liveHoldings = [] }) {
       const text = `${ticker} งบการเงินรายไตรมาส: ${analyst.quarterly.map(q =>
         `${q.label} รายได้ ${fmtB(q.revenue, ccy)} กำไรสุทธิ ${fmtB(q.netIncome, ccy)} EPS ${q.eps ?? '-'}`
       ).join('; ')}`
-
       setAiLoading(true)
-      fetch(`/api/summarize?title=${encodeURIComponent(text)}`)
-        .then(r => r.json())
-        .then(d => {
-          const ai = d.summary || null
-          setAiSummary(ai)
-          cacheRef.current[sym] = { analyst, news, ai }
-        })
-        .catch(() => { cacheRef.current[sym] = { analyst, news, ai: null } })
-        .finally(() => setAiLoading(false))
-    } else {
-      cacheRef.current[sym] = { analyst, news, ai: null }
+      aiTasks.push(
+        fetch(`/api/summarize?title=${encodeURIComponent(text)}`)
+          .then(r => r.json())
+          .then(d => { aiResult = d.summary || null; setAiSummary(aiResult) })
+          .catch(() => {})
+          .finally(() => setAiLoading(false))
+      )
+    }
+
+    if (news.length > 0) {
+      const titles = news.slice(0, 8).map(n => n.title).join('\n')
+      setNewsBriefLoading(true)
+      aiTasks.push(
+        fetch(`/api/summarize?title=${encodeURIComponent(titles)}`)
+          .then(r => r.json())
+          .then(d => { newsBriefResult = d.summary || null; setNewsBrief(newsBriefResult) })
+          .catch(() => {})
+          .finally(() => setNewsBriefLoading(false))
+      )
+    }
+
+    Promise.allSettled(aiTasks).then(() => {
+      cacheRef.current[sym] = { analyst, news, ai: aiResult, newsBrief: newsBriefResult }
+    })
+    if (aiTasks.length === 0) {
+      cacheRef.current[sym] = { analyst, news, ai: null, newsBrief: null }
     }
   }, [yahooItems])
 
@@ -599,7 +764,7 @@ export function StockDigest({ items, prices, lang, liveHoldings = [] }) {
       )}
 
       {/* News */}
-      <NewsSection newsItems={newsItems} loading={newsLoading} lang={lang} />
+      <NewsSection newsItems={newsItems} newsBrief={newsBrief} newsBriefLoading={newsBriefLoading} loading={newsLoading} lang={lang} accentColor={accent} />
 
     </div>
   )
