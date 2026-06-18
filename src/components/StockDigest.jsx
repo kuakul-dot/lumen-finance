@@ -92,7 +92,7 @@ function ConsensusCard({ data, currentPrice, ccy, th }) {
             {keyLabel(c.key)}
           </div>
           <span style={{ fontSize: 11, color: 'var(--ink-3)' }}>
-            {total > 0 ? `${total} ${ana}` : t?.analysts ? `${t.analysts} ${ana}` : (th ? 'ความเห็นส่วนใหญ่' : 'consensus')}
+            {total > 0 ? (th ? 'ความเห็นส่วนใหญ่' : 'consensus') : t?.analysts ? `${t.analysts} ${ana}` : (th ? 'ความเห็นส่วนใหญ่' : 'consensus')}
           </span>
         </div>
       )}
