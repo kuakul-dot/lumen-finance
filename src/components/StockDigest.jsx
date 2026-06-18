@@ -86,7 +86,7 @@ function ConsensusCard({ data, currentPrice, ccy, th }) {
         </div>
       )}
 
-      {c?.key && (
+      {c?.key && c.key !== 'none' && (
         <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 12 }}>
           <div style={{ background: ks.bg, border: `0.5px solid ${ks.bdr}`, color: ks.clr, fontSize: 12, fontWeight: 500, padding: '4px 14px', borderRadius: 20 }}>
             {keyLabel(c.key)}
