@@ -86,7 +86,7 @@ function extract(d) {
       epsLow:    r2(num(t.earningsEstimate?.low)),
       epsHigh:   r2(num(t.earningsEstimate?.high)),
       epsYearAgo:r2(num(t.earningsEstimate?.yearAgoEps)),
-      revEst:    num(t.revenueEstimate?.avg),
+      revEst:    num(t.revenueEstimate?.avg) || null,
       growth:    t.growth?.raw != null ? r2(t.growth.raw * 100) : null,
       analysts:  num(t.earningsEstimate?.numberOfAnalysts),
       upRev:     num(t.epsRevisions?.upLast30days),
