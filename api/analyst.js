@@ -168,6 +168,30 @@ function json(payload) {
   })
 }
 
+async function finnhubRecommendation(symbol) {
+  const key = process.env.FINNHUB_KEY
+  if (!key) return null
+  // Finnhub only covers US/global exchange symbols — skip TH suffixes
+  if (symbol.includes('.BK') || symbol.includes('.BKK')) return null
+  try {
+    const r = await fetch(
+      `https://finnhub.io/api/v1/stock/recommendation?symbol=${encodeURIComponent(symbol)}&token=${key}`,
+      { signal: AbortSignal.timeout(6000) }
+    )
+    if (!r.ok) return null
+    const data = await r.json()
+    const latest = Array.isArray(data) ? data[0] : null
+    if (!latest) return null
+    return {
+      strongBuy:  latest.strongBuy  || 0,
+      buy:        latest.buy        || 0,
+      hold:       latest.hold       || 0,
+      sell:       latest.sell       || 0,
+      strongSell: latest.strongSell || 0,
+    }
+  } catch { return null }
+}
+
 export default async function handler(request) {
   if (request.method === 'OPTIONS') {
     return new Response(null, { headers: { 'Access-Control-Allow-Origin': '*', 'Access-Control-Allow-Methods': 'GET' } })
@@ -189,7 +213,18 @@ export default async function handler(request) {
       if (r.ok) {
         const j = await r.json()
         const result = j?.quoteSummary?.result?.[0]
-        if (result) return json(extract(result))
+        if (result) {
+          const extracted = extract(result)
+          // Fallback to Finnhub if Yahoo recommendationTrend is empty
+          if (extracted.consensus.total === 0) {
+            const fh = await finnhubRecommendation(symbol)
+            if (fh) {
+              const total = fh.strongBuy + fh.buy + fh.hold + fh.sell + fh.strongSell
+              extracted.consensus = { ...fh, total, key: extracted.consensus.key }
+            }
+          }
+          return json(extracted)
+        }
       } else if (r.status === 401 || r.status === 403) {
         cachedAuth = null
       }
