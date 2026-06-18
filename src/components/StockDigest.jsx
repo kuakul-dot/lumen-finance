@@ -48,7 +48,7 @@ function SourceBadge({ src }) {
   )
 }
 
-function ConsensusCard({ data, currentPrice, ccy, th, src }) {
+function ConsensusCard({ data, currentPrice, ccy, th, src, region }) {
   const { consensus: c, target: t } = data
   const total = c?.total || 0
   const hasTarget = t?.mean != null
@@ -93,6 +93,14 @@ function ConsensusCard({ data, currentPrice, ccy, th, src }) {
           {c.sell > 0       && <span style={{ fontSize: 11, color: 'var(--ink-3)' }}><span style={{ color: '#E05030' }}>■</span> {th ? 'ขาย' : 'Sell'} {c.sell}</span>}
           {c.strongSell > 0 && <span style={{ fontSize: 11, color: 'var(--ink-3)' }}><span style={{ color: '#993C1D' }}>■</span> {th ? 'ซ.ขาย' : 'S.Sell'} {c.strongSell}</span>}
           <span style={{ fontSize: 11, color: 'var(--ink-3)' }}>{total} {ana}</span>
+        </div>
+      )}
+
+      {/* No consensus breakdown — show reason for Thai stocks */}
+      {total === 0 && region === 'TH' && (
+        <div style={{ display: 'flex', alignItems: 'flex-start', gap: 7, padding: '10px 12px', background: 'var(--bg-2)', borderRadius: 8, marginBottom: 12, fontSize: 11.5, color: 'var(--ink-3)', lineHeight: 1.5 }}>
+          <span style={{ fontSize: 14, flexShrink: 0 }}>ℹ️</span>
+          <span>{th ? 'ข้อมูล consensus จากสำนักวิจัยไทย (บล.) ไม่มีในแหล่งข้อมูลฟรี' : 'Thai broker consensus is not available in free data sources'}</span>
         </div>
       )}
 
@@ -566,7 +574,7 @@ export function StockDigest({ items, prices, lang, liveHoldings = [] }) {
         </div>
       ) : (
         <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
-          <ConsensusCard data={analystData || {}} currentPrice={currentPrice} ccy={ccy} th={th} src={analystData?.sources?.consensus} />
+          <ConsensusCard data={analystData || {}} currentPrice={currentPrice} ccy={ccy} th={th} src={analystData?.sources?.consensus} region={activeItem?.region} />
           <EstimatesCard data={analystData || {}} th={th} src={analystData?.sources?.estimates} />
         </div>
       )}
