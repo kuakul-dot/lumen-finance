@@ -164,7 +164,7 @@ export const LUMEN_I18N = {
       analytics: "วิเคราะห์",
       tools: "เครื่องมือ",
       planning: "วางแผน",
-      watchlist: "Watchlist",
+      watchlist: "รายการติดตาม",
       dca: "DCA",
     },
     common: {
