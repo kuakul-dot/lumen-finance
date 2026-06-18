@@ -64,9 +64,13 @@ function extract(d) {
   const s  = trend.sell || 0,      ss = trend.strongSell || 0
 
   // Forward estimates (0q, +1q, 0y, +1y)
+  const PERIOD_FALLBACK = { '0q': 'This Q', '+1q': 'Next Q', '0y': 'This FY', '+1y': 'Next FY' }
   const estimates = (d.earningsTrend?.trend || []).slice(0, 4).map(t => {
-    const endDate = t.endDate?.fmt || null
-    let label = t.period || ''
+    const endRaw  = t.endDate
+    const endDate = endRaw
+      ? (typeof endRaw === 'string' ? endRaw : endRaw.fmt || null)
+      : null
+    let label = PERIOD_FALLBACK[t.period] || t.period || ''
     if (endDate) {
       const dt  = new Date(endDate)
       const yr  = dt.getFullYear() + 543
@@ -135,7 +139,7 @@ function extract(d) {
     consensus: {
       strongBuy: sb, buy: b, hold: h, sell: s, strongSell: ss,
       total: sb + b + h + s + ss,
-      key: fd.recommendationKey || null,
+      key: (fd.recommendationKey || '').replace(/_([a-z])/g, (_, c) => c.toUpperCase()) || null,
     },
     target: {
       mean:     r2(num(fd.targetMeanPrice)),

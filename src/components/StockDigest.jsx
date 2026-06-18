@@ -42,8 +42,9 @@ function Shimmer({ h = 16, w = '100%', r = 6 }) {
 function ConsensusCard({ data, currentPrice, ccy, th }) {
   const { consensus: c, target: t } = data
   const total = c?.total || 0
+  const hasTarget = t?.mean != null
 
-  if (!total) return (
+  if (!total && !hasTarget && !c?.key) return (
     <div style={CARD}>
       <div style={SEC}>Analyst Consensus</div>
       <div style={{ fontSize: 12, color: 'var(--ink-3)', padding: '24px 0', textAlign: 'center' }}>
@@ -64,39 +65,45 @@ function ConsensusCard({ data, currentPrice, ccy, th }) {
     if (k === 'hold') return { bg: '#FEF5E4', bdr: '#EF9F27', clr: '#854F0B' }
     return { bg: '#FAECE7', bdr: '#E17560', clr: '#993C1D' }
   }
-  const ks = keyStyle(c.key)
+  const ks = keyStyle(c?.key)
   const upside = t?.mean && currentPrice ? ((t.mean - currentPrice) / currentPrice * 100) : null
 
   return (
     <div style={CARD}>
       <div style={SEC}>Analyst Consensus</div>
 
-      {/* Stacked rating bar */}
-      <div style={{ display: 'flex', height: 8, borderRadius: 5, overflow: 'hidden', gap: 1, marginBottom: 7 }}>
-        <div style={{ width: pct(c.strongBuy), background: '#085041' }} />
-        <div style={{ width: pct(c.buy),       background: '#1D9E75' }} />
-        <div style={{ width: pct(c.hold),      background: '#EF9F27' }} />
-        <div style={{ width: pct(c.sell),      background: '#E05030' }} />
-        <div style={{ width: pct(c.strongSell),background: '#993C1D' }} />
-      </div>
+      {/* Stacked rating bar — only when we have breakdown counts */}
+      {total > 0 && (
+        <>
+          <div style={{ display: 'flex', height: 8, borderRadius: 5, overflow: 'hidden', gap: 1, marginBottom: 7 }}>
+            <div style={{ width: pct(c.strongBuy), background: '#085041' }} />
+            <div style={{ width: pct(c.buy),       background: '#1D9E75' }} />
+            <div style={{ width: pct(c.hold),      background: '#EF9F27' }} />
+            <div style={{ width: pct(c.sell),      background: '#E05030' }} />
+            <div style={{ width: pct(c.strongSell),background: '#993C1D' }} />
+          </div>
 
-      {/* Legend */}
-      <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginBottom: 12 }}>
-        {c.strongBuy > 0 && <span style={{ fontSize: 11, color: 'var(--ink-3)' }}><span style={{ color: '#085041' }}>■</span> S.Buy {c.strongBuy}</span>}
-        {c.buy > 0       && <span style={{ fontSize: 11, color: 'var(--ink-3)' }}><span style={{ color: '#1D9E75' }}>■</span> Buy {c.buy}</span>}
-        {c.hold > 0      && <span style={{ fontSize: 11, color: 'var(--ink-3)' }}><span style={{ color: '#EF9F27' }}>■</span> Hold {c.hold}</span>}
-        {c.sell > 0      && <span style={{ fontSize: 11, color: 'var(--ink-3)' }}><span style={{ color: '#E05030' }}>■</span> Sell {c.sell}</span>}
-        {c.strongSell > 0 && <span style={{ fontSize: 11, color: 'var(--ink-3)' }}><span style={{ color: '#993C1D' }}>■</span> S.Sell {c.strongSell}</span>}
-        <span style={{ fontSize: 11, color: 'var(--ink-3)' }}>{total} analysts</span>
-      </div>
+          {/* Legend */}
+          <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginBottom: 12 }}>
+            {c.strongBuy > 0 && <span style={{ fontSize: 11, color: 'var(--ink-3)' }}><span style={{ color: '#085041' }}>■</span> S.Buy {c.strongBuy}</span>}
+            {c.buy > 0       && <span style={{ fontSize: 11, color: 'var(--ink-3)' }}><span style={{ color: '#1D9E75' }}>■</span> Buy {c.buy}</span>}
+            {c.hold > 0      && <span style={{ fontSize: 11, color: 'var(--ink-3)' }}><span style={{ color: '#EF9F27' }}>■</span> Hold {c.hold}</span>}
+            {c.sell > 0      && <span style={{ fontSize: 11, color: 'var(--ink-3)' }}><span style={{ color: '#E05030' }}>■</span> Sell {c.sell}</span>}
+            {c.strongSell > 0 && <span style={{ fontSize: 11, color: 'var(--ink-3)' }}><span style={{ color: '#993C1D' }}>■</span> S.Sell {c.strongSell}</span>}
+            <span style={{ fontSize: 11, color: 'var(--ink-3)' }}>{total} analysts</span>
+          </div>
+        </>
+      )}
 
       {/* Consensus pill */}
-      {c.key && (
+      {c?.key && (
         <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 12 }}>
           <div style={{ background: ks.bg, border: `0.5px solid ${ks.bdr}`, color: ks.clr, fontSize: 12, fontWeight: 500, padding: '4px 14px', borderRadius: 20 }}>
             {keyLabel(c.key)}
           </div>
-          <span style={{ fontSize: 11, color: 'var(--ink-3)' }}>{th ? 'ความเห็นส่วนใหญ่' : 'consensus'}</span>
+          <span style={{ fontSize: 11, color: 'var(--ink-3)' }}>
+            {total > 0 ? `${total} analysts` : (th ? 'ความเห็นส่วนใหญ่' : 'consensus')}
+          </span>
         </div>
       )}
 
