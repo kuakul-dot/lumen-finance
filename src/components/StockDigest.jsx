@@ -303,6 +303,18 @@ function QuarterlyCard({ data, aiSummary, aiLoading, accentColor, th, src }) {
         <div style={labelCell}>{th ? 'รายได้รวม' : 'Revenue'}</div>
         {quarterly.map((q, i) => <div key={q.date} style={dataCell(i === 0)}>{fmtB(q.revenue, ccy)}</div>)}
 
+        {/* Gross profit row */}
+        {quarterly.some(q => q.grossProfit != null) && <>
+          <div style={labelCell}>{th ? 'กำไรขั้นต้น' : 'Gross Profit'}</div>
+          {quarterly.map((q, i) => (
+            <div key={q.date} style={dataCell(i === 0)}>
+              {q.grossProfit != null ? (
+                <span>{fmtB(q.grossProfit, ccy)}{q.grossMargin != null && <span style={{ fontSize: 10, color: 'var(--ink-3)', marginLeft: 3 }}>{q.grossMargin}%</span>}</span>
+              ) : '—'}
+            </div>
+          ))}
+        </>}
+
         {/* Net income row */}
         <div style={labelCell}>{th ? 'กำไรสุทธิ' : 'Net Income'}</div>
         {quarterly.map((q, i) => <div key={q.date} style={dataCell(i === 0)}>{fmtB(q.netIncome, ccy)}</div>)}

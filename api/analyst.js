@@ -95,7 +95,8 @@ function extract(d) {
   })
 
   // EPS beat/miss history — last 4 quarters, most recent first
-  const beats = (d.earningsHistory?.history || [])
+  const earningsHist = d.earningsHistory?.history || []
+  const beats = earningsHist
     .slice(-4)
     .map(h => ({
       label:    h.quarter?.fmt ? fmtHistQ(h.quarter.fmt) : null,
@@ -105,15 +106,28 @@ function extract(d) {
     }))
     .reverse()
 
+  // EPS fallback map from earningsHistory (covers Thai stocks missing basicEPS)
+  const epsMap = {}
+  for (const h of earningsHist) {
+    const dt = h.quarter?.fmt
+    if (dt && h.epsActual?.raw != null) epsMap[dt] = r2(h.epsActual.raw)
+  }
+
   // Quarterly income history — sort newest first, compute QoQ net income growth
   const allQ = (d.incomeStatementHistoryQuarterly?.incomeStatementHistory || [])
-    .map(q => ({
-      date:      q.endDate?.fmt || '',
-      label:     fmtHistQ(q.endDate?.fmt || ''),
-      revenue:   num(q.totalRevenue),
-      netIncome: num(q.netIncome),
-      eps:       r2(num(q.basicEPS) ?? num(q.dilutedEPS) ?? null),
-    }))
+    .map(q => {
+      const rev = num(q.totalRevenue)
+      const gp  = num(q.grossProfit)
+      return {
+        date:        q.endDate?.fmt || '',
+        label:       fmtHistQ(q.endDate?.fmt || ''),
+        revenue:     rev,
+        grossProfit: gp,
+        grossMargin: gp != null && rev ? r2(gp / rev * 100) : null,
+        netIncome:   num(q.netIncome),
+        eps:         r2(num(q.basicEPS) ?? num(q.dilutedEPS) ?? epsMap[q.endDate?.fmt] ?? null),
+      }
+    })
     .filter(q => q.date)
     .sort((a, b) => new Date(b.date) - new Date(a.date))
 

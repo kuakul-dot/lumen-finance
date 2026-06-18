@@ -38,7 +38,7 @@ export default async function handler(req) {
       },
       body: JSON.stringify({
         model: 'claude-haiku-4-5-20251001',
-        max_tokens: 220,
+        max_tokens: 450,
         messages: [{
           role: 'user',
           content: `สรุปข่าวการเงินต่อไปนี้เป็นภาษาไทย 2-3 ประโยค กระชับ ตรงประเด็น ไม่ต้องขึ้นต้นด้วย "สรุป" หรือ "ข่าว":\n\n${content}`,
