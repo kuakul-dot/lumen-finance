@@ -281,6 +281,7 @@ export default async function handler(request) {
         const result = j?.quoteSummary?.result?.[0]
         if (result) {
           const extracted = extract(result)
+          const sources = { consensus: 'Yahoo', quarterly: 'Yahoo', estimates: 'Yahoo' }
 
           const needed = {
             consensus: extracted.consensus.total === 0,
@@ -295,6 +296,7 @@ export default async function handler(request) {
               const total = fh.strongBuy + fh.buy + fh.hold + fh.sell + fh.strongSell
               if (total > 0) {
                 extracted.consensus = { ...fh, total, key: extracted.consensus.key }
+                sources.consensus = 'Finnhub'
                 needed.consensus = false
               }
             }
@@ -305,16 +307,20 @@ export default async function handler(request) {
             const fmp = await fmpFallback(symbol, needed)
             if (fmp.consensus && needed.consensus) {
               extracted.consensus = { ...fmp.consensus, key: extracted.consensus.key }
+              sources.consensus = 'FMP'
             }
             if (fmp.quarterly && needed.quarterly) {
               extracted.quarterly = fmp.quarterly
               if (fmp.currency) extracted.currency = fmp.currency
+              sources.quarterly = 'FMP'
             }
             if (fmp.estimates && needed.estimates) {
               extracted.estimates = fmp.estimates
+              sources.estimates = 'FMP'
             }
           }
 
+          extracted.sources = sources
           return json(extracted)
         }
       } else if (r.status === 401 || r.status === 403) {

@@ -39,12 +39,22 @@ function Shimmer({ h = 16, w = '100%', r = 6 }) {
   return <div className="shimmer" style={{ height: h, width: w, borderRadius: r, background: 'var(--bg-2)' }} />
 }
 
-function ConsensusCard({ data, currentPrice, ccy, th }) {
+function SourceBadge({ src }) {
+  if (!src || src === 'Yahoo') return null
+  return (
+    <span style={{ fontSize: 9, fontWeight: 500, background: 'var(--bg-2)', border: '0.5px solid var(--line)', borderRadius: 4, padding: '1px 5px', color: 'var(--ink-3)', textTransform: 'none', letterSpacing: 0, marginLeft: 4 }}>
+      {src}
+    </span>
+  )
+}
+
+function ConsensusCard({ data, currentPrice, ccy, th, src }) {
   const { consensus: c, target: t } = data
   const total = c?.total || 0
   const hasTarget = t?.mean != null
 
   const hdr = th ? 'ความเห็นนักวิเคราะห์' : 'Analyst Consensus'
+  const srcLabel = src && src !== 'Yahoo' ? src : null
   const ana = th ? 'นักวิเคราะห์' : 'analysts'
 
   if (!total && !hasTarget && !c?.key) return (
@@ -73,7 +83,7 @@ function ConsensusCard({ data, currentPrice, ccy, th }) {
 
   return (
     <div style={CARD}>
-      <div style={SEC}>{hdr}</div>
+      <div style={SEC}>{hdr}<SourceBadge src={src} /></div>
 
       {total > 0 && (
         <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginBottom: 12 }}>
@@ -140,14 +150,14 @@ function ConsensusCard({ data, currentPrice, ccy, th }) {
   )
 }
 
-function EstimatesCard({ data, th }) {
+function EstimatesCard({ data, th, src }) {
   const { estimates, beats } = data
   const ccy = data.currency || 'THB'
   const ccyS = ccy === 'USD' ? '$' : '฿'
 
   if (!estimates?.length) return (
     <div style={CARD}>
-      <div style={SEC}>{th ? 'คาดการณ์ล่วงหน้า' : 'Forward Estimates'}</div>
+      <div style={SEC}>{th ? 'คาดการณ์ล่วงหน้า' : 'Forward Estimates'}<SourceBadge src={src} /></div>
       <div style={{ fontSize: 12, color: 'var(--ink-3)', padding: '24px 0', textAlign: 'center' }}>
         {th ? 'ไม่มีข้อมูลประมาณการ' : 'No estimate data'}
       </div>
@@ -158,7 +168,7 @@ function EstimatesCard({ data, th }) {
 
   return (
     <div style={CARD}>
-      <div style={SEC}>{th ? 'คาดการณ์ล่วงหน้า' : 'Forward Estimates'}</div>
+      <div style={SEC}>{th ? 'คาดการณ์ล่วงหน้า' : 'Forward Estimates'}<SourceBadge src={src} /></div>
 
       <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12 }}>
         <thead>
@@ -223,7 +233,7 @@ function EstimatesCard({ data, th }) {
   )
 }
 
-function QuarterlyCard({ data, aiSummary, aiLoading, accentColor, th }) {
+function QuarterlyCard({ data, aiSummary, aiLoading, accentColor, th, src }) {
   const { quarterly } = data
   const ccy = data.currency || 'THB'
 
@@ -252,6 +262,7 @@ function QuarterlyCard({ data, aiSummary, aiLoading, accentColor, th }) {
         <span style={{ marginLeft: 4, fontSize: 10, fontWeight: 400, textTransform: 'none', color: 'var(--ink-3)' }}>
           {th ? `ย้อนหลัง ${quarterly.length} ไตรมาส` : `last ${quarterly.length}Q`}
         </span>
+        <SourceBadge src={src} />
       </div>
 
       <div style={{ display: 'grid', gridTemplateColumns: cols, gap: 0 }}>
@@ -555,8 +566,8 @@ export function StockDigest({ items, prices, lang, liveHoldings = [] }) {
         </div>
       ) : (
         <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
-          <ConsensusCard data={analystData || {}} currentPrice={currentPrice} ccy={ccy} th={th} />
-          <EstimatesCard data={analystData || {}} th={th} />
+          <ConsensusCard data={analystData || {}} currentPrice={currentPrice} ccy={ccy} th={th} src={analystData?.sources?.consensus} />
+          <EstimatesCard data={analystData || {}} th={th} src={analystData?.sources?.estimates} />
         </div>
       )}
 
@@ -564,7 +575,7 @@ export function StockDigest({ items, prices, lang, liveHoldings = [] }) {
       {loading ? (
         <div style={CARD}><div style={SEC}>{th ? 'งบการเงินรายไตรมาส' : 'Quarterly Financials'}</div><Shimmer h={120} /></div>
       ) : (
-        <QuarterlyCard data={analystData || {}} aiSummary={aiSummary} aiLoading={aiLoading} accentColor={accent} th={th} />
+        <QuarterlyCard data={analystData || {}} aiSummary={aiSummary} aiLoading={aiLoading} accentColor={accent} th={th} src={analystData?.sources?.quarterly} />
       )}
 
       {/* News */}
