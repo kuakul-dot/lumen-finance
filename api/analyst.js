@@ -168,6 +168,72 @@ function json(payload) {
   })
 }
 
+// ── FMP fallback (Thai + global stocks) ──────────────────────────────────────
+async function fmpFallback(symbol, needed) {
+  const key = process.env.FMP_KEY
+  if (!key) return {}
+
+  const base = 'https://financialmodelingprep.com/api/v3'
+  const sig  = { signal: AbortSignal.timeout(6000) }
+  const get  = url => fetch(url, sig).then(r => r.ok ? r.json() : []).catch(() => [])
+
+  const [recData, qData, estData] = await Promise.all([
+    needed.consensus ? get(`${base}/analyst-stock-recommendations/${encodeURIComponent(symbol)}?apikey=${key}&limit=1`) : Promise.resolve(null),
+    needed.quarterly ? get(`${base}/income-statement/${encodeURIComponent(symbol)}?period=quarter&limit=4&apikey=${key}`) : Promise.resolve(null),
+    needed.estimates ? get(`${base}/analyst-estimates/${encodeURIComponent(symbol)}?limit=4&apikey=${key}`) : Promise.resolve(null),
+  ])
+
+  const out = {}
+
+  // Consensus breakdown
+  if (Array.isArray(recData) && recData.length) {
+    const rec = recData[0]
+    const sb = rec.analystRatingsStrongBuy  || 0
+    const b  = rec.analystRatingsbuy        || 0
+    const h  = rec.analystRatingsHold       || 0
+    const s  = rec.analystRatingsSell       || 0
+    const ss = rec.analystRatingsStrongSell || 0
+    const total = sb + b + h + s + ss
+    if (total > 0) out.consensus = { strongBuy: sb, buy: b, hold: h, sell: s, strongSell: ss, total }
+  }
+
+  // Quarterly financials
+  if (Array.isArray(qData) && qData.length) {
+    const ccy = qData[0]?.reportedCurrency || 'THB'
+    out.quarterly = qData.slice(0, 4).map((q, i) => {
+      const prev = qData[i + 1]
+      const ni   = q.netIncome || null
+      const qoq  = prev?.netIncome && ni
+        ? r2((ni - prev.netIncome) / Math.abs(prev.netIncome) * 100) : null
+      return { date: q.date, label: fmtHistQ(q.date), revenue: q.revenue || null, netIncome: ni, eps: q.eps != null ? r2(q.eps) : null, qoq }
+    })
+    out.currency = ccy
+  }
+
+  // Forward estimates (FMP returns annual by default)
+  if (Array.isArray(estData) && estData.length) {
+    out.estimates = estData.slice(0, 4).map(e => {
+      const dt  = new Date(e.date)
+      const yr  = dt.getFullYear() + 543
+      const yr2 = yr % 100
+      const q   = Math.ceil((dt.getMonth() + 1) / 3)
+      const isAnnual = e.date?.length === 10 && dt.getMonth() === 11  // Dec = FY end typical
+      const label = isAnnual ? `FY${yr}E` : `Q${q}/${yr2}E`
+      return {
+        period: isAnnual ? '0y' : '0q',
+        label, endDate: e.date,
+        epsEst:  e.epsAvg     != null ? r2(e.epsAvg)     : null,
+        revEst:  e.revenueAvg != null ? e.revenueAvg      : null,
+        growth:  null,
+        analysts: e.numberAnalystsEstimatedEps || null,
+        upRev: null, downRev: null,
+      }
+    })
+  }
+
+  return out
+}
+
 async function finnhubRecommendation(symbol) {
   const key = process.env.FINNHUB_KEY
   if (!key) return null
@@ -215,14 +281,40 @@ export default async function handler(request) {
         const result = j?.quoteSummary?.result?.[0]
         if (result) {
           const extracted = extract(result)
-          // Fallback to Finnhub if Yahoo recommendationTrend is empty
-          if (extracted.consensus.total === 0) {
+
+          const needed = {
+            consensus: extracted.consensus.total === 0,
+            quarterly: extracted.quarterly.length === 0,
+            estimates: extracted.estimates.length === 0,
+          }
+
+          // Finnhub fallback for consensus (US stocks only)
+          if (needed.consensus) {
             const fh = await finnhubRecommendation(symbol)
             if (fh) {
               const total = fh.strongBuy + fh.buy + fh.hold + fh.sell + fh.strongSell
-              extracted.consensus = { ...fh, total, key: extracted.consensus.key }
+              if (total > 0) {
+                extracted.consensus = { ...fh, total, key: extracted.consensus.key }
+                needed.consensus = false
+              }
             }
           }
+
+          // FMP fallback for consensus + quarterly + estimates
+          if (needed.consensus || needed.quarterly || needed.estimates) {
+            const fmp = await fmpFallback(symbol, needed)
+            if (fmp.consensus && needed.consensus) {
+              extracted.consensus = { ...fmp.consensus, key: extracted.consensus.key }
+            }
+            if (fmp.quarterly && needed.quarterly) {
+              extracted.quarterly = fmp.quarterly
+              if (fmp.currency) extracted.currency = fmp.currency
+            }
+            if (fmp.estimates && needed.estimates) {
+              extracted.estimates = fmp.estimates
+            }
+          }
+
           return json(extracted)
         }
       } else if (r.status === 401 || r.status === 403) {
