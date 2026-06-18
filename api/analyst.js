@@ -139,7 +139,11 @@ function extract(d) {
     consensus: {
       strongBuy: sb, buy: b, hold: h, sell: s, strongSell: ss,
       total: sb + b + h + s + ss,
-      key: (fd.recommendationKey || '').replace(/_([a-z])/g, (_, c) => c.toUpperCase()) || null,
+      key: (() => {
+        const raw = (fd.recommendationKey || '').replace(/_([a-z])/g, (_, c) => c.toUpperCase())
+        const MAP = { overweight: 'buy', outperform: 'buy', marketOutperform: 'buy', sectorOutperform: 'buy', neutral: 'hold', marketPerform: 'hold', sectorPerform: 'hold', marketWeight: 'hold', equalWeight: 'hold', underperform: 'sell', underweight: 'sell', sectorUnderperform: 'sell' }
+        return MAP[raw] || raw || null
+      })(),
     },
     target: {
       mean:     r2(num(fd.targetMeanPrice)),
