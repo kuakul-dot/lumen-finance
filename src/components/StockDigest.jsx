@@ -74,25 +74,14 @@ function ConsensusCard({ data, currentPrice, ccy, th }) {
 
       {/* Stacked rating bar — only when we have breakdown counts */}
       {total > 0 && (
-        <>
-          <div style={{ display: 'flex', height: 8, borderRadius: 5, overflow: 'hidden', gap: 1, marginBottom: 7 }}>
-            <div style={{ width: pct(c.strongBuy), background: '#085041' }} />
-            <div style={{ width: pct(c.buy),       background: '#1D9E75' }} />
-            <div style={{ width: pct(c.hold),      background: '#EF9F27' }} />
-            <div style={{ width: pct(c.sell),      background: '#E05030' }} />
-            <div style={{ width: pct(c.strongSell),background: '#993C1D' }} />
-          </div>
-
-          {/* Legend */}
-          <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginBottom: 12 }}>
-            {c.strongBuy > 0 && <span style={{ fontSize: 11, color: 'var(--ink-3)' }}><span style={{ color: '#085041' }}>■</span> S.Buy {c.strongBuy}</span>}
-            {c.buy > 0       && <span style={{ fontSize: 11, color: 'var(--ink-3)' }}><span style={{ color: '#1D9E75' }}>■</span> Buy {c.buy}</span>}
-            {c.hold > 0      && <span style={{ fontSize: 11, color: 'var(--ink-3)' }}><span style={{ color: '#EF9F27' }}>■</span> Hold {c.hold}</span>}
-            {c.sell > 0      && <span style={{ fontSize: 11, color: 'var(--ink-3)' }}><span style={{ color: '#E05030' }}>■</span> Sell {c.sell}</span>}
-            {c.strongSell > 0 && <span style={{ fontSize: 11, color: 'var(--ink-3)' }}><span style={{ color: '#993C1D' }}>■</span> S.Sell {c.strongSell}</span>}
-            <span style={{ fontSize: 11, color: 'var(--ink-3)' }}>{total} analysts</span>
-          </div>
-        </>
+        <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginBottom: 12 }}>
+          {c.strongBuy > 0 && <span style={{ fontSize: 11, color: 'var(--ink-3)' }}><span style={{ color: '#085041' }}>■</span> S.Buy {c.strongBuy}</span>}
+          {c.buy > 0       && <span style={{ fontSize: 11, color: 'var(--ink-3)' }}><span style={{ color: '#1D9E75' }}>■</span> Buy {c.buy}</span>}
+          {c.hold > 0      && <span style={{ fontSize: 11, color: 'var(--ink-3)' }}><span style={{ color: '#EF9F27' }}>■</span> Hold {c.hold}</span>}
+          {c.sell > 0      && <span style={{ fontSize: 11, color: 'var(--ink-3)' }}><span style={{ color: '#E05030' }}>■</span> Sell {c.sell}</span>}
+          {c.strongSell > 0 && <span style={{ fontSize: 11, color: 'var(--ink-3)' }}><span style={{ color: '#993C1D' }}>■</span> S.Sell {c.strongSell}</span>}
+          <span style={{ fontSize: 11, color: 'var(--ink-3)' }}>{total} analysts</span>
+        </div>
       )}
 
       {/* Consensus pill */}
