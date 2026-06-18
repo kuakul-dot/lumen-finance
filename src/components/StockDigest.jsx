@@ -44,9 +44,12 @@ function ConsensusCard({ data, currentPrice, ccy, th }) {
   const total = c?.total || 0
   const hasTarget = t?.mean != null
 
+  const hdr = th ? 'ความเห็นนักวิเคราะห์' : 'Analyst Consensus'
+  const ana = th ? 'นักวิเคราะห์' : 'analysts'
+
   if (!total && !hasTarget && !c?.key) return (
     <div style={CARD}>
-      <div style={SEC}>Analyst Consensus</div>
+      <div style={SEC}>{hdr}</div>
       <div style={{ fontSize: 12, color: 'var(--ink-3)', padding: '24px 0', textAlign: 'center' }}>
         {th ? 'ไม่มีข้อมูลนักวิเคราะห์' : 'No analyst data'}
       </div>
@@ -70,44 +73,41 @@ function ConsensusCard({ data, currentPrice, ccy, th }) {
 
   return (
     <div style={CARD}>
-      <div style={SEC}>Analyst Consensus</div>
+      <div style={SEC}>{hdr}</div>
 
-      {/* Stacked rating bar — only when we have breakdown counts */}
       {total > 0 && (
         <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginBottom: 12 }}>
-          {c.strongBuy > 0 && <span style={{ fontSize: 11, color: 'var(--ink-3)' }}><span style={{ color: '#085041' }}>■</span> S.Buy {c.strongBuy}</span>}
-          {c.buy > 0       && <span style={{ fontSize: 11, color: 'var(--ink-3)' }}><span style={{ color: '#1D9E75' }}>■</span> Buy {c.buy}</span>}
-          {c.hold > 0      && <span style={{ fontSize: 11, color: 'var(--ink-3)' }}><span style={{ color: '#EF9F27' }}>■</span> Hold {c.hold}</span>}
-          {c.sell > 0      && <span style={{ fontSize: 11, color: 'var(--ink-3)' }}><span style={{ color: '#E05030' }}>■</span> Sell {c.sell}</span>}
-          {c.strongSell > 0 && <span style={{ fontSize: 11, color: 'var(--ink-3)' }}><span style={{ color: '#993C1D' }}>■</span> S.Sell {c.strongSell}</span>}
-          <span style={{ fontSize: 11, color: 'var(--ink-3)' }}>{total} analysts</span>
+          {c.strongBuy > 0  && <span style={{ fontSize: 11, color: 'var(--ink-3)' }}><span style={{ color: '#085041' }}>■</span> {th ? 'ซ.ซื้อ' : 'S.Buy'} {c.strongBuy}</span>}
+          {c.buy > 0        && <span style={{ fontSize: 11, color: 'var(--ink-3)' }}><span style={{ color: '#1D9E75' }}>■</span> {th ? 'ซื้อ' : 'Buy'} {c.buy}</span>}
+          {c.hold > 0       && <span style={{ fontSize: 11, color: 'var(--ink-3)' }}><span style={{ color: '#EF9F27' }}>■</span> {th ? 'ถือ' : 'Hold'} {c.hold}</span>}
+          {c.sell > 0       && <span style={{ fontSize: 11, color: 'var(--ink-3)' }}><span style={{ color: '#E05030' }}>■</span> {th ? 'ขาย' : 'Sell'} {c.sell}</span>}
+          {c.strongSell > 0 && <span style={{ fontSize: 11, color: 'var(--ink-3)' }}><span style={{ color: '#993C1D' }}>■</span> {th ? 'ซ.ขาย' : 'S.Sell'} {c.strongSell}</span>}
+          <span style={{ fontSize: 11, color: 'var(--ink-3)' }}>{total} {ana}</span>
         </div>
       )}
 
-      {/* Consensus pill */}
       {c?.key && (
         <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 12 }}>
           <div style={{ background: ks.bg, border: `0.5px solid ${ks.bdr}`, color: ks.clr, fontSize: 12, fontWeight: 500, padding: '4px 14px', borderRadius: 20 }}>
             {keyLabel(c.key)}
           </div>
           <span style={{ fontSize: 11, color: 'var(--ink-3)' }}>
-            {total > 0 ? `${total} analysts` : t?.analysts ? `${t.analysts} analysts` : (th ? 'ความเห็นส่วนใหญ่' : 'consensus')}
+            {total > 0 ? `${total} ${ana}` : t?.analysts ? `${t.analysts} ${ana}` : (th ? 'ความเห็นส่วนใหญ่' : 'consensus')}
           </span>
         </div>
       )}
 
-      {/* Target price box */}
       {t?.mean && (
         <div style={{ background: 'var(--bg-2)', borderRadius: 8, padding: '10px 12px' }}>
           <div style={{ fontSize: 10, color: 'var(--ink-3)', marginBottom: 2 }}>
             {th ? 'ราคาเป้าหมายเฉลี่ย' : 'Mean price target'}
-            {t.analysts ? ` · ${t.analysts} analysts` : ''}
+            {t.analysts ? ` · ${t.analysts} ${ana}` : ''}
           </div>
           <div style={{ display: 'flex', alignItems: 'baseline', gap: 8, margin: '3px 0' }}>
             <div style={{ fontSize: 20, fontWeight: 500 }}>{ccyS}{t.mean}</div>
             {upside != null && (
               <div style={{ fontSize: 12, fontWeight: 500, padding: '2px 8px', borderRadius: 5, background: upside >= 0 ? '#E1F5EE' : '#FAECE7', color: upside >= 0 ? '#085041' : '#993C1D' }}>
-                {upside >= 0 ? '+' : ''}{upside.toFixed(1)}%
+                {upside >= 0 ? '+' : ''}{upside.toFixed(1)}% {th ? 'upside' : 'upside'}
               </div>
             )}
           </div>
@@ -128,9 +128,9 @@ function ConsensusCard({ data, currentPrice, ccy, th }) {
                 })()}
               </div>
               <div style={{ display: 'flex', justifyContent: 'space-between' }}>
-                <span style={{ fontSize: 11, color: 'var(--ink-3)' }}>Low {ccyS}{t.low}</span>
-                <span style={{ fontSize: 11, color: 'var(--ink-3)' }}>Now {ccyS}{currentPrice}</span>
-                <span style={{ fontSize: 11, color: 'var(--ink-3)' }}>High {ccyS}{t.high}</span>
+                <span style={{ fontSize: 11, color: 'var(--ink-3)' }}>{th ? 'ต่ำ' : 'Low'} {ccyS}{t.low}</span>
+                <span style={{ fontSize: 11, color: 'var(--ink-3)' }}>{th ? 'ปัจจุบัน' : 'Now'} {ccyS}{currentPrice}</span>
+                <span style={{ fontSize: 11, color: 'var(--ink-3)' }}>{th ? 'สูง' : 'High'} {ccyS}{t.high}</span>
               </div>
             </>
           )}
@@ -201,7 +201,7 @@ function EstimatesCard({ data, th }) {
             })}
             {(() => {
               const beatCount = beats.filter(b => b.surprise > 2).length
-              return <span style={{ fontSize: 11, color: 'var(--ink-3)', marginLeft: 4 }}>Beat {beatCount}/{beats.length}Q</span>
+              return <span style={{ fontSize: 11, color: 'var(--ink-3)', marginLeft: 4 }}>{th ? `เกินประมาณการ ${beatCount}/${beats.length}Q` : `Beat ${beatCount}/${beats.length}Q`}</span>
             })()}
           </div>
         </div>
@@ -550,7 +550,7 @@ export function StockDigest({ items, prices, lang, liveHoldings = [] }) {
       {/* Loading skeleton for the two main sections */}
       {loading ? (
         <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
-          <div style={CARD}><div style={SEC}>Analyst Consensus</div><Shimmer h={8} /><div style={{ marginTop: 10 }}><Shimmer h={60} /></div></div>
+          <div style={CARD}><div style={SEC}>{th ? 'ความเห็นนักวิเคราะห์' : 'Analyst Consensus'}</div><Shimmer h={8} /><div style={{ marginTop: 10 }}><Shimmer h={60} /></div></div>
           <div style={CARD}><div style={SEC}>{th ? 'คาดการณ์ล่วงหน้า' : 'Forward Estimates'}</div><Shimmer h={100} /></div>
         </div>
       ) : (
