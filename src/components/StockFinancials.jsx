@@ -1,4 +1,5 @@
 import { useState, useRef, useCallback } from 'react'
+import * as XLSX from 'xlsx'
 
 const LINE = 'var(--line)'
 
@@ -27,6 +28,25 @@ function AnalysisText({ text, loading, accent }) {
   )
 }
 
+function excelToText(arrayBuffer) {
+  const wb = XLSX.read(arrayBuffer, { type: 'array' })
+  const parts = wb.SheetNames.map(name => {
+    const ws = wb.Sheets[name]
+    // limit to first 120 rows to keep payload small
+    const ref = ws['!ref']
+    if (ref) {
+      const range = XLSX.utils.decode_range(ref)
+      range.e.r = Math.min(range.e.r, 119)
+      ws['!ref'] = XLSX.utils.encode_range(range)
+    }
+    const csv = XLSX.utils.sheet_to_csv(ws, { blankrows: false })
+    return `=== ${name} ===\n${csv}`
+  })
+  const full = parts.join('\n\n')
+  // cap at 20 000 chars so prompt stays within token budget
+  return full.length > 20000 ? full.slice(0, 20000) + '\n[truncated]' : full
+}
+
 export function StockFinancials({ symbol, lang, accentColor }) {
   const th     = lang === 'th'
   const isThai = symbol?.endsWith('.BK')
@@ -42,14 +62,17 @@ export function StockFinancials({ symbol, lang, accentColor }) {
   const processFile = useCallback(async (file) => {
     if (!file) return
 
-    const validType = ['application/pdf', 'image/png', 'image/jpeg', 'image/jpg'].includes(file.type)
-      || file.name.toLowerCase().match(/\.(pdf|png|jpg|jpeg)$/)
-    if (!validType) {
-      setError(th ? 'รองรับเฉพาะ PDF, PNG, JPG' : 'Supports PDF, PNG, JPG only')
+    const name = file.name.toLowerCase()
+    const isExcel = name.endsWith('.xlsx') || name.endsWith('.xls')
+    const isImage = ['image/png', 'image/jpeg', 'image/jpg'].includes(file.type) || name.match(/\.(png|jpg|jpeg)$/)
+    const isPdf   = file.type === 'application/pdf' || name.endsWith('.pdf')
+
+    if (!isExcel && !isImage && !isPdf) {
+      setError(th ? 'รองรับ Excel (.xlsx), PDF, PNG, JPG' : 'Supports Excel (.xlsx), PDF, PNG, JPG')
       return
     }
-    if (file.size > 10 * 1024 * 1024) {
-      setError(th ? 'ไฟล์ใหญ่เกินไป (สูงสุด 10 MB)' : 'File too large (max 10 MB)')
+    if (file.size > 20 * 1024 * 1024) {
+      setError(th ? 'ไฟล์ใหญ่เกินไป (สูงสุด 20 MB)' : 'File too large (max 20 MB)')
       return
     }
 
@@ -58,35 +81,48 @@ export function StockFinancials({ symbol, lang, accentColor }) {
     setLoading(true)
     setAnalysis(null)
 
-    const reader = new FileReader()
-    reader.onload = async (e) => {
-      const base64   = e.target.result.split(',')[1]
-      const mimeType = file.type || 'application/pdf'
-      try {
-        const res = await fetch('/api/analyze-doc', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ data: base64, mimeType, lang, ticker: symbol, name: symbol }),
-        })
-        if (!res.ok) throw new Error('api_error')
+    try {
+      let body
 
-        const r = res.body.getReader()
-        const dec = new TextDecoder()
-        let text = ''
-        while (true) {
-          const { done, value } = await r.read()
-          if (done) break
-          text += dec.decode(value, { stream: true })
-          setAnalysis(text)
-        }
-      } catch {
-        setError(th ? 'เกิดข้อผิดพลาด กรุณาลองใหม่' : 'Error occurred, please try again')
-        setAnalysis(null)
-      } finally {
-        setLoading(false)
+      if (isExcel) {
+        // Parse Excel client-side → send as plain text
+        const buf = await file.arrayBuffer()
+        const csvText = excelToText(buf)
+        body = JSON.stringify({ csvText, lang, ticker: symbol, name: symbol })
+      } else {
+        // PDF or image → base64
+        const base64 = await new Promise((res, rej) => {
+          const r = new FileReader()
+          r.onload  = e => res(e.target.result.split(',')[1])
+          r.onerror = rej
+          r.readAsDataURL(file)
+        })
+        const mimeType = isPdf ? 'application/pdf' : (file.type || 'image/png')
+        body = JSON.stringify({ data: base64, mimeType, lang, ticker: symbol, name: symbol })
       }
+
+      const res = await fetch('/api/analyze-doc', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body,
+      })
+      if (!res.ok) throw new Error('api_error')
+
+      const reader = res.body.getReader()
+      const dec = new TextDecoder()
+      let text = ''
+      while (true) {
+        const { done, value } = await reader.read()
+        if (done) break
+        text += dec.decode(value, { stream: true })
+        setAnalysis(text)
+      }
+    } catch {
+      setError(th ? 'เกิดข้อผิดพลาด กรุณาลองใหม่' : 'Error occurred, please try again')
+      setAnalysis(null)
+    } finally {
+      setLoading(false)
     }
-    reader.readAsDataURL(file)
   }, [lang, symbol, th])
 
   const onDrop = useCallback((e) => {
@@ -119,7 +155,7 @@ export function StockFinancials({ symbol, lang, accentColor }) {
           userSelect: 'none',
         }}
       >
-        <div style={{ fontSize: 30, marginBottom: 10 }}>📄</div>
+        <div style={{ fontSize: 30, marginBottom: 10 }}>📊</div>
         <div style={{ fontSize: 13.5, fontWeight: 500, color: 'var(--ink-1)', marginBottom: 5 }}>
           {th ? 'อัปโหลดงบการเงิน' : 'Upload Financial Statement'}
         </div>
@@ -127,14 +163,14 @@ export function StockFinancials({ symbol, lang, accentColor }) {
           {th ? 'ลากไฟล์มาวางที่นี่ หรือคลิกเพื่อเลือก' : 'Drag & drop or click to select'}
         </div>
         <div style={{ fontSize: 11, color: 'var(--ink-3)', background: 'var(--bg-2)', display: 'inline-block', padding: '3px 10px', borderRadius: 20 }}>
-          PDF · PNG · JPG
+          Excel · PDF · PNG · JPG
         </div>
       </div>
 
       <input
         ref={inputRef}
         type="file"
-        accept=".pdf,.png,.jpg,.jpeg"
+        accept=".xlsx,.xls,.pdf,.png,.jpg,.jpeg"
         style={{ display: 'none' }}
         onChange={e => { processFile(e.target.files[0]); e.target.value = '' }}
       />
@@ -148,7 +184,10 @@ export function StockFinancials({ symbol, lang, accentColor }) {
           <>
             <div>🇹🇭 <span style={{ fontWeight: 500 }}>set.or.th</span> → ค้นหาหุ้น → งบการเงิน</div>
             <div style={{ fontSize: 11, color: 'var(--ink-3)', paddingLeft: 22 }}>
-              ดาวน์โหลด PDF งบรายปี (56-1) หรืองบรายไตรมาส
+              ดาวน์โหลดไฟล์ <strong>Excel (.xlsx)</strong> หรือ PDF งบรายปี/รายไตรมาส
+            </div>
+            <div style={{ fontSize: 11, color: 'var(--ink-3)', paddingLeft: 22 }}>
+              หรือจากหน้า IR ของบริษัท → งบการเงิน Excel
             </div>
           </>
         ) : (
@@ -176,7 +215,7 @@ export function StockFinancials({ symbol, lang, accentColor }) {
       {/* File bar */}
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 8 }}>
         <div style={{ fontSize: 12, color: 'var(--ink-3)', display: 'flex', alignItems: 'center', gap: 6, minWidth: 0 }}>
-          <span>📄</span>
+          <span>{fileName?.match(/\.xlsx?$/i) ? '📊' : '📄'}</span>
           <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{fileName}</span>
         </div>
         {!loading && (

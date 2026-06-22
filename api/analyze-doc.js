@@ -1,8 +1,8 @@
-// Node.js runtime — higher body limit for PDF/image uploads
+// Node.js runtime — higher body limit for PDF/image/Excel uploads
 export const config = {
   api: {
     bodyParser: {
-      sizeLimit: '10mb',
+      sizeLimit: '20mb',
     },
   },
 }
@@ -16,8 +16,8 @@ export default async function handler(req, res) {
   }
   if (req.method !== 'POST') return res.status(405).end()
 
-  const { data, mimeType, lang, ticker, name } = req.body || {}
-  if (!data || !mimeType) return res.status(400).json({ error: 'missing_file' })
+  const { data, mimeType, csvText, lang, ticker, name } = req.body || {}
+  if (!csvText && (!data || !mimeType)) return res.status(400).json({ error: 'missing_file' })
 
   const apiKey = process.env.ANTHROPIC_API_KEY
   if (!apiKey) return res.status(500).json({ error: 'no_key' })
@@ -57,10 +57,16 @@ Use exact figures from the document. State the currency and fiscal years shown. 
   res.setHeader('Cache-Control', 'no-store')
 
   try {
-    const isPdf = mimeType === 'application/pdf'
-    const contentBlock = isPdf
-      ? { type: 'document', source: { type: 'base64', media_type: 'application/pdf', data } }
-      : { type: 'image',    source: { type: 'base64', media_type: mimeType, data } }
+    let contentBlocks
+    if (csvText) {
+      // Excel file parsed client-side to CSV text
+      contentBlocks = [{ type: 'text', text: `Financial data (Excel → CSV):\n\n${csvText}` }]
+    } else {
+      const isPdf = mimeType === 'application/pdf'
+      contentBlocks = [isPdf
+        ? { type: 'document', source: { type: 'base64', media_type: 'application/pdf', data } }
+        : { type: 'image',    source: { type: 'base64', media_type: mimeType, data } }]
+    }
 
     const r = await fetch('https://api.anthropic.com/v1/messages', {
       method: 'POST',
@@ -74,7 +80,7 @@ Use exact figures from the document. State the currency and fiscal years shown. 
         model: 'claude-haiku-4-5-20251001',
         max_tokens: 1400,
         stream: true,
-        messages: [{ role: 'user', content: [contentBlock, { type: 'text', text: prompt }] }],
+        messages: [{ role: 'user', content: [...contentBlocks, { type: 'text', text: prompt }] }],
       }),
     })
 
