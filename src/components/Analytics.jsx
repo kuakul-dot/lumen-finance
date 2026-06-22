@@ -3435,6 +3435,31 @@ const REBAL_BAND_KEY     = "lumen_rebalance_band"
 const RISK_BY_CLASS  = { Cash: 0, Bond: 1, GoldTH: 2, MutualFund: 2.5, Equity: 3, Crypto: 5 }
 const LIQUID_CLASSES = new Set(['Cash', 'Bond', 'MutualFund'])
 
+function pearson(a, b) {
+  const n = Math.min(a.length, b.length)
+  if (n < 8) return null
+  let am = 0, bm = 0
+  for (let i = 0; i < n; i++) { am += a[i]; bm += b[i] }
+  am /= n; bm /= n
+  let num = 0, da = 0, db = 0
+  for (let i = 0; i < n; i++) {
+    num += (a[i] - am) * (b[i] - bm)
+    da  += (a[i] - am) ** 2
+    db  += (b[i] - bm) ** 2
+  }
+  const denom = Math.sqrt(da * db)
+  return denom === 0 ? 0 : Math.round(num / denom * 100) / 100
+}
+const KNOWN_ER = {
+  VOO: 0.0003, SPY: 0.000945, QQQ: 0.002, IVV: 0.0003, VTI: 0.0003,
+  SCHB: 0.0003, BND: 0.00015, AGG: 0.0003, GLD: 0.004, SLV: 0.005,
+  ARKK: 0.0075, ARKG: 0.0075, VEA: 0.00055, VWO: 0.0008, EEM: 0.0068,
+  VNQ: 0.0012, SCHD: 0.0006, JEPI: 0.0035, JEPQ: 0.0035,
+}
+const DEFAULT_ER_BY_CLASS = {
+  Equity: 0, ETF: 0.003, MutualFund: 0.015, Bond: 0, Cash: 0, Crypto: 0, GoldTH: 0.005,
+}
+
 function healthGrade(score) {
   if (score >= 85) return 'A'
   if (score >= 70) return 'B'
@@ -3461,7 +3486,8 @@ function ScoreRing({ score }) {
   )
 }
 
-function MetricCard({ icon, name, grade, detail, barPct }) {
+function MetricCard({ icon, name, grade, detail, barPct, subs = [], th, isNew }) {
+  const [open, setOpen] = useState(false)
   const palette = {
     A: { bg: 'oklch(0.95 0.04 160)', txt: 'var(--gain)',           bar: 'var(--gain)' },
     B: { bg: 'oklch(0.96 0.06 80)',  txt: 'oklch(0.55 0.15 60)',   bar: 'oklch(0.65 0.15 60)' },
@@ -3473,7 +3499,10 @@ function MetricCard({ icon, name, grade, detail, barPct }) {
     <div className="tbl-card" style={{ padding: '16px', borderRadius: 14, display: 'flex', flexDirection: 'column', gap: 10 }}>
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
         <span style={{ fontSize: 20 }}>{icon}</span>
-        <span style={{ fontSize: 13, fontWeight: 800, padding: '3px 9px', borderRadius: 7, background: p.bg, color: p.txt, letterSpacing: '.5px' }}>{grade}</span>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 5 }}>
+          {isNew && <span style={{ fontSize: 9, fontWeight: 700, color: 'var(--gain)', background: 'oklch(0.95 0.04 160)', borderRadius: 3, padding: '1px 4px' }}>NEW</span>}
+          <span style={{ fontSize: 13, fontWeight: 800, padding: '3px 9px', borderRadius: 7, background: p.bg, color: p.txt, letterSpacing: '.5px' }}>{grade}</span>
+        </div>
       </div>
       <div>
         <div style={{ fontSize: 13, fontWeight: 650, marginBottom: 3, color: 'var(--ink-1)' }}>{name}</div>
@@ -3482,6 +3511,29 @@ function MetricCard({ icon, name, grade, detail, barPct }) {
       <div style={{ height: 5, background: 'var(--line)', borderRadius: 99, overflow: 'hidden' }}>
         <div style={{ width: `${barPct}%`, height: '100%', background: p.bar, borderRadius: 99, transition: 'width .4s ease' }} />
       </div>
+      {subs.length > 0 && (
+        <button onClick={() => setOpen(o => !o)} style={{
+          display: 'flex', alignItems: 'center', gap: 4, background: 'none', border: 'none',
+          padding: 0, cursor: 'pointer', fontSize: 11, color: 'var(--ink-3)', fontFamily: 'inherit',
+        }}>
+          <span style={{ transform: open ? 'rotate(90deg)' : 'none', transition: 'transform 0.15s', display: 'inline-block', lineHeight: 1 }}>›</span>
+          {open ? (th ? 'ซ่อน' : 'Hide') : (th ? 'ดูรายละเอียด' : 'Details')}
+        </button>
+      )}
+      {open && (
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: 6, borderTop: '0.5px solid var(--line)', paddingTop: 8 }}>
+          {subs.map((s, i) => {
+            const noteColor = s.ok === true ? 'var(--gain)' : s.ok === false ? 'var(--loss)' : 'oklch(0.6 0.12 60)'
+            return (
+              <div key={i} style={{ background: 'var(--bg-2)', borderRadius: 6, padding: '8px 10px' }}>
+                <div style={{ fontSize: 10, color: 'var(--ink-3)', marginBottom: 2 }}>{s.label}</div>
+                <div style={{ fontSize: 13, fontWeight: 600, lineHeight: 1.3 }}>{s.value}</div>
+                {s.note && <div style={{ fontSize: 10, marginTop: 2, color: noteColor }}>{s.note}</div>}
+              </div>
+            )
+          })}
+        </div>
+      )}
     </div>
   )
 }
@@ -3489,12 +3541,11 @@ function MetricCard({ icon, name, grade, detail, barPct }) {
 function AnalyticsHealth({ t, lang, rows = [], totalValue = 0, totalPlPct = 0, dataState, cashAccounts = [], fxRate = 36 }) {
   const th = lang === 'th'
 
-  // Cash value from bank/savings accounts (not in rows)
   const cashValue = useMemo(() =>
     cashAccounts.reduce((s, a) => s + (a.currency === 'USD' ? (a.balance || 0) * fxRate : (a.balance || 0)), 0)
   , [cashAccounts, fxRate])
 
-  const fullValue = totalValue + cashValue  // total incl. cash for liquidity denominator
+  const fullValue = totalValue + cashValue
 
   const rebalState = useMemo(() => ({
     targets: JSON.parse(localStorage.getItem(REBAL_TARGETS_KEY) || '{}'),
@@ -3503,65 +3554,102 @@ function AnalyticsHealth({ t, lang, rows = [], totalValue = 0, totalPlPct = 0, d
     band:    parseFloat(localStorage.getItem(REBAL_BAND_KEY) || '5') || 5,
   }), [])
 
-  // 1 — Diversification
+  // ── 7 Correlation (async) ─────────────────────────────────────────────────
+  const [corrData, setCorrData] = useState(null)
+  useEffect(() => {
+    const uniq = [...new Set(rows.map(r => r.ticker))]
+    if (uniq.length < 2) { setCorrData({ score: 90, avgRho: 0, maxPair: null, nPairs: 0 }); return }
+    Promise.all(uniq.map(sym => fetchHistory(sym, '3mo').catch(() => null))).then(results => {
+      const retsMap = {}
+      results.forEach((data, i) => {
+        const prices = (data?.series || []).map(d => d.c).filter(v => v > 0)
+        if (prices.length < 10) return
+        const rets = []
+        for (let j = 1; j < prices.length; j++) rets.push(Math.log(prices[j] / prices[j - 1]))
+        retsMap[uniq[i]] = rets
+      })
+      const valid = Object.keys(retsMap)
+      if (valid.length < 2) { setCorrData({ score: 80, avgRho: 0, maxPair: null, nPairs: 0 }); return }
+      const pairs = []
+      for (let i = 0; i < valid.length - 1; i++)
+        for (let j = i + 1; j < valid.length; j++) {
+          const rho = pearson(retsMap[valid[i]], retsMap[valid[j]])
+          if (rho !== null) pairs.push({ a: valid[i], b: valid[j], rho })
+        }
+      if (!pairs.length) { setCorrData({ score: 80, avgRho: 0, maxPair: null, nPairs: 0 }); return }
+      const avgRho  = pairs.reduce((s, p) => s + p.rho, 0) / pairs.length
+      const maxPair = pairs.reduce((m, p) => p.rho > m.rho ? p : m)
+      const score   = avgRho < 0.2 ? 95 : avgRho < 0.35 ? 80 : avgRho < 0.5 ? 65 : avgRho < 0.65 ? 50 : 35
+      setCorrData({ score, avgRho: Math.round(avgRho * 100) / 100, maxPair, nPairs: pairs.length })
+    }).catch(() => setCorrData({ score: 80, avgRho: 0, maxPair: null, nPairs: 0 }))
+  }, [rows])
+
+  // ── 1 Diversification ─────────────────────────────────────────────────────
   const divScore = useMemo(() => {
     const classes = new Set(rows.map(r => r.cls || 'Equity'))
     if (cashValue > 0) classes.add('Cash')
     const regions = new Set(rows.map(r => r.region || 'TH'))
-    const base  = [0, 20, 45, 65, 80, 90][Math.min(classes.size, 5)]
-    const score = Math.min(100, base + (regions.size >= 2 ? 10 : 0))
-    return { score, nClasses: classes.size, nRegions: regions.size }
+    const sectors = new Set(rows.filter(r => r.sector).map(r => r.sector))
+    const base    = [0, 20, 45, 65, 80, 90][Math.min(classes.size, 5)]
+    const score   = Math.min(100, base + (regions.size >= 2 ? 10 : 0))
+    return { score, nClasses: classes.size, nRegions: regions.size, nSectors: sectors.size }
   }, [rows, cashValue])
 
-  // 2 — Concentration (weight relative to investment portfolio only, excl. cash)
+  // ── 2 Concentration ───────────────────────────────────────────────────────
   const conScore = useMemo(() => {
     const sorted = [...rows].sort((a, b) => b.weight - a.weight)
     const maxW   = sorted[0]?.weight || 0
     const top3   = sorted.slice(0, 3).reduce((s, r) => s + r.weight, 0)
+    const hhi    = rows.reduce((s, r) => s + (r.weight / 100) ** 2, 0)
     const score  = Math.round(Math.max(20, 100 - maxW * 1.8) - (top3 > 65 ? 10 : 0))
-    return { score: Math.min(100, score), maxW, top3, topTicker: sorted[0]?.ticker }
+    return { score: Math.min(100, score), maxW, top3, hhi: Math.round(hhi * 1000) / 1000, topTicker: sorted[0]?.ticker }
   }, [rows])
 
-  // 3 — Rebalance
+  // ── 3 Rebalance ───────────────────────────────────────────────────────────
   const rebalScore = useMemo(() => {
     const { targets, tickerW, mode, band } = rebalState
     const hasClass  = Object.keys(targets).length > 0
     const hasTicker = Object.keys(tickerW).length > 0
-    if (!hasClass && !hasTicker) return { score: 75, hasTargets: false, outOfBand: 0, total: 0 }
-
+    if (!hasClass && !hasTicker) return { score: 75, hasTargets: false, outOfBand: 0, total: 0, maxDrift: 0, band }
     const classTotals = {}
     rows.forEach(r => { const c = r.cls || 'Equity'; classTotals[c] = (classTotals[c] || 0) + r.weight })
-
-    let outOfBand = 0, total = 0
+    let outOfBand = 0, total = 0, maxDrift = 0
     if (mode !== 'ticker' && hasClass) {
       for (const [cls, tgt] of Object.entries(targets)) {
-        total++; if (Math.abs((classTotals[cls] || 0) - tgt) > band) outOfBand++
+        total++; const drift = Math.abs((classTotals[cls] || 0) - tgt)
+        maxDrift = Math.max(maxDrift, drift); if (drift > band) outOfBand++
       }
     }
     if (mode !== 'class' && hasTicker) {
       for (const r of rows) {
         const tgt = tickerW[r.ticker]; if (tgt == null) continue
-        total++; if (Math.abs(r.weight - tgt) > band) outOfBand++
+        total++; const drift = Math.abs(r.weight - tgt)
+        maxDrift = Math.max(maxDrift, drift); if (drift > band) outOfBand++
       }
     }
-    if (total === 0) return { score: 75, hasTargets: true, outOfBand: 0, total: 0 }
-    return { score: Math.round(((total - outOfBand) / total) * 100), hasTargets: true, outOfBand, total }
+    if (total === 0) return { score: 75, hasTargets: true, outOfBand: 0, total: 0, maxDrift: 0, band }
+    return { score: Math.round(((total - outOfBand) / total) * 100), hasTargets: true, outOfBand, total, maxDrift: Math.round(maxDrift * 10) / 10, band }
   }, [rows, rebalState])
 
-  // 4 — Return
+  // ── 4 Return ──────────────────────────────────────────────────────────────
   const retScore = useMemo(() => {
-    const pos      = rows.filter(r => r.pl >= 0).length
+    const sorted = [...rows].sort((a, b) => b.plPct - a.plPct)
+    const pos    = rows.filter(r => r.pl >= 0).length
     const posScore = rows.length > 0 ? (pos / rows.length) * 70 : 0
     const plScore  = Math.min(30, Math.max(0, (totalPlPct || 0) * 1.0))
-    return { score: Math.round(posScore + plScore), pos, total: rows.length }
+    return {
+      score: Math.round(posScore + plScore), pos, total: rows.length,
+      best:  sorted[0]                   ? { ticker: sorted[0].ticker,                   plPct: sorted[0].plPct                   } : null,
+      worst: sorted[sorted.length - 1]   ? { ticker: sorted[sorted.length - 1].ticker,   plPct: sorted[sorted.length - 1].plPct   } : null,
+    }
   }, [rows, totalPlPct])
 
-  // 5 — Risk
+  // ── 5 Risk ────────────────────────────────────────────────────────────────
   const riskScore = useMemo(() => {
     const totalW = rows.reduce((s, r) => s + r.weight, 0)
-    const wr = totalW > 0
-      ? rows.reduce((s, r) => s + (RISK_BY_CLASS[r.cls] ?? 3) * r.weight, 0) / totalW
-      : 0
+    const wr = totalW > 0 ? rows.reduce((s, r) => s + (RISK_BY_CLASS[r.cls] ?? 3) * r.weight, 0) / totalW : 0
+    const cryptoW = rows.filter(r => r.cls === 'Crypto').reduce((s, r) => s + r.weight, 0)
+    const equityW = rows.filter(r => ['Equity', 'ETF'].includes(r.cls)).reduce((s, r) => s + r.weight, 0)
     const levels = [
       { max: 1,        score: 70, en: 'Conservative',  th: 'อนุรักษ์นิยม' },
       { max: 2,        score: 80, en: 'Moderate-Low',  th: 'ค่อนข้างอนุรักษ์' },
@@ -3570,23 +3658,37 @@ function AnalyticsHealth({ t, lang, rows = [], totalValue = 0, totalPlPct = 0, d
       { max: Infinity, score: 55, en: 'High Risk',     th: 'ความเสี่ยงสูง' },
     ]
     const lv = levels.find(l => wr < l.max)
-    return { score: lv.score, label: th ? lv.th : lv.en, wr }
+    return { score: lv.score, label: th ? lv.th : lv.en, wr: Math.round(wr * 10) / 10, cryptoW: Math.round(cryptoW * 10) / 10, equityW: Math.round(equityW * 10) / 10 }
   }, [rows, th])
 
-  // 6 — Liquidity (includes cash accounts as numerator + denominator)
+  // ── 6 Liquidity ───────────────────────────────────────────────────────────
   const liqScore = useMemo(() => {
-    const liquidInvValue = rows
-      .filter(r => LIQUID_CLASSES.has(r.cls))
-      .reduce((s, r) => s + r.value, 0)
+    const liquidInvValue = rows.filter(r => LIQUID_CLASSES.has(r.cls)).reduce((s, r) => s + r.value, 0)
     const liquidTotal = liquidInvValue + cashValue
-    const liqPct = fullValue > 0 ? (liquidTotal / fullValue) * 100 : 0
-    const score = liqPct >= 25 ? 100 : liqPct >= 20 ? 85 : liqPct >= 15 ? 70 : liqPct >= 10 ? 55 : liqPct >= 5 ? 35 : 20
-    return { score, liqPct: Math.round(liqPct * 10) / 10, cashValue }
+    const liqPct  = fullValue > 0 ? (liquidTotal / fullValue) * 100 : 0
+    const cashPct = fullValue > 0 ? (cashValue   / fullValue) * 100 : 0
+    const score   = liqPct >= 25 ? 100 : liqPct >= 20 ? 85 : liqPct >= 15 ? 70 : liqPct >= 10 ? 55 : liqPct >= 5 ? 35 : 20
+    return { score, liqPct: Math.round(liqPct * 10) / 10, cashPct: Math.round(cashPct * 10) / 10 }
   }, [rows, cashValue, fullValue])
 
+  // ── 8 Cost Efficiency ─────────────────────────────────────────────────────
+  const costScore = useMemo(() => {
+    if (rows.length === 0) return { score: 100, avgER: 0, highestTicker: null, highestER: 0 }
+    let wSum = 0, wERSum = 0
+    rows.forEach(r => { const er = KNOWN_ER[r.ticker] ?? DEFAULT_ER_BY_CLASS[r.cls] ?? 0; wERSum += er * r.weight; wSum += r.weight })
+    const avgER = wSum > 0 ? wERSum / wSum : 0
+    const pct   = Math.round(avgER * 10000) / 100
+    const score = avgER < 0.001 ? 100 : avgER < 0.003 ? 88 : avgER < 0.007 ? 75 : avgER < 0.012 ? 60 : 40
+    const top   = rows.reduce((m, r) => (KNOWN_ER[r.ticker] ?? DEFAULT_ER_BY_CLASS[r.cls] ?? 0) > (KNOWN_ER[m.ticker] ?? DEFAULT_ER_BY_CLASS[m.cls] ?? 0) ? r : m, rows[0])
+    const topER = Math.round((KNOWN_ER[top?.ticker] ?? DEFAULT_ER_BY_CLASS[top?.cls] ?? 0) * 10000) / 100
+    return { score, avgER: pct, highestTicker: top?.ticker, highestER: topER }
+  }, [rows])
+
+  const corrScore = corrData?.score ?? 75
   const composite = Math.round(
-    divScore.score * 0.20 + conScore.score * 0.20 + rebalScore.score * 0.15 +
-    retScore.score * 0.25 + riskScore.score * 0.10 + liqScore.score * 0.10
+    divScore.score  * 0.18 + conScore.score  * 0.17 + rebalScore.score * 0.12 +
+    retScore.score  * 0.21 + riskScore.score * 0.10 + liqScore.score   * 0.09 +
+    corrScore       * 0.08 + costScore.score * 0.05
   )
 
   const overallLabel = composite >= 80 ? (th ? 'พอร์ตสุขภาพดีเยี่ยม' : 'Excellent portfolio health')
@@ -3602,6 +3704,7 @@ function AnalyticsHealth({ t, lang, rows = [], totalValue = 0, totalPlPct = 0, d
       conScore.score  < 55 && (th ? 'ความเข้มข้นสูง'   : 'high concentration'),
       divScore.score  < 55 && (th ? 'กระจายน้อย'       : 'low diversification'),
       rebalScore.hasTargets && rebalScore.score < 60 && (th ? 'Rebalance ค้าง' : 'rebalancing needed'),
+      corrData?.avgRho > 0.55 && (th ? 'Correlation สูง' : 'high correlation'),
     ].filter(Boolean)
     return weak.length > 0
       ? (th ? `ควรแก้ไข: ${weak.join(', ')}` : `Address: ${weak.join(', ')}`)
@@ -3612,74 +3715,103 @@ function AnalyticsHealth({ t, lang, rows = [], totalValue = 0, totalPlPct = 0, d
     {
       icon: '🧩', score: divScore.score,
       name: th ? 'การกระจาย' : 'Diversification',
-      detail: th
-        ? `${divScore.nClasses} ประเภทสินทรัพย์ · ${divScore.nRegions} ภูมิภาค`
-        : `${divScore.nClasses} asset class${divScore.nClasses !== 1 ? 'es' : ''} · ${divScore.nRegions} region(s)`,
+      detail: th ? `${divScore.nClasses} ประเภทสินทรัพย์ · ${divScore.nRegions} ภูมิภาค` : `${divScore.nClasses} asset class${divScore.nClasses !== 1 ? 'es' : ''} · ${divScore.nRegions} region(s)`,
+      subs: [
+        { label: th ? 'ประเภทสินทรัพย์' : 'Asset Classes', value: divScore.nClasses, note: divScore.nClasses >= 3 ? '✓' : th ? 'เพิ่มประเภท' : 'Add more', ok: divScore.nClasses >= 3 },
+        { label: th ? 'ภูมิภาค' : 'Regions', value: divScore.nRegions, note: divScore.nRegions >= 2 ? '✓' : th ? 'เพิ่มต่างประเทศ' : 'Add international', ok: divScore.nRegions >= 2 },
+        { label: 'Sectors', value: divScore.nSectors || '—', note: divScore.nSectors >= 5 ? '✓' : divScore.nSectors > 0 ? '< 5' : null, ok: divScore.nSectors >= 5 },
+      ],
     },
     {
       icon: '⚖️', score: conScore.score,
       name: th ? 'ความเข้มข้น' : 'Concentration',
-      detail: th
-        ? `${conScore.topTicker || '—'} ${conScore.maxW.toFixed(1)}% · Top-3 รวม ${conScore.top3.toFixed(0)}%`
-        : `${conScore.topTicker || '—'} ${conScore.maxW.toFixed(1)}% · top-3 sum ${conScore.top3.toFixed(0)}%`,
+      detail: th ? `${conScore.topTicker || '—'} ${conScore.maxW.toFixed(1)}% · Top-3 รวม ${conScore.top3.toFixed(0)}%` : `${conScore.topTicker || '—'} ${conScore.maxW.toFixed(1)}% · top-3 sum ${conScore.top3.toFixed(0)}%`,
+      subs: [
+        { label: th ? 'ถือสูงสุด' : 'Top Holding', value: `${conScore.topTicker} ${conScore.maxW.toFixed(1)}%`, note: conScore.maxW > 20 ? (th ? 'เกิน 20% ⚠' : '>20% ⚠') : '✓', ok: conScore.maxW <= 20 },
+        { label: 'Top-3', value: `${conScore.top3.toFixed(0)}%`, note: conScore.top3 > 50 ? (th ? 'เข้มข้น' : 'Concentrated') : '✓', ok: conScore.top3 <= 50 },
+        { label: 'HHI', value: conScore.hhi.toFixed(3), note: conScore.hhi < 0.1 ? '✓ Low' : conScore.hhi < 0.18 ? 'Moderate' : 'High ⚠', ok: conScore.hhi < 0.1 },
+      ],
     },
     {
       icon: '🎯', score: rebalScore.score,
-      name: th ? 'Rebalance' : 'Rebalance',
-      detail: rebalScore.hasTargets
-        ? (th ? `${rebalScore.outOfBand}/${rebalScore.total} รายการนอกเป้า` : `${rebalScore.outOfBand}/${rebalScore.total} outside target`)
-        : (th ? 'ยังไม่ได้ตั้งเป้าหมาย' : 'No targets set yet'),
+      name: 'Rebalance',
+      detail: rebalScore.hasTargets ? (th ? `${rebalScore.outOfBand}/${rebalScore.total} รายการนอกเป้า` : `${rebalScore.outOfBand}/${rebalScore.total} outside target`) : (th ? 'ยังไม่ได้ตั้งเป้าหมาย' : 'No targets set yet'),
+      subs: rebalScore.hasTargets ? [
+        { label: th ? 'นอกกรอบ' : 'Out of Band', value: `${rebalScore.outOfBand}/${rebalScore.total}`, ok: rebalScore.outOfBand === 0 },
+        { label: th ? 'Drift สูงสุด' : 'Max Drift', value: `${rebalScore.maxDrift}%`, note: rebalScore.maxDrift > rebalScore.band ? '⚠' : '✓', ok: rebalScore.maxDrift <= rebalScore.band },
+        { label: 'Band', value: `±${rebalScore.band}%`, ok: null },
+      ] : [],
     },
     {
       icon: '📈', score: retScore.score,
       name: th ? 'ผลตอบแทน' : 'Return',
-      detail: th
-        ? `${retScore.pos}/${retScore.total} กำไร · รวม ${totalPlPct >= 0 ? '+' : ''}${totalPlPct.toFixed(1)}%`
-        : `${retScore.pos}/${retScore.total} profitable · ${totalPlPct >= 0 ? '+' : ''}${totalPlPct.toFixed(1)}% total`,
+      detail: th ? `${retScore.pos}/${retScore.total} กำไร · รวม ${totalPlPct >= 0 ? '+' : ''}${totalPlPct.toFixed(1)}%` : `${retScore.pos}/${retScore.total} profitable · ${totalPlPct >= 0 ? '+' : ''}${totalPlPct.toFixed(1)}% total`,
+      subs: [
+        { label: 'Win Rate', value: `${retScore.total > 0 ? Math.round(retScore.pos / retScore.total * 100) : 0}%`, note: `${retScore.pos}/${retScore.total}`, ok: retScore.pos / retScore.total >= 0.6 },
+        { label: th ? 'P&L รวม' : 'Total P&L', value: `${totalPlPct >= 0 ? '+' : ''}${totalPlPct.toFixed(1)}%`, ok: totalPlPct >= 0 },
+        retScore.best  && { label: th ? 'ดีสุด' : 'Best',  value: retScore.best.ticker,  note: `${retScore.best.plPct  >= 0 ? '+' : ''}${retScore.best.plPct.toFixed(1)}%`,  ok: true },
+        retScore.worst && retScore.worst.ticker !== retScore.best?.ticker && { label: th ? 'แย่สุด' : 'Worst', value: retScore.worst.ticker, note: `${retScore.worst.plPct >= 0 ? '+' : ''}${retScore.worst.plPct.toFixed(1)}%`, ok: retScore.worst.plPct >= 0 },
+      ].filter(Boolean),
     },
     {
       icon: '🌡️', score: riskScore.score,
       name: th ? 'ระดับความเสี่ยง' : 'Risk Level',
       detail: riskScore.label,
+      subs: [
+        { label: th ? 'ความเสี่ยงถ่วงน้ำหนัก' : 'Weighted Risk', value: `${riskScore.wr} / 5`, note: riskScore.label, ok: riskScore.wr < 3.5 },
+        { label: th ? 'หุ้น + ETF' : 'Equity + ETF', value: `${riskScore.equityW.toFixed(0)}%`, ok: riskScore.equityW < 90 },
+        { label: 'Crypto', value: `${riskScore.cryptoW.toFixed(0)}%`, note: riskScore.cryptoW > 20 ? (th ? 'สูงเกิน ⚠' : 'High ⚠') : '✓', ok: riskScore.cryptoW <= 20 },
+      ],
     },
     {
       icon: '💧', score: liqScore.score,
       name: th ? 'สภาพคล่อง' : 'Liquidity',
-      detail: th
-        ? `เงินสด+พันธบัตร ${liqScore.liqPct}%${liqScore.liqPct < 15 ? ' · ต่ำกว่าเป้า 15%' : ''}`
-        : `Cash+bonds ${liqScore.liqPct}%${liqScore.liqPct < 15 ? ' · below 15% target' : ''}`,
+      detail: th ? `เงินสด+พันธบัตร ${liqScore.liqPct}%${liqScore.liqPct < 15 ? ' · ต่ำกว่าเป้า 15%' : ''}` : `Cash+bonds ${liqScore.liqPct}%${liqScore.liqPct < 15 ? ' · below 15% target' : ''}`,
+      subs: [
+        { label: th ? 'เงินสด' : 'Cash', value: `${liqScore.cashPct.toFixed(1)}%`, ok: liqScore.cashPct >= 5 },
+        { label: th ? 'เงินสด + พันธบัตร' : 'Cash + Bonds', value: `${liqScore.liqPct}%`, note: liqScore.liqPct >= 15 ? '✓' : th ? '< เป้า 15%' : '< 15% target', ok: liqScore.liqPct >= 15 },
+      ],
+    },
+    {
+      icon: '🔗', score: corrScore, isNew: true,
+      name: 'Correlation',
+      detail: corrData === null ? (th ? 'กำลังคำนวณ...' : 'Calculating...') : (th ? `ρ เฉลี่ย ${corrData.avgRho}${corrData.maxPair ? ` · สูงสุด ${corrData.maxPair.a}/${corrData.maxPair.b}` : ''}` : `Avg ρ ${corrData.avgRho}${corrData.maxPair ? ` · highest ${corrData.maxPair.a}/${corrData.maxPair.b}` : ''}`),
+      subs: corrData ? [
+        { label: th ? 'ρ เฉลี่ย (3M)' : 'Avg ρ (3M)', value: corrData.avgRho, note: corrData.avgRho < 0.35 ? '✓ Low' : corrData.avgRho < 0.55 ? 'Moderate' : 'High ⚠', ok: corrData.avgRho < 0.35 },
+        corrData.maxPair && { label: th ? 'คู่ที่ correlate สูงสุด' : 'Highest Pair', value: `${corrData.maxPair.a} / ${corrData.maxPair.b}`, note: `ρ ${corrData.maxPair.rho}`, ok: corrData.maxPair.rho < 0.7 },
+        { label: th ? 'จำนวนคู่ที่วิเคราะห์' : 'Pairs Analyzed', value: corrData.nPairs, ok: null },
+      ].filter(Boolean) : [],
+    },
+    {
+      icon: '💸', score: costScore.score, isNew: true,
+      name: th ? 'ค่าใช้จ่าย' : 'Cost Efficiency',
+      detail: th ? `ER เฉลี่ย ${costScore.avgER}%/ปี` : `Avg ER ${costScore.avgER}%/yr`,
+      subs: [
+        { label: th ? 'Expense Ratio เฉลี่ย' : 'Avg Expense Ratio', value: `${costScore.avgER}%`, note: costScore.avgER < 0.3 ? '✓ Low' : costScore.avgER < 0.7 ? 'Moderate' : 'High ⚠', ok: costScore.avgER < 0.3 },
+        costScore.highestTicker && { label: th ? 'ค่าใช้จ่ายสูงสุด' : 'Highest Cost', value: costScore.highestTicker, note: `${costScore.highestER}%/yr`, ok: costScore.highestER < 0.5 },
+        { label: th ? 'เปรียบ Active Fund' : 'vs Active Fund', value: '~1–2%', note: th ? 'ETF/Index ถูกกว่ามาก' : 'ETF much cheaper', ok: true },
+      ].filter(Boolean),
     },
   ]
 
-  // Action items
   const actions = useMemo(() => {
     const items = []
     if (liqScore.score < 70)
-      items.push({ sev: 'high', text: th
-        ? `เพิ่มเงินสด/พันธบัตร — สภาพคล่อง ${liqScore.liqPct}% ควรมีอย่างน้อย 15%`
-        : `Increase cash or bonds — liquidity ${liqScore.liqPct}%, target ≥15%` })
+      items.push({ sev: 'high', text: th ? `เพิ่มเงินสด/พันธบัตร — สภาพคล่อง ${liqScore.liqPct}% ควรมีอย่างน้อย 15%` : `Increase cash or bonds — liquidity ${liqScore.liqPct}%, target ≥15%` })
     if (conScore.score < 65 && conScore.topTicker)
-      items.push({ sev: 'high', text: th
-        ? `ลดน้ำหนัก ${conScore.topTicker} — ถือ ${conScore.maxW.toFixed(1)}% เสี่ยงหากราคาตก`
-        : `Reduce ${conScore.topTicker} — ${conScore.maxW.toFixed(1)}% single-asset concentration` })
+      items.push({ sev: 'high', text: th ? `ลดน้ำหนัก ${conScore.topTicker} — ถือ ${conScore.maxW.toFixed(1)}% เสี่ยงหากราคาตก` : `Reduce ${conScore.topTicker} — ${conScore.maxW.toFixed(1)}% single-asset concentration` })
+    if (corrData?.maxPair?.rho > 0.7)
+      items.push({ sev: 'med', text: th ? `${corrData.maxPair.a}/${corrData.maxPair.b} เคลื่อนไหวพร้อมกันสูง (ρ ${corrData.maxPair.rho}) — เพิ่ม uncorrelated assets` : `${corrData.maxPair.a}/${corrData.maxPair.b} highly correlated (ρ ${corrData.maxPair.rho}) — add uncorrelated assets` })
     if (rebalScore.hasTargets && rebalScore.outOfBand > 0)
-      items.push({ sev: 'med', text: th
-        ? `${rebalScore.outOfBand} รายการนอกกรอบเป้าหมาย — ควร Rebalance ตามแผน`
-        : `${rebalScore.outOfBand} item(s) outside target band — consider rebalancing` })
+      items.push({ sev: 'med', text: th ? `${rebalScore.outOfBand} รายการนอกกรอบเป้าหมาย — ควร Rebalance ตามแผน` : `${rebalScore.outOfBand} item(s) outside target band — consider rebalancing` })
     if (divScore.nRegions < 2)
-      items.push({ sev: 'med', text: th
-        ? 'ลงทุนในภูมิภาคเดียว — เพิ่มหุ้น/กองทุนต่างประเทศเพื่อกระจายความเสี่ยง'
-        : 'Single-region portfolio — add international assets to reduce country risk' })
+      items.push({ sev: 'med', text: th ? 'ลงทุนในภูมิภาคเดียว — เพิ่มหุ้น/กองทุนต่างประเทศเพื่อกระจายความเสี่ยง' : 'Single-region portfolio — add international assets to reduce country risk' })
     if (retScore.score >= 75)
-      items.push({ sev: 'ok', text: th
-        ? `${retScore.pos}/${retScore.total} หลักทรัพย์กำไร · ผลตอบแทนรวม ${totalPlPct >= 0 ? '+' : ''}${totalPlPct.toFixed(1)}%`
-        : `${retScore.pos}/${retScore.total} holdings profitable · overall ${totalPlPct >= 0 ? '+' : ''}${totalPlPct.toFixed(1)}%` })
+      items.push({ sev: 'ok', text: th ? `${retScore.pos}/${retScore.total} หลักทรัพย์กำไร · ผลตอบแทนรวม ${totalPlPct >= 0 ? '+' : ''}${totalPlPct.toFixed(1)}%` : `${retScore.pos}/${retScore.total} holdings profitable · overall ${totalPlPct >= 0 ? '+' : ''}${totalPlPct.toFixed(1)}%` })
     if (divScore.score >= 85)
-      items.push({ sev: 'ok', text: th
-        ? `กระจายครบ ${divScore.nClasses} ประเภทสินทรัพย์ · ${divScore.nRegions} ภูมิภาค`
-        : `Well diversified — ${divScore.nClasses} asset classes · ${divScore.nRegions} region(s)` })
+      items.push({ sev: 'ok', text: th ? `กระจายครบ ${divScore.nClasses} ประเภทสินทรัพย์ · ${divScore.nRegions} ภูมิภาค` : `Well diversified — ${divScore.nClasses} asset classes · ${divScore.nRegions} region(s)` })
     return items
-  }, [liqScore, conScore, rebalScore, divScore, retScore, totalPlPct, th])
+  }, [liqScore, conScore, rebalScore, divScore, retScore, corrData, totalPlPct, th])
 
   if (rows.length === 0 && cashValue === 0) {
     return (
@@ -3697,15 +3829,12 @@ function AnalyticsHealth({ t, lang, rows = [], totalValue = 0, totalPlPct = 0, d
 
   return (
     <div className="shell-section">
-
-      {/* ── Score card ── */}
       <div className="tbl-card" style={{ borderRadius: 18, marginBottom: 20, overflow: 'hidden' }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 20, padding: '22px 24px 18px' }}>
           <ScoreRing score={composite} />
           <div style={{ flex: 1, minWidth: 0 }}>
             <div style={{ fontSize: 19, fontWeight: 750, marginBottom: 5, color: 'var(--ink-1)' }}>{overallLabel}</div>
             <div style={{ fontSize: 13, color: 'var(--ink-3)', lineHeight: 1.55 }}>{overallSub}</div>
-            {/* Grade pill summary */}
             <div style={{ display: 'flex', gap: 6, marginTop: 10, flexWrap: 'wrap' }}>
               {metrics.map(m => {
                 const g = healthGrade(m.score)
@@ -3719,36 +3848,23 @@ function AnalyticsHealth({ t, lang, rows = [], totalValue = 0, totalPlPct = 0, d
             </div>
           </div>
         </div>
-        {/* colored accent bar at bottom */}
         <div style={{ height: 4, background: `linear-gradient(90deg, ${overallColor} ${composite}%, var(--line) ${composite}%)` }} />
       </div>
 
-      {/* ── 6 metrics ── */}
-      <div className="label-up" style={{ marginBottom: 10 }}>{th ? '6 มิติสุขภาพ' : '6 health dimensions'}</div>
+      <div className="label-up" style={{ marginBottom: 10 }}>{th ? '8 มิติสุขภาพ' : '8 health dimensions'}</div>
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(200px, 1fr))', gap: 10, marginBottom: 20 }}>
         {metrics.map(m => (
-          <MetricCard key={m.name} icon={m.icon} name={m.name} grade={healthGrade(m.score)} detail={m.detail} barPct={m.score} />
+          <MetricCard key={m.name} icon={m.icon} name={m.name} grade={healthGrade(m.score)} detail={m.detail} barPct={m.score} subs={m.subs || []} th={th} isNew={m.isNew} />
         ))}
       </div>
 
-      {/* ── Action items ── */}
       {actions.length > 0 && (
         <>
           <div className="label-up" style={{ marginBottom: 10 }}>{th ? 'สิ่งที่ควรทำ' : 'Recommended actions'}</div>
           <div className="tbl-card" style={{ borderRadius: 14, overflow: 'hidden' }}>
             {actions.map((a, i) => (
-              <div key={i} style={{
-                display: 'flex', alignItems: 'flex-start', gap: 14,
-                padding: '14px 18px',
-                borderBottom: i < actions.length - 1 ? '1px solid var(--line)' : 'none',
-                borderLeft: `3px solid ${sevColor[a.sev]}`,
-              }}>
-                <div style={{
-                  width: 24, height: 24, borderRadius: '50%',
-                  background: sevBg[a.sev], color: sevColor[a.sev],
-                  display: 'flex', alignItems: 'center', justifyContent: 'center',
-                  fontSize: 12, fontWeight: 800, flexShrink: 0, marginTop: 1,
-                }}>
+              <div key={i} style={{ display: 'flex', alignItems: 'flex-start', gap: 14, padding: '14px 18px', borderBottom: i < actions.length - 1 ? '1px solid var(--line)' : 'none', borderLeft: `3px solid ${sevColor[a.sev]}` }}>
+                <div style={{ width: 24, height: 24, borderRadius: '50%', background: sevBg[a.sev], color: sevColor[a.sev], display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 12, fontWeight: 800, flexShrink: 0, marginTop: 1 }}>
                   {sevIcon[a.sev]}
                 </div>
                 <div style={{ fontSize: 13, color: 'var(--ink-2)', lineHeight: 1.6 }}>{a.text}</div>
