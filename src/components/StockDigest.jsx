@@ -2,6 +2,7 @@ import { useState, useEffect, useRef, useMemo, useCallback } from 'react'
 import { toYahooSymbol } from '../lib/prices'
 import { timeAgo } from '../lib/news'
 import { TickerLogo } from './Nav'
+import { StockFinancials } from './StockFinancials'
 
 const PALETTE = [
   { bg: 'rgba(56,138,230,0.13)',  border: 'rgba(56,138,230,0.32)',  color: '#2d7ac9' },
@@ -568,7 +569,8 @@ export function StockDigest({ items, prices, lang, liveHoldings = [] }) {
     }))
   }, [items, liveHoldings])
 
-  const [activeSym, setActiveSym] = useState(() => yahooItems[0]?.yahooSym || null)
+  const [activeSym,  setActiveSym]  = useState(() => yahooItems[0]?.yahooSym || null)
+  const [digestTab,  setDigestTab]  = useState('analyst') // 'analyst' | 'financials'
   const [analystData, setAnalystData] = useState(null)
   const [newsItems,        setNewsItems]        = useState([])
   const [loading,          setLoading]          = useState(false)
@@ -696,6 +698,21 @@ export function StockDigest({ items, prices, lang, liveHoldings = [] }) {
         })}
       </div>
 
+      {/* View toggle — วิเคราะห์ / งบการเงิน */}
+      <div style={{ display: 'flex', background: 'var(--bg-2)', borderRadius: 10, padding: 3, gap: 3, width: 'fit-content' }}>
+        {[['analyst', th ? 'วิเคราะห์' : 'Analysis'], ['financials', th ? 'งบการเงิน' : 'Financials']].map(([key, lbl]) => (
+          <button key={key} onClick={() => setDigestTab(key)} style={{
+            padding: '5px 14px', border: 'none', borderRadius: 7, cursor: 'pointer', fontSize: 12, fontFamily: 'inherit',
+            background: digestTab === key ? 'var(--bg-1)' : 'transparent',
+            color: digestTab === key ? 'var(--ink-1)' : 'var(--ink-3)',
+            fontWeight: digestTab === key ? 500 : 400,
+            boxShadow: digestTab === key ? '0 0 0 0.5px var(--line)' : 'none',
+          }}>
+            {lbl}
+          </button>
+        ))}
+      </div>
+
       {/* Header card */}
       <div style={{ ...CARD, padding: '12px 16px' }}>
         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
@@ -743,28 +760,35 @@ export function StockDigest({ items, prices, lang, liveHoldings = [] }) {
         </div>
       </div>
 
-      {/* Loading skeleton for the two main sections */}
-      {loading ? (
-        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
-          <div style={CARD}><div style={SEC}>{th ? 'ความเห็นนักวิเคราะห์' : 'Analyst Consensus'}</div><Shimmer h={8} /><div style={{ marginTop: 10 }}><Shimmer h={60} /></div></div>
-          <div style={CARD}><div style={SEC}>{th ? 'คาดการณ์ล่วงหน้า' : 'Forward Estimates'}</div><Shimmer h={100} /></div>
-        </div>
-      ) : (
-        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
-          <ConsensusCard data={analystData || {}} currentPrice={currentPrice} ccy={ccy} th={th} src={analystData?.sources?.consensus} region={activeItem?.region} />
-          <EstimatesCard data={analystData || {}} th={th} src={analystData?.sources?.estimates} />
-        </div>
+      {/* Financials tab */}
+      {digestTab === 'financials' && (
+        <StockFinancials symbol={activeSym} lang={lang} accentColor={accent} />
       )}
 
-      {/* Quarterly financials */}
-      {loading ? (
-        <div style={CARD}><div style={SEC}>{th ? 'งบการเงินรายไตรมาส' : 'Quarterly Financials'}</div><Shimmer h={120} /></div>
-      ) : (
-        <QuarterlyCard data={analystData || {}} aiSummary={aiSummary} aiLoading={aiLoading} accentColor={accent} th={th} src={analystData?.sources?.quarterly} />
-      )}
+      {/* Analyst tab content */}
+      {digestTab === 'analyst' && (
+        <>
+          {loading ? (
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
+              <div style={CARD}><div style={SEC}>{th ? 'ความเห็นนักวิเคราะห์' : 'Analyst Consensus'}</div><Shimmer h={8} /><div style={{ marginTop: 10 }}><Shimmer h={60} /></div></div>
+              <div style={CARD}><div style={SEC}>{th ? 'คาดการณ์ล่วงหน้า' : 'Forward Estimates'}</div><Shimmer h={100} /></div>
+            </div>
+          ) : (
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
+              <ConsensusCard data={analystData || {}} currentPrice={currentPrice} ccy={ccy} th={th} src={analystData?.sources?.consensus} region={activeItem?.region} />
+              <EstimatesCard data={analystData || {}} th={th} src={analystData?.sources?.estimates} />
+            </div>
+          )}
 
-      {/* News */}
-      <NewsSection newsItems={newsItems} newsBrief={newsBrief} newsBriefLoading={newsBriefLoading} loading={newsLoading} lang={lang} accentColor={accent} />
+          {loading ? (
+            <div style={CARD}><div style={SEC}>{th ? 'งบการเงินรายไตรมาส' : 'Quarterly Financials'}</div><Shimmer h={120} /></div>
+          ) : (
+            <QuarterlyCard data={analystData || {}} aiSummary={aiSummary} aiLoading={aiLoading} accentColor={accent} th={th} src={analystData?.sources?.quarterly} />
+          )}
+
+          <NewsSection newsItems={newsItems} newsBrief={newsBrief} newsBriefLoading={newsBriefLoading} loading={newsLoading} lang={lang} accentColor={accent} />
+        </>
+      )}
 
     </div>
   )
