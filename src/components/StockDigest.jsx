@@ -588,8 +588,9 @@ export function StockDigest({ items, prices, lang, liveHoldings = [] }) {
 
   const loadData = useCallback(async (sym) => {
     if (!sym) return
-    if (cacheRef.current[sym]) {
-      const c = cacheRef.current[sym]
+    const cacheKey = `${sym}_${lang}`
+    if (cacheRef.current[cacheKey]) {
+      const c = cacheRef.current[cacheKey]
       setAnalystData(c.analyst)
       setNewsItems(c.news)
       setNewsBrief(c.newsBrief ?? null)
@@ -680,12 +681,12 @@ export function StockDigest({ items, prices, lang, liveHoldings = [] }) {
     }
 
     Promise.allSettled(aiTasks).then(() => {
-      cacheRef.current[sym] = { analyst, news, newsBrief: newsBriefResult, aiStock: aiStockResult }
+      cacheRef.current[cacheKey] = { analyst, news, newsBrief: newsBriefResult, aiStock: aiStockResult }
     })
     if (aiTasks.length === 0) {
-      cacheRef.current[sym] = { analyst, news, newsBrief: null, aiStock: null }
+      cacheRef.current[cacheKey] = { analyst, news, newsBrief: null, aiStock: null }
     }
-  }, [yahooItems])
+  }, [yahooItems, lang])
 
   useEffect(() => { loadData(activeSym) }, [activeSym, loadData])
 
