@@ -202,42 +202,6 @@ function EstimatesCard({ data, th, src }) {
         </tbody>
       </table>
 
-      {/* Beat/miss history */}
-      {beats?.length > 0 && (
-        <div style={{ marginTop: 12, paddingTop: 10, borderTop: '0.5px solid var(--line)' }}>
-          <div style={{ fontSize: 10, color: 'var(--ink-3)', marginBottom: 6 }}>
-            {th ? 'EPS Surprise · ย้อนหลัง 4 ไตรมาส' : 'EPS Surprise · last 4Q'}
-          </div>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 5 }}>
-            {beats.map((b, i) => {
-              const beat = b.surprise > 2, miss = b.surprise < -2
-              return (
-                <div key={i} title={b.label + (b.surprise != null ? ` ${b.surprise > 0 ? '+' : ''}${b.surprise}%` : '')}
-                  style={{ width: 22, height: 22, borderRadius: 5, display: 'inline-flex', alignItems: 'center', justifyContent: 'center', fontSize: 9, fontWeight: 700, background: beat ? '#E1F5EE' : miss ? '#FAECE7' : 'var(--bg-2)', color: beat ? '#085041' : miss ? '#993C1D' : 'var(--ink-3)', cursor: 'default' }}>
-                  {beat ? 'B' : miss ? 'M' : '~'}
-                </div>
-              )
-            })}
-            {(() => {
-              const beatCount = beats.filter(b => b.surprise > 2).length
-              return <span style={{ fontSize: 11, color: 'var(--ink-3)', marginLeft: 4 }}>{th ? `เกินประมาณการ ${beatCount}/${beats.length}Q` : `Beat ${beatCount}/${beats.length}Q`}</span>
-            })()}
-          </div>
-        </div>
-      )}
-
-      {/* EPS revision */}
-      {estimates[0]?.upRev != null && (
-        <div style={{ marginTop: 10, paddingTop: 10, borderTop: '0.5px solid var(--line)' }}>
-          <div style={{ fontSize: 10, color: 'var(--ink-3)', marginBottom: 6 }}>
-            {th ? 'EPS Revision · 30 วันล่าสุด' : 'EPS Revision · last 30d'}
-          </div>
-          <div style={{ display: 'flex', gap: 12, fontSize: 12 }}>
-            <span style={{ color: '#085041' }}>↑ {estimates[0].upRev ?? 0} {th ? 'ปรับขึ้น' : 'up'}</span>
-            <span style={{ color: '#993C1D' }}>↓ {estimates[0].downRev ?? 0} {th ? 'ปรับลง' : 'down'}</span>
-          </div>
-        </div>
-      )}
     </div>
   )
 }
@@ -769,21 +733,15 @@ export function StockDigest({ items, prices, lang, liveHoldings = [] }) {
       {digestTab === 'analyst' && (
         <>
           {loading ? (
-            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
               <div style={CARD}><div style={SEC}>{th ? 'ความเห็นนักวิเคราะห์' : 'Analyst Consensus'}</div><Shimmer h={8} /><div style={{ marginTop: 10 }}><Shimmer h={60} /></div></div>
               <div style={CARD}><div style={SEC}>{th ? 'คาดการณ์ล่วงหน้า' : 'Forward Estimates'}</div><Shimmer h={100} /></div>
             </div>
           ) : (
-            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
               <ConsensusCard data={analystData || {}} currentPrice={currentPrice} ccy={ccy} th={th} src={analystData?.sources?.consensus} region={activeItem?.region} />
               <EstimatesCard data={analystData || {}} th={th} src={analystData?.sources?.estimates} />
             </div>
-          )}
-
-          {loading ? (
-            <div style={CARD}><div style={SEC}>{th ? 'งบการเงินรายไตรมาส' : 'Quarterly Financials'}</div><Shimmer h={120} /></div>
-          ) : (
-            <QuarterlyCard data={analystData || {}} aiSummary={aiSummary} aiLoading={aiLoading} accentColor={accent} th={th} src={analystData?.sources?.quarterly} />
           )}
 
           <NewsSection newsItems={newsItems} newsBrief={newsBrief} newsBriefLoading={newsBriefLoading} loading={newsLoading} lang={lang} accentColor={accent} />
