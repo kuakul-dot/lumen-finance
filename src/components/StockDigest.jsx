@@ -49,6 +49,39 @@ function SourceBadge({ src }) {
   )
 }
 
+function StockAiAnalysis({ text, loading, accentColor, th }) {
+  if (!loading && !text) return null
+  return (
+    <div style={{ ...CARD, borderLeft: `2.5px solid ${accentColor.border}` }}>
+      <div style={{ ...SEC, color: accentColor.color }}>
+        ✦ AI {th ? 'วิเคราะห์' : 'Analysis'}
+      </div>
+      {loading && !text && (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+          <Shimmer h={12} w="95%" /><Shimmer h={12} w="88%" /><Shimmer h={12} w="78%" />
+        </div>
+      )}
+      {text && (
+        <div style={{ fontSize: 12.5, lineHeight: 1.75, color: 'var(--ink-2)' }}>
+          {text.split('\n').map((line, i) => {
+            const clean = line.replace(/\*\*(.*?)\*\*/g, '$1')
+            if (line.startsWith('## ')) return (
+              <div key={i} style={{ fontWeight: 500, color: accentColor.color, fontSize: 11, letterSpacing: '.04em', textTransform: 'uppercase', marginTop: 12, marginBottom: 4, paddingTop: 10, borderTop: `0.5px solid ${accentColor.border}` }}>
+                {line.slice(3)}
+              </div>
+            )
+            if (line.startsWith('- ')) return (
+              <div key={i} style={{ paddingLeft: 10 }}>· {clean.slice(2)}</div>
+            )
+            if (!line.trim()) return <div key={i} style={{ height: 4 }} />
+            return <div key={i}>{clean}</div>
+          })}
+        </div>
+      )}
+    </div>
+  )
+}
+
 function ConsensusCard({ data, currentPrice, ccy, th, src, region }) {
   const { consensus: c, target: t } = data
   const total = c?.total || 0
@@ -539,10 +572,10 @@ export function StockDigest({ items, prices, lang, liveHoldings = [] }) {
   const [newsItems,        setNewsItems]        = useState([])
   const [loading,          setLoading]          = useState(false)
   const [newsLoading,      setNewsLoading]      = useState(false)
-  const [aiSummary,        setAiSummary]        = useState(null)
-  const [aiLoading,        setAiLoading]        = useState(false)
   const [newsBrief,        setNewsBrief]        = useState(null)
   const [newsBriefLoading, setNewsBriefLoading] = useState(false)
+  const [aiStockAnalysis,  setAiStockAnalysis]  = useState(null)
+  const [aiStockLoading,   setAiStockLoading]   = useState(false)
   const cacheRef = useRef({})
 
   // Keep activeSym valid when items change
@@ -559,8 +592,8 @@ export function StockDigest({ items, prices, lang, liveHoldings = [] }) {
       const c = cacheRef.current[sym]
       setAnalystData(c.analyst)
       setNewsItems(c.news)
-      setAiSummary(c.ai)
       setNewsBrief(c.newsBrief ?? null)
+      setAiStockAnalysis(c.aiStock ?? null)
       return
     }
 
@@ -568,10 +601,10 @@ export function StockDigest({ items, prices, lang, liveHoldings = [] }) {
     setNewsLoading(true)
     setAnalystData(null)
     setNewsItems([])
-    setAiSummary(null)
-    setAiLoading(false)
     setNewsBrief(null)
     setNewsBriefLoading(false)
+    setAiStockAnalysis(null)
+    setAiStockLoading(false)
 
     const [ar, nr] = await Promise.allSettled([
       fetch(`/api/analyst?symbol=${encodeURIComponent(sym)}`).then(r => r.json()),
@@ -588,28 +621,52 @@ export function StockDigest({ items, prices, lang, liveHoldings = [] }) {
     setLoading(false)
     setNewsLoading(false)
 
-    // Run both AI summaries in parallel
-    let aiResult = null
+    // Run AI tasks in parallel
     let newsBriefResult = null
+    let aiStockResult = null
     const aiTasks = []
+    const activeItm = yahooItems.find(x => x.yahooSym === sym)
 
-    if (analyst?.quarterly?.length) {
-      const ccy = analyst.currency || 'THB'
-      const activeItm = yahooItems.find(x => x.yahooSym === sym)
-      const ticker = activeItm?.symbol || sym
-      const text = `${ticker} งบการเงินรายไตรมาส: ${analyst.quarterly.map(q =>
-        `${q.label} รายได้ ${fmtB(q.revenue, ccy)} กำไรสุทธิ ${fmtB(q.netIncome, ccy)} EPS ${q.eps ?? '-'}`
-      ).join('; ')}`
-      setAiLoading(true)
+    // Comprehensive stock analysis from analyst data
+    const hasAnalystData = analyst?.consensus?.key || analyst?.target?.mean || analyst?.estimates?.length || analyst?.quarterly?.length
+    if (hasAnalystData) {
+      setAiStockLoading(true)
+      const reqBody = {
+        kind: 'watchlistStock',
+        lang,
+        portfolio: {},
+        ticker: activeItm?.symbol || sym,
+        name: analyst?.name || '',
+        consensus: analyst?.consensus || null,
+        target: analyst?.target || null,
+        estimates: analyst?.estimates || null,
+        quarterly: analyst?.quarterly || null,
+        currentPrice: analyst?.currentPrice ?? null,
+        ccy: analyst?.currency || 'THB',
+      }
       aiTasks.push(
-        fetch(`/api/summarize?title=${encodeURIComponent(text)}`)
-          .then(r => r.json())
-          .then(d => { aiResult = d.summary || null; setAiSummary(aiResult) })
-          .catch(() => {})
-          .finally(() => setAiLoading(false))
+        fetch('/api/analyze', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(reqBody),
+        }).then(async res => {
+          setAiStockLoading(false)
+          if (!res.ok || !res.body) return
+          const reader = res.body.getReader()
+          const decoder = new TextDecoder()
+          let text = ''
+          while (true) {
+            const { done, value } = await reader.read()
+            if (done) break
+            text += decoder.decode(value, { stream: true })
+            setAiStockAnalysis(text)
+          }
+          aiStockResult = text
+        }).catch(() => setAiStockLoading(false))
       )
     }
 
+    // News brief
     if (news.length > 0) {
       const titles = news.slice(0, 8).map(n => n.title).join('\n')
       setNewsBriefLoading(true)
@@ -623,10 +680,10 @@ export function StockDigest({ items, prices, lang, liveHoldings = [] }) {
     }
 
     Promise.allSettled(aiTasks).then(() => {
-      cacheRef.current[sym] = { analyst, news, ai: aiResult, newsBrief: newsBriefResult }
+      cacheRef.current[sym] = { analyst, news, newsBrief: newsBriefResult, aiStock: aiStockResult }
     })
     if (aiTasks.length === 0) {
-      cacheRef.current[sym] = { analyst, news, ai: null, newsBrief: null }
+      cacheRef.current[sym] = { analyst, news, newsBrief: null, aiStock: null }
     }
   }, [yahooItems])
 
@@ -736,11 +793,13 @@ export function StockDigest({ items, prices, lang, liveHoldings = [] }) {
             <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
               <div style={CARD}><div style={SEC}>{th ? 'ความเห็นนักวิเคราะห์' : 'Analyst Consensus'}</div><Shimmer h={8} /><div style={{ marginTop: 10 }}><Shimmer h={60} /></div></div>
               <div style={CARD}><div style={SEC}>{th ? 'คาดการณ์ล่วงหน้า' : 'Forward Estimates'}</div><Shimmer h={100} /></div>
+              <div style={CARD}><Shimmer h={12} w="60%" /><div style={{ marginTop: 10 }}><Shimmer h={80} /></div></div>
             </div>
           ) : (
             <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
               <ConsensusCard data={analystData || {}} currentPrice={currentPrice} ccy={ccy} th={th} src={analystData?.sources?.consensus} region={activeItem?.region} />
               <EstimatesCard data={analystData || {}} th={th} src={analystData?.sources?.estimates} />
+              <StockAiAnalysis text={aiStockAnalysis} loading={aiStockLoading} accentColor={accent} th={th} />
             </div>
           )}
 

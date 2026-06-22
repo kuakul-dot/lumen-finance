@@ -56,11 +56,12 @@ export default async function handler(request) {
   // Pick the right prompt builder based on what the client asked for. Follow-ups
   // always use the compact continuation prompt regardless of kind.
   let prompt
-  if (isFollowUp)                prompt = buildFollowUpPrompt(portfolio, lang)
-  else if (kind === 'rebalance') prompt = buildRebalancePrompt(portfolio, extra, lang)
+  if (isFollowUp)                    prompt = buildFollowUpPrompt(portfolio, lang)
+  else if (kind === 'rebalance')     prompt = buildRebalancePrompt(portfolio, extra, lang)
   else if (kind === 'portfolioReview') prompt = buildPortfolioReviewPrompt(portfolio, rebalanceHealth, lang)
-  else if (kind === 'holding')   prompt = buildHoldingPrompt(portfolio, holding, fundamentals, ta, lang)
-  else                           prompt = buildPrompt(portfolio, lang)
+  else if (kind === 'holding')       prompt = buildHoldingPrompt(portfolio, holding, fundamentals, ta, lang)
+  else if (kind === 'watchlistStock') prompt = buildWatchlistStockPrompt(body, lang)
+  else                               prompt = buildPrompt(portfolio, lang)
   const messages = [{ role: 'user', content: prompt }, ...history]
   // Cap output too — follow-ups are answers to single questions, not the
   // 4-section structured analysis the initial call asks for.
@@ -440,6 +441,102 @@ function buildFollowUpPrompt(portfolio, lang) {
 Never recommend buying or selling specific stocks; use "might/consider" not "should".
 
 Current portfolio: ${summary}`
+}
+
+// Watchlist stock deep-dive — synthesizes analyst consensus, price target,
+// forward estimates, and quarterly results into a 3-section analysis.
+function buildWatchlistStockPrompt(body, lang) {
+  const ticker = body.ticker || 'Unknown'
+  const name = body.name || ''
+  const ccy = body.ccy || 'THB'
+  const ccyS = ccy === 'USD' ? '$' : '฿'
+  const consensus = body.consensus || null
+  const target = body.target || null
+  const estimates = body.estimates || null
+  const quarterly = body.quarterly || null
+  const currentPrice = body.currentPrice ?? null
+
+  const fmtV = (v) => {
+    if (v == null) return '—'
+    const abs = Math.abs(v)
+    if (abs >= 1e9) return ccyS + (v / 1e9).toFixed(2) + 'B'
+    if (abs >= 1e6) return ccyS + (v / 1e6).toFixed(1) + 'M'
+    if (abs >= 1e3) return ccyS + (v / 1e3).toFixed(0) + 'K'
+    return ccyS + (+v.toFixed(2))
+  }
+
+  const parts = []
+
+  if (consensus?.key || consensus?.total) {
+    const keyMap = { strongBuy: 'Strong Buy', buy: 'Buy', hold: 'Hold', sell: 'Sell', strongSell: 'Strong Sell' }
+    const rating = keyMap[consensus.key] || consensus.key || '?'
+    const total = consensus.total || 0
+    const breakdown = [
+      consensus.strongBuy > 0 ? `S.Buy ${consensus.strongBuy}` : null,
+      consensus.buy > 0 ? `Buy ${consensus.buy}` : null,
+      consensus.hold > 0 ? `Hold ${consensus.hold}` : null,
+      consensus.sell > 0 ? `Sell ${consensus.sell}` : null,
+      consensus.strongSell > 0 ? `S.Sell ${consensus.strongSell}` : null,
+    ].filter(Boolean).join(', ')
+    parts.push(`Analyst Consensus: ${rating}${total ? ` (${breakdown}, total ${total} analysts)` : ''}`)
+  }
+
+  if (target?.mean) {
+    const upside = currentPrice != null ? ((target.mean - currentPrice) / currentPrice * 100) : null
+    parts.push(`Price Target: ${ccyS}${target.mean}${upside != null ? ` (${upside >= 0 ? '+' : ''}${upside.toFixed(1)}% upside from ${ccyS}${currentPrice})` : ''}${target.analysts ? `, ${target.analysts} analysts` : ''}
+Range: ${ccyS}${target.low ?? '?'} – ${ccyS}${target.high ?? '?'}`)
+  }
+
+  if (estimates?.length) {
+    parts.push(`Forward Estimates:\n${estimates.map(e =>
+      `- ${e.label}: Revenue ${fmtV(e.revEst)}${e.growth != null ? ` (${e.growth > 0 ? '+' : ''}${e.growth}% YoY)` : ''}, EPS ${e.epsEst ?? '—'}`
+    ).join('\n')}`)
+  }
+
+  if (quarterly?.length) {
+    parts.push(`Quarterly Results (latest first):\n${quarterly.map(q =>
+      `- ${q.label}: Revenue ${fmtV(q.revenue)}, Net Income ${fmtV(q.netIncome)}, EPS ${q.eps ?? '—'}${q.qoq != null ? ` (QoQ ${q.qoq >= 0 ? '+' : ''}${(+q.qoq).toFixed(1)}%)` : ''}`
+    ).join('\n')}`)
+  }
+
+  const dataBlock = parts.join('\n\n')
+  const stockLabel = `${ticker}${name ? ` (${name})` : ''}`
+
+  return lang === 'th'
+    ? `คุณเป็นนักวิเคราะห์หลักทรัพย์มืออาชีพ วิเคราะห์หุ้น ${stockLabel} จากข้อมูลต่อไปนี้ ตอบเป็นภาษาไทย กระชับ ตรงประเด็น:
+
+${dataBlock}
+
+วิเคราะห์ใน 3 หัวข้อ (ใช้ ## heading):
+
+## มุมมองนักวิเคราะห์
+ประเมิน consensus และ price target — ความเชื่อมั่น, upside/downside, ความสอดคล้องของความเห็น
+
+## แนวโน้มธุรกิจ
+Revenue growth จาก estimates, trend ของกำไรรายไตรมาส, EPS trajectory — บริษัทกำลังเดินไปทิศทางไหน
+
+## ความเสี่ยงและสิ่งควรติดตาม
+ประเด็นหลักที่ควรจับตา เช่น valuation, EPS ยังติดลบ, growth uncertainty, ความเห็นนักวิเคราะห์ที่แตกต่างกัน
+
+ห้ามแนะนำซื้อ-ขายโดยตรง ใช้คำ "อาจ/ควรพิจารณา"
+ลงท้ายด้วย: "บทวิเคราะห์นี้สร้างโดย AI เพื่อการศึกษาเท่านั้น ไม่ใช่คำแนะนำการลงทุน"`
+    : `You are a professional equity analyst. Analyze ${stockLabel} from the data below. Be concise and direct:
+
+${dataBlock}
+
+Respond with 3 ## sections:
+
+## Analyst Sentiment
+Evaluate consensus and price target — confidence level, upside/downside, analyst disagreement.
+
+## Business Outlook
+Revenue growth from estimates, quarterly profit trend, EPS trajectory.
+
+## Risks & Watch Points
+Key concerns: valuation, negative EPS, growth uncertainty, analyst divergence.
+
+Do not recommend buying/selling directly; use "might/consider".
+End with: "AI-generated analysis for education only — not investment advice."`
 }
 
 function hasKeyFor(p) {
