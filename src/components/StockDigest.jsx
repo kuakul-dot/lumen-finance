@@ -672,7 +672,7 @@ export function StockDigest({ items, prices, lang, liveHoldings = [] }) {
       const titles = news.slice(0, 8).map(n => n.title).join('\n')
       setNewsBriefLoading(true)
       aiTasks.push(
-        fetch(`/api/summarize?title=${encodeURIComponent(titles)}`)
+        fetch(`/api/summarize?lang=${lang}&title=${encodeURIComponent(titles)}`)
           .then(r => r.json())
           .then(d => { newsBriefResult = d.summary || null; setNewsBrief(newsBriefResult) })
           .catch(() => {})

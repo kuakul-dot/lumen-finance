@@ -12,6 +12,7 @@ export default async function handler(req) {
   const { searchParams } = new URL(req.url)
   const title = (searchParams.get('title') || '').trim()
   const desc  = (searchParams.get('desc')  || '').trim()
+  const lang  = searchParams.get('lang') === 'en' ? 'en' : 'th'
 
   if (!title) {
     return new Response(JSON.stringify({ summary: '' }), {
@@ -41,7 +42,9 @@ export default async function handler(req) {
         max_tokens: 450,
         messages: [{
           role: 'user',
-          content: `สรุปข่าวการเงินต่อไปนี้เป็นภาษาไทย 2-3 ประโยค กระชับ ตรงประเด็น ไม่ต้องขึ้นต้นด้วย "สรุป" หรือ "ข่าว":\n\n${content}`,
+          content: lang === 'en'
+            ? `Summarize the following financial news in English, 2-3 sentences, concise and to the point. Do not start with "Summary" or "News":\n\n${content}`
+            : `สรุปข่าวการเงินต่อไปนี้เป็นภาษาไทย 2-3 ประโยค กระชับ ตรงประเด็น ไม่ต้องขึ้นต้นด้วย "สรุป" หรือ "ข่าว":\n\n${content}`,
         }],
       }),
       signal: AbortSignal.timeout(10000),
