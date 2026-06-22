@@ -332,8 +332,15 @@ export default async function handler(request) {
   if (!extracted) return json({})
 
   const currency = extracted.currency
+
+  // Yahoo sometimes returns revenue+netIncome but omits grossProfit, costOfRevenue,
+  // operatingIncome, and EPS for certain US stocks (e.g. MU, NVDA). Treat the
+  // income statement as incomplete when grossProfit is null across all annual rows.
+  const incomeIncomplete = extracted.income.annual.length === 0 ||
+    !extracted.income.annual.some(r => r.grossProfit != null)
+
   const needed = {
-    income:   extracted.income.annual.length === 0,
+    income:   incomeIncomplete,
     balance:  extracted.balance.annual.length === 0,
     cashflow: extracted.cashflow.annual.length === 0,
   }
