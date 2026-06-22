@@ -6,7 +6,6 @@ import { fetchHistory, fetchPrices, toYahooSymbol } from '../lib/prices'
 import { getWatchlist, addWatchlistItem, updateWatchlistNote, removeWatchlistItem, migrateLocalWatchlist } from '../lib/watchlistDb'
 import { loadAlerts } from '../lib/alerts'
 import { AlertsModal } from './AlertsModal'
-import { StockDigest } from './StockDigest'
 
 const WATCHLIST_KEY = 'lumen_watchlist_v1'
 
@@ -1367,7 +1366,6 @@ export function WatchlistPage({ lang, ccy, fxRate = 36, session, liveHoldings = 
   const [alertPrefill,   setAlertPrefill]   = useState(null) // null | { ticker, name, region, cls, yahooSym, livePrice, currency }
   const [filterRegion,   setFilterRegion]   = useState('all') // 'all' | 'US' | 'TH' | 'Crypto'
   const [sortBy,         setSortBy]         = useState('default')
-  const [pageTab,        setPageTab]        = useState('list') // 'list' | 'analyst'
 
   // Existing alerts (localStorage cache, kept fresh by lumen-alerts-changed)
   const [alerts, setAlerts] = useState([])
@@ -1573,26 +1571,6 @@ export function WatchlistPage({ lang, ccy, fxRate = 36, session, liveHoldings = 
         <EmptyState th={th} onAdd={() => setShowAdd(true)} />
       ) : (
         <>
-          {/* Tab toggle: รายการ / วิเคราะห์ */}
-          <div style={{ display: 'flex', background: 'var(--bg-2)', borderRadius: 10, padding: 3, gap: 3, width: 'fit-content', marginBottom: 16 }}>
-            {[['list', th ? 'รายการ' : 'List'], ['analyst', th ? 'วิเคราะห์' : 'Analysis']].map(([key, lbl]) => (
-              <button key={key} onClick={() => setPageTab(key)} style={{
-                padding: '5px 16px', border: 'none', borderRadius: 7, cursor: 'pointer', fontSize: 12, fontFamily: 'inherit',
-                background: pageTab === key ? 'var(--bg-1)' : 'transparent',
-                color: pageTab === key ? 'var(--ink-1)' : 'var(--ink-3)',
-                fontWeight: pageTab === key ? 500 : 400,
-                boxShadow: pageTab === key ? '0 0 0 0.5px var(--line)' : 'none',
-              }}>{lbl}</button>
-            ))}
-          </div>
-
-          {/* Analyst / Financials view */}
-          {pageTab === 'analyst' && (
-            <StockDigest items={items} prices={prices} lang={lang} liveHoldings={liveHoldings} />
-          )}
-
-          {/* List view */}
-          {pageTab === 'list' && (
           <>
           {/* Legend */}
           <div style={{ display: 'flex', gap: 16, marginBottom: 20, flexWrap: 'wrap', alignItems: 'center' }}>
@@ -1687,7 +1665,6 @@ export function WatchlistPage({ lang, ccy, fxRate = 36, session, liveHoldings = 
             )}
           </p>
           </>
-          )}
         </>
       )}
 
